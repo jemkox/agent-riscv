@@ -5,19 +5,17 @@
 import sys
 
 def main(argv):
-    quiet = False; log = None; binfile = None
-    for a in argv[1:]:
-        if a == '--quiet': quiet = True
-        elif a == '--log': pass
+    quiet = False; log = None; binfile = None; want_pass = False
     i = 1
     while i < len(argv):
         a = argv[i]
         if a == '--quiet': quiet = True
+        elif a == '--pass': want_pass = True
         elif a == '--log': log = argv[i+1]; i += 2; continue
         else: binfile = a
         i += 1
     if binfile is None:
-        print("usage: iss.py [--quiet] [--log F] BIN"); return 1
+        print("usage: iss.py [--quiet] [--pass] [--log F] BIN"); return 1
     prog = open(binfile,'rb').read()
     mem = bytearray(0x40000)          # 256 KiB, word index = (a>>2)&0xFFFF
     mem[0:len(prog)] = prog
@@ -33,6 +31,7 @@ def main(argv):
     def w16(a,v): mem[(a&0x3FFFF):((a&0x3FFFF)+2)] = (v&0xFFFF).to_bytes(2,'little')
     def w32(a,v): mem[(a&0x3FFFF):((a&0x3FFFF)+4)] = (v&0xFFFFFFFF).to_bytes(4,'little')
     def sx(v,n):  return v - (1<<n) if v & (1<<(n-1)) else v
+    stopped = 0
     while steps < LIM:
         a = pc & 0x3FFFF
         ins = int.from_bytes(mem[a:a+4],'little')
@@ -69,10 +68,8 @@ def main(argv):
         elif opc == 0x03: # LOAD
             ea = (a0 + iimm) & 0xFFFFFFFF
             if f3 == 2:
-                if ea & 3: illegal = True
                 ldrd = rw(ea)
             elif f3 in (1,5):
-                if ea & 1: illegal = True
                 v = rw16(ea); ldrd = sx(v,16) if f3 == 1 else v
             elif f3 in (0,4):
                 v = rd8(ea); ldrd = sx(v,8) if f3 == 0 else v
@@ -81,17 +78,13 @@ def main(argv):
         elif opc == 0x23: # STORE
             ea = (a0 + simm) & 0xFFFFFFFF
             if f3 == 2:
-                if ea & 3: illegal = True
-                else:
-                    st = (32, ea, a1)
-                    slog = (1, ea, a1, 0xF)
+                st = (32, ea, a1)
+                slog = (1, ea, a1, 0xF)
             elif f3 in (1,5):
-                if ea & 1: illegal = True
-                else:
-                    half = a1 & 0xFFFF
-                    st = (16, ea, half)
-                    slog = (1, ea, half << (16 * ((ea >> 1) & 1)),
-                            3 << (2 * ((ea >> 1) & 1)))
+                half = a1 & 0xFFFF
+                st = (16, ea, half)
+                slog = (1, ea, half << (16 * ((ea >> 1) & 1)),
+                        3 << (2 * ((ea >> 1) & 1)))
             elif f3 in (0,4):
                 byte = a1 & 0xFF
                 st = (8, ea, byte)
@@ -113,9 +106,8 @@ def main(argv):
         elif opc == 0x37: wv = uimm
         elif opc == 0x17: wv = (pc + uimm) & 0xFFFFFFFF
         elif opc == 0x73:
-            if ins == 0x00100073:
-                lines.append((pc,ins,0,0,0,0,0,0)); break
-            illegal = True   # ecall / others unsupported at M1
+            stopped = 1
+            lines.append((pc,ins,0,0,0,0,0,0)); break
         else:
             illegal = True
         if illegal:
@@ -143,6 +135,9 @@ def main(argv):
     if log:
         open(log,'w').write("\n".join(
             "%08x %08x %d %08x %d %08x %08x %x" % t for t in lines) + "\n")
+    if want_pass:
+        if stopped and reg[3] == 1: return 0
+        print("FAIL: gp=%d" % (reg[3] if stopped else 0)); return 1
     if not quiet: print("STEPS=%d" % steps)
     return 0
 

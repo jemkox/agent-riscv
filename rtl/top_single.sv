@@ -19,19 +19,20 @@ module top_single (
   output logic [3:0]  ex_sbe
 );
   logic [31:0] pc;
-  logic [31:0] insn, ea, aluA, aluB, wb_wv, ldx, sda, tgt, ldraw;
+  logic [31:0] insn, ea, aluA, aluB, wb_wv, ldx, sda, tgt, ldraw, sd_raw;
   logic [3:0]  sbe, alu_op;
   logic [2:0]  f3;
   logic [4:0]  rs1c, rs2c, rdf;
-  logic [7:0]  rs2_b0, ld_b0, ld_b1, ld_b2, ld_b3;
-  logic [15:0] ld_h0, ld_h2;
+  logic [7:0]  rs2_b0, ld_b0;
+  logic [15:0] ld_h0;
   logic        bself;
+  logic [1:0]  ssz;
   logic        is_ld, is_st, is_br, is_jal, is_jalr, is_lui, is_auipc,
                is_opi, is_op, is_sys, is_fence, is_ill;
   logic [31:0] iimm, simm, bimm, uimm, jimm;
   logic        eqb, sltrb, sltub;
   logic [31:0] alures;
-  logic        taken, wb_en, msw, sys_il;
+  logic        taken, wb_en, msw;
   logic [31:0] rs1, rs2;
 
   /* verilator lint_off PINCONNECTEMPTY */
@@ -50,23 +51,18 @@ module top_single (
   alu    AL(.a(aluA), .b(aluB), .op(alu_op), .res(alures),
             .eq(eqb), .slt_r(sltrb), .sltu_r(sltub));
   mem32  MM(.clk(clk), .ia(pc), .id(insn), .la(ea), .ld(ldraw),
-            .sw(msw), .sa(ea), .sd(sda), .sbe(sbe),
+            .sw(msw), .sa(ea), .sd(sd_raw), .ssz(ssz),
             .lwe(lwe), .lwa(lwa), .lwd(lwd));
 
   assign ea = alures;
   assign rs2_b0 = rs2[7:0];
   assign ld_b0 = ldraw[7:0];
-  assign ld_b1 = ldraw[15:8];
-  assign ld_b2 = ldraw[23:16];
-  assign ld_b3 = ldraw[31:24];
   assign ld_h0 = ldraw[15:0];
-  assign ld_h2 = ldraw[31:16];
 
   // A: ALU operands, branch condition, writeback enable (no mem-read deps)
   always_comb begin
     aluA = rs1;
     aluB = is_st ? simm : (bself ? iimm : rs2);
-    sys_il = is_sys && (insn[31:20] != 12'h001);
     taken = 1'b0;
     case (f3)
       3'b000: taken = eqb;
@@ -78,7 +74,7 @@ module top_single (
       default: taken = 1'b0;
     endcase
     wb_en = (rdf != 5'd0) && (is_ld || is_lui || is_auipc || is_jal ||
-             is_jalr || is_opi || is_op) && !is_fence && !is_ill && !sys_il;
+             is_jalr || is_opi || is_op) && !is_fence && !is_ill && !is_sys;
   end
 
   // B: target, store pack, side effects (no mem-read deps)
@@ -87,8 +83,9 @@ module top_single (
     else if (is_jalr)      tgt = (rs1 + iimm) & 32'hFFFFFFFE;
     else if (is_br)        tgt = taken ? (pc + bimm) : (pc + 4);
     else                   tgt = pc + 4;
-    sbe = 4'b0000; sda = 32'h0;
+    sbe = 4'b0000; sda = 32'h0; ssz = 2'b00; sd_raw = 32'h0;
     if (f3 == 3'b000) begin
+      ssz = 2'b00; sd_raw = {24'h000000, rs2_b0};
       case (ea[1:0])
         2'b00: begin sbe = 4'b0001; sda = {24'h000000, rs2_b0}; end
         2'b01: begin sbe = 4'b0010; sda = {16'h0000, rs2_b0, 8'h00}; end
@@ -96,46 +93,28 @@ module top_single (
         2'b11: begin sbe = 4'b1000; sda = {rs2_b0, 24'h000000}; end
       endcase
     end else if (f3 == 3'b001 || f3 == 3'b101) begin
+      ssz = 2'b01; sd_raw = {16'h0000, rs2[15:0]};
       if (ea[1] == 1'b0) begin
         sbe = 4'b0011; sda = {16'h0000, rs2[15:0]};
       end else begin
         sbe = 4'b1100; sda = {rs2[15:0], 16'h0000};
       end
     end else begin
+      ssz = 2'b10; sd_raw = rs2;
       sbe = 4'b1111; sda = rs2;
     end
-    msw = is_st && !halt && !reset && !is_fence && !is_ill && !sys_il;
+    msw = is_st && !halt && !reset && !is_fence && !is_ill && !is_sys;
   end
 
   // C: load extension + writeback value (reads mem word)
   always_comb begin
     ldx = 32'h0;
     case (f3)
-      3'b000: begin
-        case (ea[1:0])
-          2'b00: ldx = {{24{ld_b0[7]}}, ld_b0};
-          2'b01: ldx = {{24{ld_b1[7]}}, ld_b1};
-          2'b10: ldx = {{24{ld_b2[7]}}, ld_b2};
-          2'b11: ldx = {{24{ld_b3[7]}}, ld_b3};
-        endcase
-      end
-      3'b001: begin
-        if (ea[1] == 1'b0) ldx = {{16{ld_h0[15]}}, ld_h0};
-        else                ldx = {{16{ld_h2[15]}}, ld_h2};
-      end
+      3'b000: ldx = {{24{ld_b0[7]}}, ld_b0};
+      3'b001: ldx = {{16{ld_h0[15]}}, ld_h0};
       3'b010: ldx = ldraw;
-      3'b100: begin
-        case (ea[1:0])
-          2'b00: ldx = {24'h000000, ld_b0};
-          2'b01: ldx = {24'h000000, ld_b1};
-          2'b10: ldx = {24'h000000, ld_b2};
-          2'b11: ldx = {24'h000000, ld_b3};
-        endcase
-      end
-      3'b101: begin
-        if (ea[1] == 1'b0) ldx = {16'h0000, ld_h0};
-        else                ldx = {16'h0000, ld_h2};
-      end
+      3'b100: ldx = {24'h000000, ld_b0};
+      3'b101: ldx = {16'h0000, ld_h0};
       default: ldx = ldraw;
     endcase
     wb_wv = alures;
@@ -151,7 +130,7 @@ module top_single (
       halt <= 1'b0;
     end else if (!halt) begin
       pc <= tgt;
-      if (is_ill || sys_il || (is_sys && insn[31:20] == 12'h001))
+      if (is_ill || is_sys)
         halt <= 1;
     end
   end
@@ -159,7 +138,7 @@ module top_single (
   assign ex_pc    = pc;
   assign ex_insn  = insn;
   assign ex_wben  = wb_en && !halt && !reset;
-  assign ex_rd    = (is_ill || sys_il) ? 5'd0 : rdf;
+  assign ex_rd    = (is_ill || is_sys) ? 5'd0 : rdf;
   assign ex_wv    = wb_wv;
   assign ex_st    = msw;
   assign ex_sa    = msw ? ea : 32'h0;

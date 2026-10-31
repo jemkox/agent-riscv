@@ -1,5 +1,13 @@
 # PROGRESS
 
+## RULES
+- Keep working until the final acceptance test is actually proven; a failing simulation, test, lint, or timing check is normal work, not a stopped task.
+- Stop after two failed attempts only when the command/tool itself is broken; simulation failures should be read, fixed, and rerun.
+- Prefer small targeted edits and keep each source file around 250 lines when possible.
+- Run HDL/simulator/build tools through the `hdl` wrapper: `hdl make`, `hdl verilator`, `hdl iverilog`, `hdl vvp`, `hdl yosys`, etc.
+- Do not use shell redirections in direct commands; piping to `head`/`tail` is okay.
+- Use official riscv-tests only from the already-available local read-only copies. Do not clone/download extra test suites.
+
 ## M1: single-cycle RV32I CPU
 
 ### Worked
@@ -7,6 +15,7 @@
 - Testbench: `tb/run_hex.sv` logs retired instructions as `pc insn rd value store_flag store_addr store_data store_mask`.
 - Directed tests passed: `t01_basic`, `t02_memory`, `t03_control`, `t04_edge`, `t05_jumps`, `t06_fence`.
 - Random differential regression passed for 500 generated RV32I programs.
+- Official `rv32ui` passed on M1: `make ui` built 42 official `.S` tests and reported `ALL UI PASS`; 42 RTL logs and 42 ISS logs exist under `build/ui/logs/`.
 - Python ISS (`iss/iss.py`) and random generator (`tools/gen.py`) were fixed for the 8-field log format, memory/log store rules, and corrected RV32I encodings.
 - Verilator loader fix: the testbench now sets `lwe/lwa/lwd` one time unit before the loader port is committed by `clk`, so Verilator sees the current word instead of the previous/zero value.
 

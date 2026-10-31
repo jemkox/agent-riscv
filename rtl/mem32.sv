@@ -1,34 +1,52 @@
-// Word-addressable RAM: byte addr a -> word index a[17:2]; 256 KiB range 0..0x3FFFF.
-// Continuous reads (fetch, load); clocked writes (CPU store with byte-enables; tb loader word).
-/* verilator lint_off UNUSEDSIGNAL */
+// Byte-addressable RAM with store-to-read forwarding.
+// CPU store writes 1/2/4 consecutive bytes at sa from raw sd according to ssz.
+// Loader writes one word through lwa/lwd.
+/* verilator lint_off UNUSED */
 module mem32 #(
-  parameter int SIZE = 65536
+  parameter int WORDS = 65536
 )(
   input  logic        clk,
-  input  logic [31:0] ia,            // fetch addr
+  input  logic [31:0] ia,            // fetch byte addr
   output logic [31:0] id,
-  input  logic [31:0] la,            // load addr
-  output logic [31:0] ld,
+  input  logic [31:0] la,            // load byte addr
+  output logic [31:0] ld,            // four bytes starting at la, little endian
   input  logic        sw,            // CPU store
-  input  logic [31:0] sa,
-  input  logic [31:0] sd,
-  input  logic [3:0]  sbe,
+  input  logic [31:0] sa,            // store byte addr
+  input  logic [31:0] sd,            // raw store value: low 1/2/4 bytes used
+  input  logic [1:0]  ssz,           // 0 byte, 1 half, 2 word
   input  logic        lwe,           // testbench loader port
   input  logic [31:0] lwa,
   input  logic [31:0] lwd
 );
-  logic [31:0] ram [0:SIZE-1];
+  localparam int BYTES = WORDS * 4;
+  localparam int MASK  = BYTES - 1;
+  logic [7:0] ram [0:BYTES-1];
 
-  assign id = ram[ia[17:2]];
-  assign ld = ram[la[17:2]];
+  int lbase, sbase;
+
+  assign lbase = lwa & MASK;
+  assign sbase = sa  & MASK;
+
+  assign id = { ram[(ia + 3) & MASK], ram[(ia + 2) & MASK],
+                ram[(ia + 1) & MASK], ram[ ia       & MASK] };
+  assign ld = { ram[(la + 3) & MASK], ram[(la + 2) & MASK],
+                ram[(la + 1) & MASK], ram[ la       & MASK] };
 
   always_ff @(posedge clk) begin
-    if (lwe) ram[lwa[17:2]] <= lwd;
+    if (lwe) begin
+      ram[lbase]                  <= lwd[7:0];
+      ram[(lbase + 1) & MASK]     <= lwd[15:8];
+      ram[(lbase + 2) & MASK]     <= lwd[23:16];
+      ram[(lbase + 3) & MASK]     <= lwd[31:24];
+    end
     if (sw) begin
-      if (sbe[0]) ram[sa[17:2]][7:0]    <= sd[7:0];
-      if (sbe[1]) ram[sa[17:2]][15:8]   <= sd[15:8];
-      if (sbe[2]) ram[sa[17:2]][23:16]  <= sd[23:16];
-      if (sbe[3]) ram[sa[17:2]][31:24]  <= sd[31:24];
+      ram[sbase] <= sd[7:0];
+      if (ssz == 2'b01 || ssz == 2'b10)
+        ram[(sbase + 1) & MASK] <= sd[15:8];
+      if (ssz == 2'b10) begin
+        ram[(sbase + 2) & MASK] <= sd[23:16];
+        ram[(sbase + 3) & MASK] <= sd[31:24];
+      end
     end
   end
 endmodule
