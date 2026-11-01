@@ -25,7 +25,7 @@ UM_HEXES := $(foreach n,$(UM_NAMES),build/um/$(n).hex)
 UM_BINS := $(foreach n,$(UM_NAMES),build/um/$(n).bin)
 UM_LOGS := $(foreach n,$(UM_NAMES),build/um/logs/$(n).rtl.log build/um/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um lat1 lat5 lat20 m7
+.PHONY: test regress lint clean synth ui um lat1 lat5 lat20 m7 fpga fpga_test
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin
 
@@ -89,14 +89,29 @@ build/um/%.hex: build/um/%.bin | build/um
 build/sim_%.vvp: $(RTL) $(TB) | build
 	iverilog -g2012 -Wall -DTBHEX='"build/$*.hex"' -DTOPPIPE -o build/sim_$*.vvp $(RTL) $(TB)
 
-test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) build/vlt/run_hex
-	@bad=0; \
+test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/ui build/ui/logs build/um build/um/logs
+	@bad=0; mkdir -p build/rand; \
 	for t in $(TESTS); do \
-	  cp build/$$t.hex build/p.hex; ./build/vlt/run_hex > build/$$t.rtl.log; \
-	  python3 iss/iss.py --quiet --log build/$$t.iss.log build/$$t.bin > /dev/null; \
-	  python3 tools/cmp.py build/$$t.rtl.log build/$$t.iss.log || bad=$$((bad+1)); \
+	 cp build/$$t.hex build/p.hex; ./build/vlt/run_hex > build/$$t.rtl.log; \
+	 python3 iss/iss.py --quiet --log build/$$t.iss.log build/$$t.bin > /dev/null; \
+	 python3 tools/cmp.py build/$$t.rtl.log build/$$t.iss.log || bad=$$((bad+1)); \
 	 done; \
-	 if [ $$bad -eq 0 ]; then echo ALL PASS; else echo TEST FAILED:\ $$bad\ errors; fi
+	 for n in $(UI_NAMES); do \
+	 cp build/ui/$$n.hex build/p.hex; ./build/vlt/run_hex > build/ui/logs/$$n.rtl.log; \
+	 python3 iss/iss.py --quiet --pass --log build/ui/logs/$$n.iss.log build/ui/$$n.bin > /dev/null; \
+	 python3 tools/cmp.py build/ui/logs/$$n.rtl.log build/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+	 done; \
+	 for n in $(UM_NAMES); do \
+	 cp build/um/$$n.hex build/p.hex; ./build/vlt/run_hex > build/um/logs/$$n.rtl.log; \
+	 python3 iss/iss.py --quiet --pass --log build/um/logs/$$n.iss.log build/um/$$n.bin > /dev/null; \
+	 python3 tools/cmp.py build/um/logs/$$n.rtl.log build/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+	 done; \
+	 for i in $(shell seq 1 $(N)); do \
+	 python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; \
+	 python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; \
+	 python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); \
+	 done; \
+	 if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; fi
 
 ui: $(UI_BINS) $(UI_HEXES) build/vlt/run_hex | build/ui build/ui/logs
 	@bad=0; \
@@ -163,21 +178,13 @@ m7: build/vlt/run_mmio $(M7_HEXS)
 
 lat1:
 	$(MAKE) CACHE_LAT=1 test
-	$(MAKE) CACHE_LAT=1 ui
-	$(MAKE) CACHE_LAT=1 um
-	$(MAKE) CACHE_LAT=1 regress
+	$(MAKE) CACHE_LAT=1 test
 
 lat5:
 	$(MAKE) CACHE_LAT=5 test
-	$(MAKE) CACHE_LAT=5 ui
-	$(MAKE) CACHE_LAT=5 um
-	$(MAKE) CACHE_LAT=5 regress
 
 lat20:
 	$(MAKE) CACHE_LAT=20 test
-	$(MAKE) CACHE_LAT=20 ui
-	$(MAKE) CACHE_LAT=20 um
-	$(MAKE) CACHE_LAT=20 regress
 
 lint:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
@@ -185,7 +192,31 @@ lint:
 clean:
 	rm -rf build wave.vcd
 
+RTL_NO_CACHE := $(filter-out rtl/cache32.sv,$(RTL))
+SYN_FILES := rtl/cache32_small.sv $(RTL_NO_CACHE)
+FPGA_RTL := rtl/fpga_top.sv
+TB_FPGA := tb/fpga_tb.sv
+
+build/vlt/fpga_run: $(FPGA_RTL) $(TB_FPGA) | build/vlt
+	verilator --binary --Wall --timing -O2 --Mdir build/vlt -o fpga_run $(FPGA_RTL) $(TB_FPGA)
+
+build/cpu.json: $(FPGA_RTL) | build
+	yosys -p 'read_verilog -sv -Irtl $(FPGA_RTL); synth_ice40 -top fpga_top -json build/cpu.json; stat' > build/cpu_syn.log
+
+build/cpu.asc: build/cpu.json | build
+	nextpnr-ice40 --up5k --package sg48 --json build/cpu.json --asc build/cpu.asc --freq 20 > build/cpu_route.log 2>&1
+
+build/cpu.bin: build/cpu.asc
+	icepack build/cpu.asc build/cpu.bin
+
+fpga_test: build/vlt/fpga_run
+	@./build/vlt/fpga_run > build/fpga.out; grep -q "TEST PASSED" build/fpga.out
+
+fpga: build/cpu.bin | fpga_test
+	@echo "build/cpu.bin"
+	@grep -H 'SB_LUT4 *[0-9]\|ICESTORM_RAM\|Max frequency' build/cpu_syn.log build/cpu_route.log
+
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
 	verilator --lint-only -Wall --timing $(RTL_SINGLE) $(TB)
-	yosys -p 'read_verilog -sv -Irtl -DCACHE_LAT=2 rtl/cache32_small.sv rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv; synth -top top_pipe; stat'
+	yosys -p 'read_verilog -sv -Irtl -DCACHE_LAT=2 $(SYN_FILES); synth -top top_pipe; stat'
