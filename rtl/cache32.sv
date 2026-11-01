@@ -29,6 +29,11 @@ module cache32 (
 `else
   localparam int LAT = 1;
 `endif
+`ifdef FPGA
+  localparam int BACK_WORDS = 256;
+  localparam int IC_LINES   = 16;
+  localparam int DC_LINES   = 16;
+`else
 `ifdef SMALL_CACHE
   localparam int BACK_WORDS = 16;
   localparam int IC_LINES   = 4;
@@ -44,6 +49,7 @@ module cache32 (
   localparam int DC_LINES   = 1024;
 `endif
 `endif
+`endif
   localparam int BACK_BYTES = BACK_WORDS * 4;
   localparam int BACK_MASK  = BACK_BYTES - 1;
   localparam int IC_MASK    = IC_LINES - 1;
@@ -54,13 +60,13 @@ module cache32 (
   localparam int LINE_BYTES = 16;
   localparam int LINE_SHIFT = 4;
 
-  logic [7:0] ram [0:BACK_BYTES-1];
-  logic [7:0] ic_data [0:IC_LINES*LINE_BYTES-1];
-  logic [7:0] dc_data [0:DC_LINES*LINE_BYTES-1];
-  logic [31:0] ic_tag [0:IC_LINES-1];
-  logic [31:0] dc_tag [0:DC_LINES-1];
-  logic [31:0] ic_ep  [0:IC_LINES-1];
-  logic [31:0] dc_ep  [0:DC_LINES-1];
+  (* BRAM = 1 *) logic [7:0] ram [0:BACK_BYTES-1];
+  (* BRAM = 1 *) logic [7:0] ic_data [0:IC_LINES*LINE_BYTES-1];
+  (* BRAM = 1 *) logic [7:0] dc_data [0:DC_LINES*LINE_BYTES-1];
+  (* BRAM = 1 *) logic [31:0] ic_tag [0:IC_LINES-1];
+  (* BRAM = 1 *) logic [31:0] dc_tag [0:DC_LINES-1];
+  (* BRAM = 1 *) logic [31:0] ic_ep  [0:IC_LINES-1];
+  (* BRAM = 1 *) logic [31:0] dc_ep  [0:DC_LINES-1];
   logic [31:0] epoch = 32'd1;
   logic        ic_pending = 1'b0;
   logic        dc_pending = 1'b0;

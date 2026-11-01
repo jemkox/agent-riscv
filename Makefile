@@ -1,4 +1,4 @@
-RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/cache32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv
+RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/cache32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
@@ -33,7 +33,7 @@ MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um mi lat1 lat5 lat20 m7 fpga fpga_test doom_mem build/vlt/run_hex build/vlt/run_mmio
+.PHONY: test regress lint clean synth ui um mi lat1 lat5 lat20 m7 fpga fpga_test doom_mem fpga_full build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -260,6 +260,27 @@ fpga_test: build/vlt/fpga_run
 fpga: build/cpu.bin | fpga_test
 	@echo "build/cpu.bin"
 	@grep -H 'SB_LUT4 *[0-9]\|ICESTORM_RAM\|Max frequency' build/cpu_syn.log build/cpu_route.log
+
+build/fpga_prog.hex: build/t01_basic.hex | build
+	@cp build/t01_basic.hex $@
+
+rtl/fpga_prog_init.sv: build/fpga_prog.hex
+	@python3 tools/gen_fpga_rom.py $< $@
+
+FPGA_PIPE_RTL := rtl/fpga_pipe_top.sv rtl/cache32_fpga.sv $(filter-out rtl/mdiu_fast.sv,$(RTL_NO_CACHE)) rtl/mdiu_fpga.sv
+
+build/cpu_full.json: $(FPGA_PIPE_RTL) rtl/fpga_prog_init.sv | build
+	@yosys -p 'read_verilog -sv -Irtl -DFPGA $(FPGA_PIPE_RTL); synth_ice40 -top fpga_pipe_top -json build/cpu_full.json; stat' > build/cpu_full_syn.log
+
+build/cpu_full.asc: build/cpu_full.json | build
+	@nextpnr-ice40 --up5k --package sg48 --json build/cpu_full.json --asc build/cpu_full.asc --freq 10 > build/cpu_full_route.log 2>&1
+
+build/cpu_full.bin: build/cpu_full.asc
+	@icepack build/cpu_full.asc build/cpu_full.bin
+
+fpga_full: build/cpu_full.bin | build
+	@echo "build/cpu_full.bin"
+	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' build/cpu_full_syn.log build/cpu_full_route.log
 
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)

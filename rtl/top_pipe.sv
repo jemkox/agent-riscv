@@ -66,11 +66,19 @@ module top_pipe (
             .is_opi(ce_opi), .is_op(ce_op),              .is_sys(ce_sys), .is_fence(ce_fence),
              .is_m(ce_m), .m_op(ce_m_op),              .is_mret(ce_mret), .is_ill(ce_ill),
              .is_csr(ce_csr), .csr_num(), .i(idex_insn));
-  mdiu MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
-          .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
-          /* verilator lint_off PINCONNECTEMPTY */
-          .md_active(), .md_done_now(m_done_now), .result(md_result));
-          /* verilator lint_on PINCONNECTEMPTY */
+`ifdef FPGA
+  mdiu_fpga MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
+           .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
+           /* verilator lint_off PINCONNECTEMPTY */
+           .md_active(), .md_done_now(m_done_now), .result(md_result));
+           /* verilator lint_on PINCONNECTEMPTY */
+`else
+  mdiu_fast MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
+           .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
+           /* verilator lint_off PINCONNECTEMPTY */
+           .md_active(), .md_done_now(m_done_now), .result(md_result));
+           /* verilator lint_on PINCONNECTEMPTY */
+`endif
   /* verilator lint_on PINCONNECTEMPTY */
   /* verilator lint_off PINCONNECTEMPTY */
   ctrl   CEID(.alu_op(), .f3(), .op7(), .rs1(ceif_rs1), .rs2(ceif_rs2), .rd(),

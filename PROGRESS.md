@@ -601,3 +601,37 @@ hdl make doom_mem CACHE_LAT=1
 - MI counter/timer behavior is modeled for the official/local selected tests and the ISS/RTL differential, not as a complete RISC-V privilege implementation.
 - F4 (full `top_pipe` on UP5K with `build/cpu_full.bin`) and M10 Doom remain before `M10 DOOM: MET`.
 
+## F4 part 1: MDU split (review fix), FPGA fit under budget
+
+### Worked
+- Restored the M10a fast multiply for the simulation build per review: `rtl/mdiu_fast.sv` keeps the single-cycle 64-bit MUL wires (`mul_ss/mul_su/mul_uu/mul_ll` complete on the start cycle) and 33-cycle restoring DIV. This is the original M10a MDU logic, restored from `e000690`.
+- Added FPGA-only schoolbook MDU `rtl/mdiu_fpga.sv` (one 65-bit adder, MUL/DIV ~33 cycles), selected in `rtl/top_pipe.sv` via `ifdef FPGA`; Makefile `RTL` uses `rtl/mdiu_fast.sv`, `FPGA_PIPE_RTL` filters it out and adds `rtl/mdiu_fpga.sv`.
+- `rtl/csrs.sv`: FPGA `mcycle`/`minstret` counter reads route through constant wires `mc_ref`/`min_ref`/`minh_ref` guarded by `ifdef FPGA`. (`define` macros are NOT expanded by the installed Verilator preprocessor and one-line `function`s broke the yosys 0.33 parser; plain wires work in both tools.)
+- FPGA regs32 = 4 manual `SB_RAM40_4K` 16-bit halves, `fpga_pipe_top`/cache BRAM init unchanged from before.
+- Reruns: `hdl make regress` prints `ALL PASS`; `hdl make fpga_test` prints `TEST PASSED`; `hdl make m7 CACHE_LAT=1` prints `ALL M7 PASS`; `hdl make um` prints `ALL UM PASS`; standalone FPGA-MDU testbench (45 cases) prints `TEST PASSED`.
+
+### Metrics
+| Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
+|---|---:|---:|---:|---:|
+| F4 p1 | regress ALL PASS (UI/UM/MI/latencies/directed random), fpga_test PASS, FPGA MDU tb 45/45 | SIM build back to M10a numbers: matmul IPC `0.856` (`INSN=35708 CYCLES=41737`), bench IPC `0.906`; official UM mul/mulh/mulhsu/mulhu IPC `0.830-0.834` (505-507 cycles, M10a values), div/rem/remu/divu `0.220-0.223`, UM aggregate `INSN=1919 CYCLES=2874 IPC=0.668` | FPGA full: `4295/5280 LC` (81%), `8` `SB_RAM40_4K` BRAM, `0` SPRAM; FPGA MDU standalone `1819` cells (`1173 SB_LUT4 + 314 SB_CARRY + 332` DFF) | Fmax table below; `--freq 10` PASS, `build/cpu_full.bin` produced |
+
+### Fmax/LUT iteration table (F4 timing work)
+| Iteration | Change | Fmax | LCs |
+|---|---|---:|---:|
+| 0 | initial full top attempt | fail at 50 MHz (12.85 MHz) | 4365 |
+| 1 | manual SB_RAM40_4K regs32 + CSR counter stub | 13.58 MHz | 4295 |
+
+### How to run
+```sh
+hdl make regress
+hdl make fpga_full        # build/cpu_full.bin, yosys synth + nextpnr at --freq 10
+hdl make fpga_test
+hdl iverilog -g2012 -o build/mdiu_tb.vvp rtl/mdiu_fpga.sv build/mdiu_tb.sv
+hdl vvp build/mdiu_tb.vvp
+```
+
+### Honest limitations
+- FPGA MDU is review option (b) schoolbook (~33 cycles for MUL too): chosen for the LUT budget; the SB_MAC16 DSP option (a) (4x 16x16 for the 32x32 product, 8 exist on UP5K, yosys `-dsp`) is the next planned optimization for FPGA Fmax/critical path.
+- Fmax 13.58 MHz is above the 50 MHz UP5K reality check but still needs at least two critical-path optimizations per F4 acceptance (iteration table currently has only one).
+- Full-FPGA Doom performance will depend on the FPGA MDU latency until option (a) lands.
+
