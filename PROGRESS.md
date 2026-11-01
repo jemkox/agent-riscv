@@ -301,7 +301,7 @@ hdl make synth
 ### Metrics
 | Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
 |---|---:|---:|---:|---:|
-| M6 | 13 directed at CACHE_LAT 1/5/20 + 3x N=5000 random + 42 UI + 8 UM at each latency | 0.209 UI, 0.127 UM (CACHE_LAT=1 logs) | 37399 (small cache proof variant, CACHE_LAT=2) | n/a |
+| M6 | 13 directed at CACHE_LAT 1/5/20 + 3x N=5000 random + 42 UI + 8 UM at each latency | 0.209 UI, 0.127 UM (CACHE_LAT=1 stale-runner artifact; superseded by F2 section below) | 37399 (small cache proof variant, CACHE_LAT=2) | n/a |
 
 ### Synthesis proof
 - Yosys command reads `cache32_small.sv` with `-DCACHE_LAT=2`, then synthesizes `top_pipe`.
@@ -499,4 +499,55 @@ hdl make doom_mem CACHE_LAT=1
 ### Notes
 - This is not M10b proof yet: it does not load an ELF, does not load `doom1.wad`, and does not execute Doom.
 - Before continuing M10b, do F1-F4 and P1-P3 as required by the updated `PROMPT.md`; `M10 DOOM: MET` requires those plus real frame images.
+
+## F1 + F2: real caches and stale-binary IPC fix
+
+### Worked
+- Replaced the latency-only cache model in `rtl/cache32.sv` with real direct-mapped I/D cache storage:
+  - 16-byte cache lines: `LINE_BYTES = 16`, `LINE_SHIFT = 4`
+  - data arrays: `ic_data`, `dc_data`
+  - tag arrays: `ic_tag`, `dc_tag`
+  - epoch/valid arrays: `ic_ep`, `dc_ep`
+  - store-through updates backing RAM and the matching D-cache line
+  - cross-line stores invalidate the next D-cache line when the byte mask crosses line bit 12.
+- Fixed the `ma_data` stale D-cache-line failure by adding:
+  ```systemverilog
+  if (d_off > 12) begin
+    ic_ep[((ea >> LINE_SHIFT) + 1) & IC_MASK] = 32'd0;
+    dc_ep[(d_idx + 1) & DC_MASK] = 32'd0;
+  end
+  ```
+- Found and fixed the F2 IPC regression root cause:
+  - The measured `rv32ui` IPC drop was partly caused by a stale `build/vlt/run_hex` copy: old Makefile copy targets left a `CACHE_LAT=20` runner in place while running `CACHE_LAT=1` targets.
+  - Fixed the Makefile by making `build/vlt/run_hex` and `build/vlt/run_mmio` phony copy targets:
+    ```makefile
+    .PHONY: ... build/vlt/run_hex build/vlt/run_mmio
+
+    build/vlt/run_hex: build/vlt/run_hex_lat$(CACHE_LAT)
+    	@cp -f $< $@
+
+    build/vlt/run_mmio: build/vlt/run_mmio_lat$(CACHE_LAT)
+    	@cp -f $< $@
+    ```
+- Re-ran after the Makefile fix:
+  - `hdl make lint CACHE_LAT=1` passed.
+  - `hdl make test CACHE_LAT=1` printed `ALL PASS`.
+  - `hdl make test CACHE_LAT=5` printed `ALL PASS`.
+  - `hdl make test CACHE_LAT=20` printed `ALL PASS`.
+  - `hdl make test N=300 CACHE_LAT=1` printed `ALL PASS`.
+  - `hdl make test N=300 CACHE_LAT=5` printed `ALL PASS`.
+  - `hdl make test N=300 CACHE_LAT=20` printed `ALL PASS`.
+  - `hdl make ui CACHE_LAT=1` printed `ALL UI PASS`.
+  - `hdl make um CACHE_LAT=1` printed `ALL UM PASS`.
+  - `hdl make m7 CACHE_LAT=1` printed `ALL M7 PASS`.
+
+### Metrics
+| Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
+|---|---:|---:|---:|---:|
+| F1 + F2 | 13 directed + 3x N=300 random at `CACHE_LAT=1/5/20`; official UI/UM/M7 pass at `CACHE_LAT=1` | `0.902 UI`, `0.623 UM`, `0.867 M7 C aggregate` at `CACHE_LAT=1`; UI `0.535` at `CACHE_LAT=5`, `0.209` at `CACHE_LAT=20` | unchanged from M8 proof artifacts in this step | n/a |
+
+### Honest limitations
+- F2's main measured improvement is fixing the stale-binary measurement bug and re-measuring at `CACHE_LAT=1`; after that, official UI aggregate IPC is above `0.8`.
+- UM IPC remains lower than UI because iterative divide dominates `div/rem/remu`, while M10a fast multiply tests are around `IPC=0.83`.
+- F3 (`rv32mi`) and F4 (full `top_pipe` on UP5K with `build/cpu_full.bin`) remain before `M10 DOOM: MET`.
 

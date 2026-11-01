@@ -111,7 +111,12 @@ M10d Port and run: build Doom with riscv64-unknown-elf-gcc -march=rv32im -mabi=i
 M10e Results: record measured cycles per frame, the frame rate at the assumed 50 MHz, and the simulation wall-clock
      speed (frames per real second) in PROGRESS.md and README. Put 3 sample frames in docs/doom/ and, if possible,
      an animated GIF of the demo (ffmpeg is NOT installed; use Python if you make a GIF).
-When F1-F4 are done, M10d and M10e are proven with real frame images, and the P1-P3 numbers are measured, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
+M10f Playable (do this LAST, after F1-F4, M10a-M10e and P1-P3 are done): a live SDL2 window in the Verilator C++
+     Doom testbench that shows the framebuffer as it is drawn, with the real keyboard fed into the key register:
+     arrow keys = move/turn, Ctrl = fire, Space = use/open, Enter, Esc, Y/N, and 1-7 = weapons. One command starts it:
+     `hdl make play` (it needs the display, so the window must open from inside the sandbox; DISPLAY is passed in).
+     Verify it by running it, checking frames still render and that a scripted key sequence moves the player.
+When F1-F4 are done, M10d and M10e are proven with real frame images, the P1-P3 numbers are measured and M10f `make play` works, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
 
 ## FINAL ACCEPTANCE (only then may you stop)
 - `hdl make test` runs the whole regression from scratch (directed, random differential, official rv32ui + rv32um tests) and prints ALL PASS. Show that output.

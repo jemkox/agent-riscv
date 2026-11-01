@@ -25,7 +25,7 @@ UM_HEXES := $(foreach n,$(UM_NAMES),build/um/$(n).hex)
 UM_BINS := $(foreach n,$(UM_NAMES),build/um/$(n).bin)
 UM_LOGS := $(foreach n,$(UM_NAMES),build/um/logs/$(n).rtl.log build/um/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um lat1 lat5 lat20 m7 fpga fpga_test doom_mem
+.PHONY: test regress lint clean synth ui um lat1 lat5 lat20 m7 fpga fpga_test doom_mem build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin
 
@@ -127,8 +127,7 @@ build/vlt/run_hex_lat$(CACHE_LAT): $(RTL) $(TB) | build build/vlt
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_hex_lat$(CACHE_LAT) $(RTL) $(TB)
 
 build/vlt/run_hex: build/vlt/run_hex_lat$(CACHE_LAT)
-	@if test -f $@; then rm $@; fi
-	@if test -f $<; then cp $< $@; fi
+	@cp -f $< $@
 
 um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/um build/um/logs
 	@bad=0; \
@@ -170,8 +169,7 @@ build/vlt/run_mmio_lat$(CACHE_LAT): $(RTL) $(TB_MMIO) | build/vlt
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_mmio_lat$(CACHE_LAT) $(RTL) $(TB_MMIO)
 
 build/vlt/run_mmio: build/vlt/run_mmio_lat$(CACHE_LAT)
-	@if test -f $@; then rm $@; fi
-	@if test -f $<; then cp $< $@; fi
+	@cp -f $< $@
 
 m7: build/vlt/run_mmio $(M7_HEXS)
 	@bad=0; mkdir -p build/m7/logs; for n in $(M7_NAMES); do cp build/m7/$$n.hex build/m7/p.hex; ./build/vlt/run_mmio > build/m7/logs/$$n.out; grep -q PASS build/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; fi
