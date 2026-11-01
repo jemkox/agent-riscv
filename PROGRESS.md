@@ -230,3 +230,85 @@ hdl make synth
 - Formal proof is still model-level pipeline invariants from M2; CSR/trap/timer equivalence is not fully formalized.
 - The UM IPC remains low because the current multi-cycle M unit dominates those tests; Zicsr/trap additions did not change official UI/UM totals materially.
 
+## M6: instruction and data cache latency model
+
+### Worked
+- Added `rtl/cache32.sv`: direct-mapped I-cache and D-cache state plus a backing byte RAM. `CACHE_LAT` controls miss latency; `READY_AT = LAT - 1`.
+- Cache correctness decision: ready fetch/load bytes come from backing RAM via `rbwb(addr)`, so cache tags are latency/coherence state only and unaligned load semantics remain byte-accurate.
+- Loader writes through `lwe` update backing RAM and invalidate cache/pending state. Store side effects write backing RAM and invalidate the matching I-cache line.
+- Added `rtl/cache32_small.sv` for synthesis: defines `SMALL_CACHE` (16-word backing RAM, 4-line caches) and includes `cache32.sv`.
+- Updated `rtl/top_pipe.sv` from `mem32` to `cache32 MM(...)` and added separate memory-pending semantics:
+  ```systemverilog
+  mem_pend = idex_valid && (idex_ld || idex_st) && !mem_ready;
+  m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend;
+  ```
+- Fixed pipeline/cache interaction by holding IF/ID and `pc_if` during `mem_pend` and normal stalls, and re-forwarding ID/EX operands while a pending load/store stays in ID/EX.
+- Added Makefile latency targets:
+  ```makefile
+  build/vlt/run_hex_lat$(CACHE_LAT): $(RTL) $(TB) | build build/vlt
+      verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_hex_lat$(CACHE_LAT) $(RTL) $(TB)
+
+  build/vlt/run_hex: build/vlt/run_hex_lat$(CACHE_LAT)
+      @if test -f $@; then rm $@; fi
+      @if test -f $<; then cp $< $@; fi
+  ```
+- Added `lat1`, `lat5`, and `lat20` targets that run `test`, `ui`, `um`, and default `regress` at each latency.
+- Verification passed:
+  - `hdl make lat1 lat5 lat20 | grep -E 'ALL PASS|ALL UI PASS|ALL UM PASS|TEST FAILED|ERROR'` showed `ALL PASS`, `ALL UI PASS`, `ALL UM PASS`, and `ALL PASS` three times.
+  - `hdl make regress CACHE_LAT=20 N=5000`, `CACHE_LAT=5 N=5000`, and `CACHE_LAT=1 N=5000` all printed `ALL PASS`.
+  - `hdl make lint` passes with no Verilator warnings.
+  - `hdl make synth` now uses the small cache proof variant with `-DCACHE_LAT=2` and reports no errors, no latches, `37399` total cells.
+- Measured official UI logs after `make ui CACHE_LAT=1`: `12389 instr / 59324 cycles`, IPC `0.209`.
+- Measured official UM logs after `make um CACHE_LAT=1`: `1917 instr / 15122 cycles`, IPC `0.127`.
+- Updated `rtl/top_pipe.sv` to 250 lines by compacting the new memory-pending/stall branches and using one line for `mem_pend`/`m_stall` calculation.
+
+### Failed / fixed
+- `CACHE_LAT=5` initially failed on `t07_m` and `t13_timer`. The first load used a stale operand during I/D-cache pending cycles; first failing diff was:
+  ```text
+  first diff at 7: rtl=00000020 0221e4b3 9 ffffffff ... iss=0000001c 0221c433 8 fffffffd ...
+  ```
+- Cause 1: the memory-pending state kept the instruction in ID/EX but did not re-forward `idex_r1`/`idex_r2`, so the pending load used old `a_ex`/`b_ex`.
+  - Fix: in the `mem_pend` branch:
+    ```systemverilog
+    idex_r1 <= a_ex; idex_r2 <= b_ex;
+    ```
+- Cause 2: the M/D/stall path cleared IF/ID and recalculated fetch PC while an I-cache fetch could still be pending, which dropped an already-fetched instruction.
+  - Fix: hold IF/ID and `pc_if` through cache/memory stalls:
+    ```systemverilog
+    ifid_valid <= ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
+    ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
+    ```
+- Yosys `make synth` initially failed on the cache variant with:
+  ```text
+  ERROR: Output port top_pipe.MM.fetch_ready (cache32) is connected to constants: 1'1
+  ```
+  - Fix for the small proof variant: synthesize with `-DCACHE_LAT=2` and remove the top-level `= 1'b1` initializers on `fetch_ready`/`mem_ready`, so cache outputs are not constant-propagated through the model.
+
+### How to run
+```sh
+hdl make test CACHE_LAT=1
+hdl make test CACHE_LAT=5
+hdl make test CACHE_LAT=20
+hdl make lat1
+hdl make lat5
+hdl make lat20
+hdl make regress CACHE_LAT=5 N=5000
+hdl make regress CACHE_LAT=20 N=5000
+hdl make lint
+hdl make synth
+```
+
+### Metrics
+| Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
+|---|---:|---:|---:|---:|
+| M6 | 13 directed at CACHE_LAT 1/5/20 + 3x N=5000 random + 42 UI + 8 UM at each latency | 0.209 UI, 0.127 UM (CACHE_LAT=1 logs) | 37399 (small cache proof variant, CACHE_LAT=2) | n/a |
+
+### Synthesis proof
+- Yosys command reads `cache32_small.sv` with `-DCACHE_LAT=2`, then synthesizes `top_pipe`.
+- Result: no errors, no latches, `37399` total cells in the hierarchy.
+
+### Honest limitations
+- The cache model is correctness-oriented: cache tags/valids drive latency and coherence, while ready reads return backing RAM bytes. It is not an FPGA cache with byte-addressed tag/store datapath costs.
+- The cache model is conservative for stores/instruction coherence: stores invalidate matching I-cache lines and the stall split is kept small for test correctness.
+- UI/UM IPC dropped materially after cache integration relative to M5, likely from the conservative pipeline/cache interaction and the existing low branch-predictor/M-unit efficiency; correctness is proven by directed, official UI/UM, and 3x N=5000 random regression at latencies 1, 5, and 20.
+

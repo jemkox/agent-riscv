@@ -1,4 +1,5 @@
-RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv
+RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/cache32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv
+CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
 TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer
@@ -107,8 +108,12 @@ ui: $(UI_BINS) $(UI_HEXES) build/vlt/run_hex | build/ui build/ui/logs
   done; \
   if [ $$bad -eq 0 ]; then echo ALL UI PASS; else echo "UI TEST FAILED: $$bad errors"; fi
 
-build/vlt/run_hex: $(RTL) $(TB) | build build/vlt
-	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME --Mdir build/vlt -o run_hex $(RTL) $(TB)
+build/vlt/run_hex_lat$(CACHE_LAT): $(RTL) $(TB) | build build/vlt
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_hex_lat$(CACHE_LAT) $(RTL) $(TB)
+
+build/vlt/run_hex: build/vlt/run_hex_lat$(CACHE_LAT)
+	@if test -f $@; then rm $@; fi
+	@if test -f $<; then cp $< $@; fi
 
 um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/um build/um/logs
 	@bad=0; \
@@ -123,6 +128,24 @@ um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/um build/um/logs
 regress: build/vlt/run_hex
 	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; fi
 
+lat1:
+	$(MAKE) CACHE_LAT=1 test
+	$(MAKE) CACHE_LAT=1 ui
+	$(MAKE) CACHE_LAT=1 um
+	$(MAKE) CACHE_LAT=1 regress
+
+lat5:
+	$(MAKE) CACHE_LAT=5 test
+	$(MAKE) CACHE_LAT=5 ui
+	$(MAKE) CACHE_LAT=5 um
+	$(MAKE) CACHE_LAT=5 regress
+
+lat20:
+	$(MAKE) CACHE_LAT=20 test
+	$(MAKE) CACHE_LAT=20 ui
+	$(MAKE) CACHE_LAT=20 um
+	$(MAKE) CACHE_LAT=20 regress
+
 lint:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
 
@@ -132,4 +155,4 @@ clean:
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
 	verilator --lint-only -Wall --timing $(RTL_SINGLE) $(TB)
-	yosys -p 'read_verilog -sv rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32_small.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv; synth -top top_pipe; stat'
+	yosys -p 'read_verilog -sv -Irtl -DCACHE_LAT=2 rtl/cache32_small.sv rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv; synth -top top_pipe; stat'
