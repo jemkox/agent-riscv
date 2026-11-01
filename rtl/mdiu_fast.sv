@@ -53,44 +53,43 @@ module mdiu_fast (
   logic n_neg_r;
   logic [63:0] new_rem;
 
+  // P2: the 4 multiplies (and 64-bit sign/zero extends) used to run EVERY
+  // eval as top-level wires. Now computed only on M-unit start cycles; idle
+  // cycles skip them (identical semantics).
   /* verilator lint_off UNUSEDSIGNAL */
-  wire signed [63:0] a_s64 = {{32{a[31]}}, a};
-  wire signed [63:0] b_s64 = {{32{b[31]}}, b};
-  wire [63:0] a_u64 = {32'h0, a};
-  wire [63:0] b_u64 = {32'h0, b};
-  wire signed [63:0] mul_ss = a_s64 * $signed(b_s64);
-  wire signed [63:0] mul_su = a_s64 * $signed(b_u64);
-  wire [63:0] mul_uu = a_u64 * b_u64;
-  wire [31:0] mul_ll = a * b;
+  logic signed [63:0] mul_ss;
+  logic signed [63:0] mul_su;
+  logic [63:0] mul_uu;
+  logic [31:0] mul_ll;
   /* verilator lint_on UNUSEDSIGNAL */
 
+  // P2 sim-speed: the old always_comb copied ~20 state vars (incl 6x 64-bit)
+  // EVERY cycle. Idle cycles now take a tiny path; state latches are written
+  // only on start/step cycles. Semantics unchanged (the writes previously
+  // rewrote identical values when idle).
+  wire start = idex_valid && is_m && !is_ill && !idex_done && !ex_stall;
+
   always_comb begin
-    n_active = active;
     n_done = 1'b0;
     n_result = result;
-    n_mode = mode;
-    n_cur_op = cur_op;
-    n_m_b = m_b;
-    n_a_ext = a_ext;
-    n_p = p;
-    n_div_a = div_a;
-    n_div_b = div_b;
-    n_rem = rem;
-    n_q = q;
-    n_step = step;
-    n_signed_a = signed_a;
-    n_signed_b = signed_b;
-    n_div_signed = div_signed;
-    n_neg_q = neg_q;
-    n_neg_r = neg_r;
-    new_rem = 64'h0;
-
     if (reset) begin
       n_active = 1'b0;
-      n_mode = 2'b00;
-      n_result = 32'h0;
-      n_done = 1'b0;
-    end else if (!active && idex_valid && is_m && !is_ill && !idex_done && !ex_stall) begin
+    end else if (!active && start) begin
+      n_mode = mode;
+      n_cur_op = cur_op;
+      n_m_b = m_b;
+      n_p = p;
+      n_div_a = div_a;
+      n_div_b = div_b;
+      n_rem = rem;
+      n_q = q;
+      n_step = step;
+      n_signed_a = signed_a;
+      n_signed_b = signed_b;
+      n_div_signed = div_signed;
+      n_neg_q = neg_q;
+      n_neg_r = neg_r;
+      n_a_ext = a_ext;
       n_cur_op = op;
       n_mode = op <= 3'd3 ? 2'b00 : 2'b01;
       n_signed_a = (op == 3'd1 || op == 3'd2);
@@ -105,6 +104,10 @@ module mdiu_fast (
         n_step = 6'd0;
         n_active = 1'b0;
         n_done = 1'b1;
+        mul_ll = a * b;
+        mul_ss = $signed({{32{a[31]}}, a}) * $signed({{32{b[31]}}, b});
+        mul_su = $signed({{32{a[31]}}, a}) * $signed({32'h0, b});
+        mul_uu = {32'h0, a} * {32'h0, b};
         case (op)
           3'd0: n_result = mul_ll;
           3'd1: n_result = mul_ss[63:32];
@@ -135,6 +138,21 @@ module mdiu_fast (
         n_active = 1'b1;
       end
     end else if (active) begin
+      n_mode = mode;
+      n_cur_op = cur_op;
+      n_m_b = m_b;
+      n_a_ext = a_ext;
+      n_div_a = div_a;
+      n_div_b = div_b;
+      n_signed_a = signed_a;
+      n_signed_b = signed_b;
+      n_div_signed = div_signed;
+      n_neg_q = neg_q;
+      n_neg_r = neg_r;
+      n_p = p;
+      n_rem = rem;
+      n_q = q;
+      n_step = step;
       if (mode == 2'b00) begin
         n_p = p;
         if (step < 6'd32) begin
@@ -186,23 +204,43 @@ module mdiu_fast (
   end
 
   always_ff @(posedge clk) begin
-    active <= n_active;
-    mode <= n_mode;
-    cur_op <= n_cur_op;
-    m_b <= n_m_b;
-    a_ext <= n_a_ext;
-    p <= n_p;
-    div_a <= n_div_a;
-    div_b <= n_div_b;
-    rem <= n_rem;
-    q <= n_q;
-    step <= n_step;
-    signed_a <= n_signed_a;
-    signed_b <= n_signed_b;
-    div_signed <= n_div_signed;
-    neg_q <= n_neg_q;
-    neg_r <= n_neg_r;
-    result <= n_result;
+    if (reset) begin
+      active <= 1'b0;
+      mode <= 2'b00;
+      cur_op <= 3'd0;
+      m_b <= 32'h0;
+      a_ext <= 64'h0;
+      p <= 64'h0;
+      div_a <= 64'h0;
+      div_b <= 64'h0;
+      rem <= 64'h0;
+      q <= 64'h0;
+      step <= 6'd0;
+      signed_a <= 1'b0;
+      signed_b <= 1'b0;
+      div_signed <= 1'b0;
+      neg_q <= 1'b0;
+      neg_r <= 1'b0;
+      result <= 32'h0;
+    end else if (active || start) begin
+      active <= n_active;
+      mode <= n_mode;
+      cur_op <= n_cur_op;
+      m_b <= n_m_b;
+      a_ext <= n_a_ext;
+      p <= n_p;
+      div_a <= n_div_a;
+      div_b <= n_div_b;
+      rem <= n_rem;
+      q <= n_q;
+      step <= n_step;
+      signed_a <= n_signed_a;
+      signed_b <= n_signed_b;
+      div_signed <= n_div_signed;
+      neg_q <= n_neg_q;
+      neg_r <= n_neg_r;
+      result <= n_result;
+    end
   end
 
   assign md_active = active;

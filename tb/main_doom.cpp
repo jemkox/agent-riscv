@@ -2,6 +2,7 @@
 #include <verilated.h>
 #include <memory>
 #include "Vrun_doom.h"
+#include "Vrun_doom___024root.h"
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -88,9 +89,11 @@ int main(int argc, char **argv) {
     load_words(wad, WAD_ADDR);
 
     auto read_word = [&](uint32_t addr) -> uint32_t {
-        model->dbg_ra = addr; model->dbg_re = 1;
-        model->eval();
-        return model->dbg_rd;
+        auto &ram = model->rootp->run_doom__DOT__T__DOT__MM__DOT__ram;
+        uint32_t m = addr & 0x1FFFFFFu;
+        return ((uint32_t)ram[m] | ((uint32_t)ram[(m + 1) & 0x1FFFFFFu] << 8) |
+                ((uint32_t)ram[(m + 2) & 0x1FFFFFFu] << 16) |
+                ((uint32_t)ram[(m + 3) & 0x1FFFFFFu] << 24));
     };
 
     FILE *uartlog = fopen("build/doom/logs/run.out", "w");

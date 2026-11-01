@@ -46,8 +46,8 @@ module cache32 (
 `else
 `ifdef DOOM_BIG
   localparam int BACK_WORDS = 8 * 1024 * 1024;  // 32 MB for the Doom testbench
-  localparam int IC_LINES   = 1024;
-  localparam int DC_LINES   = 1024;
+  localparam int IC_LINES   = 1024;   // 16 KB I-cache (P1)
+  localparam int DC_LINES   = 1024;   // 16 KB D-cache (P1)
 `else
   localparam int BACK_WORDS = 65536;
   localparam int IC_LINES   = 1024;
@@ -248,9 +248,11 @@ module cache32 (
   /* verilator lint_on WIDTHEXPAND */
   /* verilator lint_on WIDTHTRUNC */
 `ifdef DOOM_BIG
-  // Debug word readback straight from backing RAM (testbench frame capture).
-  assign dbg_rd = { ram[(dbg_ra + 3) & BACK_MASK], ram[(dbg_ra + 2) & BACK_MASK],
-                    ram[(dbg_ra + 1) & BACK_MASK], ram[dbg_ra & BACK_MASK] };
+  // Debug word readback straight from backing RAM (only when dbg_re set; C++
+  // P2 runner now reads rootp->ram directly, so this runs at most once per
+  // loader/capture call, not every eval).
+  assign dbg_rd = dbg_re ? { ram[(dbg_ra + 3) & BACK_MASK], ram[(dbg_ra + 2) & BACK_MASK],
+                             ram[(dbg_ra + 1) & BACK_MASK], ram[dbg_ra & BACK_MASK] } : 32'h0;
 `endif
 endmodule
 `default_nettype wire

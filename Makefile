@@ -273,7 +273,8 @@ build/doom/doom.syms: build/doom/doom.elf | build/doom
 	@riscv64-unknown-elf-nm $< > $@
 
 build/vlt_doom/run_doom: $(RTL) $(DOOM_TB) $(DOOM_MAIN) | build/doom
-	verilator --cc --exe --build --Wall -O3 --x-assign fast --x-initial fast -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_doom -o run_doom $(RTL) $(DOOM_TB) $(DOOM_MAIN_ABS)
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_doom -o run_doom $(RTL) $(DOOM_TB) $(DOOM_MAIN_ABS)
+	$(MAKE) -C build/vlt_doom -f Vrun_doom.mk OPT_FAST="-O3" run_doom -j 4
 
 doom: build/vlt_doom/run_doom build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
 	@mkdir -p build/doom/frames build/doom/logs; ./build/vlt_doom/run_doom 400000000; grep "#frame\|#RUN" build/doom/logs/run.out | tail -n 40

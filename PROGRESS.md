@@ -739,3 +739,46 @@ hdl make doom_probe   # builds fsys.o + probe elf/hex + wad.hex + run_mmio_big (
 ### Next
 - P2 simulation speed: Doom runner must be a Verilator C++ main (`-O3 --x-assign fast --x-initial fast`, no per-instruction logging); target >= 15M cycles/s (now ~3.5M). Measure cycles/s from wall-clock.
 - Then M10f `hdl make play` (SDL2 window + keyboard), then P1/P3/M10e, then final F4 checklist numbers.
+
+## P2 speed attempt (in progress, after `09319e3`)
+### Worked
+- Key finding: Verilator's `--build` compiles generated code with `OPT_FAST=-Os` even when
+  `-O3` is on the verilator command (that flag only tunes Verilator's own optimizations).
+  The Makefile `build/vlt_doom/run_doom` rule now verilates (no `--build`) and then runs
+  `$(MAKE) -C build/vlt_doom -f Vrun_doom.mk OPT_FAST="-O3" run_doom -j 4` so the model .o
+  files really are -O3 (+40%: 3.96 -> 5.68M cycles/s).
+- `tb/main_doom.cpp`: removed the per-read `dbg_re/dbg_ra`+eval readback; `read_word()` now
+  reads the Verilated backing RAM directly through `model->rootp->...MM__DOT__ram` (no extra
+  evals, no 4 random backing reads every cycle in the comb).
+- `rtl/cache32.sv`: `dbg_rd` assign is guarded by `dbg_re` (ternary, dead when 0); removed the
+  temporary `stat_icm/stat_dcm` `$display` probe (it was DOOM_BIG-only debug).
+- `rtl/mdiu_fast.sv` (P2 graph trim, semantics unchanged): idle MDU cycles no longer copy ~20
+  state vars (incl. 6x 64-bit); the `always_ff` latches only write on start/step cycles
+  (`else if (active || start)`), and the 4 multiplies/64-bit extends now compute only on
+  M-unit start cycles. Generated nba got noticeably smaller.
+- Cache geometry: `DOOM_BIG` set to 1024 lines = 16 KB I + 16 KB D (P1 "16-32 KB" range).
+- Measured knob sweep (400M-cycle cap runs, same RTL): -Os vs -O3 (OPT_FAST) 4.0->5.7M;
+  `--threads 4` catastrophic; `-CFLAGS -march=native` no gain; `--gate-stmts 0` worse (5.4M);
+  `-O2` verilation ~= same (6.08M at LAT=1/4K experiment); LAT=1 + 4K experiment 6.02M cyc/s,
+  2.21M cyc/frame (kept LAT=5 canonical for honest miss timing).
+
+### Metrics (P2 attempt, measured this session, canonical LAT=5 16K+16K)
+| Item | Result |
+|---|---|
+| `hdl make doom` | `#RUN cycles=124092703 insns=112822564 frames=31 halt=0`; ~2.34M cycles/frame; wall 23.1s -> **5.36M cycles/s** (2.3 real-time fps) |
+| experiment builds (4K caches, LAT=1) | 116915638 cycles, 19.4s -> 6.02M cycles/s, 2.21M cyc/frame, 2.72 fps |
+| gprof split (-pg build) | `nba_sequent` ~58%, `ico_sequent` ~32% of runtime; rest: VlTriggerVec glue |
+| `hdl make test`/`regress` | `ALL PASS` |
+| `ui`/`um`/`mi`/`m7` | `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, `ALL M7 PASS` |
+| `lat1`/`lat5`/`lat20` | `ALL PASS` (lat1 x2) |
+
+### Honest limitations (P2)
+- Target >= 15M cycles/s NOT met: best measured ~5.4-6.0M cycles/s. The remaining gap is
+  graph-size-bound: ~2 evals/cycle over a ~5-6k-statement generated model (csrs 434, cache
+  494, pipeline-level selects/copies, predictor 212...). Flags cannot close it; remaining
+  levers are design surgery: word-array backing RAM, write-back D-cache (needs capture-safe
+  flush), predictor-lite, top_pipe latch trims.
+
+### Next
+- Keep P2 surgery going (word-array backing next), then M10f `hdl make play` (SDL2), then
+  P1 metrics/P3 counters/M10e, then the last F4 checklist items.
