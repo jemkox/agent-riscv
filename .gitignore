@@ -1,2 +1,4 @@
 build/
 formal/pipeline/
+obj_dir/
+wave.vcd
