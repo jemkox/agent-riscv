@@ -31,6 +31,17 @@ def main(argv):
     def w16(a,v): mem[(a&0x3FFFF):((a&0x3FFFF)+2)] = (v&0xFFFF).to_bytes(2,'little')
     def w32(a,v): mem[(a&0x3FFFF):((a&0x3FFFF)+4)] = (v&0xFFFFFFFF).to_bytes(4,'little')
     def sx(v,n):  return v - (1<<n) if v & (1<<(n-1)) else v
+    def idiv(a,b):
+        if b == 0: return -1
+        if a == -2147483648 and b == -1: return -2147483648
+        q = abs(a)//abs(b)
+        if (a < 0) ^ (b < 0): q = -q
+        return q
+    def irem(a,b):
+        if b == 0: return a
+        if a == -2147483648 and b == -1: return 0
+        r = abs(a) % abs(b)
+        return -r if a < 0 else r
     stopped = 0
     while steps < LIM:
         a = pc & 0x3FFFF
@@ -46,15 +57,30 @@ def main(argv):
         wv = None; wv_ok = False; npc = (pc+4) & 0xFFFFFFFF
         neg = (ins>>30)&1
         if opc == 0x33:   # OP
+            op7 = (ins >> 25) & 0x7F
             sh = a1 & 31
-            if   f3 == 0: wv = (a0-a1) if neg else (a0+a1)
-            elif f3 == 1: wv = a0 << sh
-            elif f3 == 2: wv = 1 if sx(a0,32) < sx(a1,32) else 0
-            elif f3 == 3: wv = 1 if a0 < a1 else 0
-            elif f3 == 4: wv = a0 ^ a1
-            elif f3 == 5: wv = (sx(a0,32) >> sh) if neg else ((a0&0xFFFFFFFF) >> sh)
-            elif f3 == 6: wv = a0 | a1
-            else:         wv = a0 & a1
+            if op7 == 1:
+                if   f3 == 0: wv = (a0*a1) & 0xFFFFFFFF
+                elif f3 == 1: wv = ((sx(a0,32)*sx(a1,32)) >> 32) & 0xFFFFFFFF
+                elif f3 == 2: wv = ((sx(a0,32)*a1) >> 32) & 0xFFFFFFFF
+                elif f3 == 3: wv = ((a0*a1) >> 32) & 0xFFFFFFFF
+                elif f3 == 4: wv = idiv(sx(a0,32), sx(a1,32)) & 0xFFFFFFFF
+                elif f3 == 5: wv = (0xFFFFFFFF if a1 == 0 else a0 // a1) & 0xFFFFFFFF
+                elif f3 == 6: wv = irem(sx(a0,32), sx(a1,32)) & 0xFFFFFFFF
+                else:         wv = (a0 if a1 == 0 else a0 % a1) & 0xFFFFFFFF
+            elif op7 not in (0,0x20):
+                illegal = True
+            else:
+                neg = (op7 == 0x20)
+                if   f3 == 0: wv = (a0-a1) if neg else (a0+a1)
+                elif f3 == 1 and not neg: wv = a0 << sh
+                elif f3 == 2 and not neg: wv = 1 if sx(a0,32) < sx(a1,32) else 0
+                elif f3 == 3 and not neg: wv = 1 if a0 < a1 else 0
+                elif f3 == 4 and not neg: wv = a0 ^ a1
+                elif f3 == 5: wv = (sx(a0,32) >> sh) if neg else ((a0&0xFFFFFFFF) >> sh)
+                elif f3 == 6 and not neg: wv = a0 | a1
+                elif f3 == 7 and not neg: wv = a0 & a1
+                else: illegal = True
         elif opc == 0x13: # OP-IMM
             sh = iimm & 31
             if   f3 == 0: wv = a0 + iimm

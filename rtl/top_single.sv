@@ -23,7 +23,8 @@ module top_single (
   logic [31:0] insn, ea, aluA, aluB, wb_wv, ldx, sda, tgt, ldraw, sd_raw;
   logic [3:0]  sbe, alu_op;
   logic [2:0]  f3;
-  logic [4:0]  rs1c, rs2c, rdf;
+   logic [4:0]  rs1c, rs2c, rdf;
+   logic        is_m;
   logic [7:0]  rs2_b0, ld_b0;
   logic [15:0] ld_h0;
   logic        bself;
@@ -41,8 +42,8 @@ module top_single (
            .a_sel(), .b_sel(bself),
            .is_ld(is_ld), .is_st(is_st), .is_br(is_br), .is_jal(is_jal),
            .is_jalr(is_jalr), .is_lui(is_lui), .is_auipc(is_auipc),
-           .is_opi(is_opi), .is_op(is_op), .is_sys(is_sys), .is_fence(is_fence),
-           .is_mret(), .is_ill(is_ill), .i(insn));
+            .is_opi(is_opi), .is_op(is_op), .is_sys(is_sys), .is_fence(is_fence),
+            .is_m(is_m), .m_op(), .is_mret(), .is_ill(is_ill), .i(insn));
   /* verilator lint_on PINCONNECTEMPTY */
   imm32  IM(.i(insn), .iimm(iimm), .simm(simm), .bimm(bimm), .uimm(uimm),
            .jimm(jimm));
@@ -75,7 +76,7 @@ module top_single (
       default: taken = 1'b0;
     endcase
     wb_en = (rdf != 5'd0) && (is_ld || is_lui || is_auipc || is_jal ||
-             is_jalr || is_opi || is_op) && !is_fence && !is_ill && !is_sys;
+             is_jalr || is_opi || is_op) && !is_fence && !is_ill && !is_sys && !is_m;
   end
 
   // B: target, store pack, side effects (no mem-read deps)

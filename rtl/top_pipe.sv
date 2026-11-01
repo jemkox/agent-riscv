@@ -42,6 +42,8 @@ module top_pipe (
 
   // pipeline valid/stage control bits
   logic ifid_valid = 0, idex_valid = 0, exmem_valid = 0, mwb_valid = 0;
+  logic idex_m_done = 1'b1;
+  logic m_stall, m_done_now;
   logic exmem_ld = 0, exmem_st = 0, exmem_stop = 0, exmem_wben = 0;
   logic mwb_st = 0, mwb_stop = 0, mwb_wben = 0;
   logic stall, flush, conflict, flush_ex, taken_ex;
@@ -49,7 +51,10 @@ module top_pipe (
   logic exmem_fwd, mwb_fwd, read_a, read_b;
   logic ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr;
   logic ce_lui, ce_auipc, ce_opi, ce_op, ce_sys, ce_fence;
-  logic ce_ill;
+  logic ce_ill, ce_m;
+  logic ceif_ill, ceif_m;
+  logic [2:0] ce_m_op;
+  logic [31:0] md_result;
   logic [4:0] ceif_rs1, ceif_rs2;
   logic ceif_ld, ceif_st, ceif_br, ceif_jalr, ceif_opi, ceif_op;
   logic exif_fwd, mwif_fwd, id_read_a, id_read_b;
@@ -65,15 +70,21 @@ module top_pipe (
   ctrl   CE(.alu_op(ce_alu_op), .f3(ce_f3), .op7(), .rs1(ce_rs1), .rs2(ce_rs2), .rd(ce_rd),
             .a_sel(), .b_sel(ce_bsel), .is_ld(ce_ld), .is_st(ce_st), .is_br(ce_br),
             .is_jal(ce_jal), .is_jalr(ce_jalr), .is_lui(ce_lui), .is_auipc(ce_auipc),
-            .is_opi(ce_opi), .is_op(ce_op), .is_sys(ce_sys), .is_fence(ce_fence),
-             .is_mret(), .is_ill(ce_ill), .i(idex_insn));
+            .is_opi(ce_opi), .is_op(ce_op),              .is_sys(ce_sys), .is_fence(ce_fence),
+             .is_m(ce_m), .m_op(ce_m_op), .is_mret(), .is_ill(ce_ill), .i(idex_insn));
+  mdiu MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
+          .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
+          /* verilator lint_off PINCONNECTEMPTY */
+          .md_active(), .md_done_now(m_done_now), .result(md_result));
+          /* verilator lint_on PINCONNECTEMPTY */
   /* verilator lint_on PINCONNECTEMPTY */
   /* verilator lint_off PINCONNECTEMPTY */
   ctrl   CEID(.alu_op(), .f3(), .op7(), .rs1(ceif_rs1), .rs2(ceif_rs2), .rd(),
               .a_sel(), .b_sel(), .is_ld(ceif_ld), .is_st(ceif_st),
               .is_br(ceif_br), .is_jal(), .is_jalr(ceif_jalr),
               .is_lui(), .is_auipc(), .is_opi(ceif_opi), .is_op(ceif_op),
-              .is_sys(), .is_fence(), .is_mret(), .is_ill(), .i(ifid_insn));
+              .is_sys(), .is_fence(), .is_m(ceif_m), .m_op(),
+              .is_mret(), .is_ill(ceif_ill), .i(ifid_insn));
   /* verilator lint_on PINCONNECTEMPTY */
   imm32  IM(.i(idex_insn), .iimm(iimm), .simm(simm), .bimm(bimm), .uimm(uimm), .jimm(jimm));
   alu    AL(.a(a_ex), .b(aluB_ex), .op(ce_alu_op), .res(alu_res), .eq(alu_eq),
@@ -155,12 +166,14 @@ module top_pipe (
     else br_tgt_ex = idex_pc + 32'd4;
 
     idex_wbval = alu_res;
-    if (ce_lui) idex_wbval = uimm;
+    if (ce_m && !ce_ill) idex_wbval = md_result;
+    else if (ce_lui) idex_wbval = uimm;
     else if (ce_auipc) idex_wbval = idex_pc + uimm;
     else if (ce_jal || (ce_jalr && !ce_ill)) idex_wbval = idex_pc + 32'd4;
 
     stall = exmem_valid && exmem_ld && (exmem_rd != 5'd0) &&
             ((read_a && (ce_rs1 == exmem_rd)) || (read_b && (ce_rs2 == exmem_rd)));
+    m_stall = idex_valid && ce_m && !ce_ill && !idex_m_done;
     flush = !stall && flush_ex;
     conflict = !stall && !flush && idex_valid &&
                ((idex_st && (pc_if == idex_ea)) ||
@@ -202,6 +215,7 @@ module top_pipe (
       pc_if <= 32'h0;
       halt <= 1'b0;
       ifid_valid <= 1'b0; idex_valid <= 1'b0; exmem_valid <= 1'b0; mwb_valid <= 1'b0;
+      idex_m_done <= 1'b1;
     end else if (!halt) begin
       halt <= halt || exmem_stop;
       mwb_valid <= exmem_valid;
@@ -212,10 +226,11 @@ module top_pipe (
       mwb_st <= exmem_st && !exmem_stop;
       mwb_sa <= exmem_ea; mwb_sd <= exmem_sd_log; mwb_sbe <= exmem_sbe;
 
-      if (stall) begin
+      if (stall || m_stall) begin
         exmem_valid <= 1'b0;
         idex_valid <= idex_valid;
         idex_pc <= idex_pc; idex_insn <= idex_insn; idex_r1 <= idex_r1; idex_r2 <= idex_r2;
+        idex_m_done <= idex_m_done;
         ifid_valid <= 1'b0;
         pc_if <= ifid_valid ? ifid_pc : pc_if;
       end else if (flush) begin
@@ -225,7 +240,7 @@ module top_pipe (
         exmem_f3 <= ce_f3; exmem_ea <= idex_ea; exmem_ssz <= idex_ssz;
         exmem_sd_raw <= idex_sd_raw; exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
         exmem_wbval <= idex_wbval; exmem_result <= idex_wbval;
-        idex_valid <= 1'b0; ifid_valid <= 1'b0;
+        idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
         pc_if <= br_tgt_ex & 32'hFFFFFFFE;
       end else begin
         exmem_valid <= idex_valid;
@@ -237,8 +252,10 @@ module top_pipe (
 
         idex_valid <= ifid_valid;
         idex_pc <= ifid_pc; idex_insn <= ifid_insn; idex_r1 <= ifid_r1_fwd; idex_r2 <= ifid_r2_fwd;
+        idex_m_done <= ifid_valid ? !(ceif_m && !ceif_ill) : 1'b1;
         if (conflict) begin
           ifid_valid <= 1'b0;
+          idex_m_done <= 1'b1;
           pc_if <= pc_if;
         end else begin
           ifid_valid <= 1'b1;
@@ -246,6 +263,7 @@ module top_pipe (
           pc_if <= pc_if + 32'd4;
         end
       end
+      if (m_done_now) idex_m_done <= 1'b1;
     end
   end
 

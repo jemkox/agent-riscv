@@ -27,6 +27,8 @@ TASK: Design, verify, synthesize and benchmark a RISC-V CPU in SystemVerilog, wo
 
 ## WORK LOOP
 PLAN → WRITE HDL → LINT → SIMULATE → SYNTHESIZE → READ OUTPUT → FIX → REPEAT.
+- METRICS must be measured: every number in the PROGRESS.md METRICS table (IPC, cycles, cells/LUTs, Fmax, misprediction rate, benchmark score) must come from tool output you actually saw (the testbench #SUMMARY line, Yosys stat, nextpnr, ...). If you cannot measure it yet, write `not measured`, never an estimate.
+- FRESH-CLONE CHECK before every commit: `rm -rf ../rv32cpu-check && git clone -q . ../rv32cpu-check && cd ../rv32cpu-check && hdl make test` (stay inside ~/agent-workspace so `hdl` works). It must pass there too. This catches absolute paths, files you forgot to commit and leftovers from your build folder. Never hard-code /home/... paths in RTL, testbenches, scripts or the Makefile; use paths relative to the project folder (the official test suites in ~/agent-workspace/downloads may be referenced through one Makefile variable).
 - Keep PROGRESS.md: what works, what failed, root cause, next step, and a METRICS table (milestone, tests passed, IPC, cells/LUTs, Fmax). Update it after every milestone and every major bug. If you lose context, read PROGRESS.md first and continue.
 - git commit after each passing milestone so you can always roll back.
 - Every testbench is self-checking and ends with exactly `TEST PASSED` or `TEST FAILED: <n> errors`.

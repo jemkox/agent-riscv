@@ -22,6 +22,8 @@ module ctrl (
   output logic         is_op,
   output logic         is_sys,      // SYSTEM opcode (ecall/ebreak/CSR in M5)
   output logic         is_fence,    // FENCE opcode (no-op in M1)
+  output logic         is_m,
+  output logic [2:0]   m_op,        // 0 MUL, 1 MULH, 2 MULHSU, 3 MULHU, 4 DIV, 5 DIVU, 6 REM, 7 REMU
   output logic         is_mret,
   output logic         is_ill
 );
@@ -47,7 +49,7 @@ module ctrl (
 
   always_comb begin
     alu_op = 4'd0; a_sel = 0; b_sel = 0;
-    is_ill = 0;
+    is_ill = 0; is_m = 0; m_op = 3'd0;
     case (opc)
       7'b0000011: begin alu_op = 4'd0; b_sel = 1; end                          // LOAD
       7'b0100011: begin alu_op = 4'd0; b_sel = 1; end                          // STORE
@@ -71,17 +73,37 @@ module ctrl (
         b_sel = 1;
       end
       7'b0110011: begin                                                   // OP
-        case (f3)
-          3'b000: alu_op = op7[5] ? 4'd1 : 4'd0;      // ADD/SUB
-          3'b001: alu_op = 4'd5;                       // SLL
-          3'b101: alu_op = op7[5] ? 4'd7 : 4'd6;       // SRL/SRA
-          3'b010: alu_op = 4'd8;                       // SLT
-          3'b011: alu_op = 4'd9;                       // SLTU
-          3'b100: alu_op = 4'd4;                       // XOR
-          3'b110: alu_op = 4'd3;                       // OR
-          3'b111: alu_op = 4'd2;                       // AND
-          default: is_ill = 1;
-        endcase
+        if (op7 == 7'b0000001) begin
+          is_m = 1;
+          case (f3)
+            3'b000: m_op = 3'd0;                       // MUL
+            3'b001: m_op = 3'd1;                       // MULH
+            3'b010: m_op = 3'd2;                       // MULHSU
+            3'b011: m_op = 3'd3;                       // MULHU
+            3'b100: m_op = 3'd4;                       // DIV
+            3'b101: m_op = 3'd5;                       // DIVU
+            3'b110: m_op = 3'd6;                       // REM
+            3'b111: m_op = 3'd7;                       // REMU
+            default: is_ill = 1;
+          endcase
+        end else begin
+          case (f3)
+            3'b000: alu_op = (op7 == 7'b0100000) ? 4'd1 : 4'd0; // ADD/SUB
+            3'b001: alu_op = 4'd5;                       // SLL
+            3'b101: alu_op = (op7 == 7'b0100000) ? 4'd7 : 4'd6; // SRL/SRA
+            3'b010: alu_op = 4'd8;                       // SLT
+            3'b011: alu_op = 4'd9;                       // SLTU
+            3'b100: alu_op = 4'd4;                       // XOR
+            3'b110: alu_op = 4'd3;                       // OR
+            3'b111: alu_op = 4'd2;                       // AND
+            default: is_ill = 1;
+          endcase
+          if ((f3 == 3'b000 || f3 == 3'b101) &&
+              (op7 != 7'b0000000 && op7 != 7'b0100000)) is_ill = 1;
+          if ((f3 == 3'b001 || f3 == 3'b010 || f3 == 3'b011 ||
+               f3 == 3'b100 || f3 == 3'b110 || f3 == 3'b111) &&
+              (op7 != 7'b0000000)) is_ill = 1;
+        end
       end
       7'b0001111: begin end                                             // FENCE
       7'b1110011: begin end                                             // SYSTEM

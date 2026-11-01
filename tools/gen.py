@@ -80,7 +80,8 @@ KINDS = (
     'lui', 'auipc', 'jal', 'jalr', 'beq', 'bne', 'blt', 'bge', 'bltu', 'bgeu',
     'lb', 'lh', 'lw', 'lbu', 'lhu', 'sb', 'sh', 'sw',
     'addi', 'slti', 'sltiu', 'xori', 'ori', 'andi', 'slli', 'srli', 'srai',
-    'add', 'sub', 'sll', 'slt', 'sltu', 'xor', 'srl', 'sra', 'and', 'or', 'fence')
+    'add', 'sub', 'sll', 'slt', 'sltu', 'xor', 'srl', 'sra', 'and', 'or', 'fence',
+    'mul', 'mulh', 'mulhsu', 'mulhu', 'div', 'divu', 'rem', 'remu')
 
 def emit(kind, idx):
     d = rdreg()
@@ -162,6 +163,22 @@ def emit(kind, idx):
         return R(0, b, a, 7, d, 0x33)
     if kind == 'or':
         return R(0, b, a, 6, d, 0x33)
+    if kind == 'mul':
+        return R(1, b, a, 0, d, 0x33)
+    if kind == 'mulh':
+        return R(1, b, a, 1, d, 0x33)
+    if kind == 'mulhsu':
+        return R(1, b, a, 2, d, 0x33)
+    if kind == 'mulhu':
+        return R(1, b, a, 3, d, 0x33)
+    if kind == 'div':
+        return R(1, b, a, 4, d, 0x33)
+    if kind == 'divu':
+        return R(1, b, a, 5, d, 0x33)
+    if kind == 'rem':
+        return R(1, b, a, 6, d, 0x33)
+    if kind == 'remu':
+        return R(1, b, a, 7, d, 0x33)
     return I(0, 0, 0, 0, 0x0f)
 
 for i in range(Bn):
