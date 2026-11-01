@@ -641,3 +641,30 @@ hdl vvp build/mdiu_tb.vvp
 - Longest clk->clk chain: `exmem_insn` DFF -> CSRS `mstatus_wr` -> `inhibit_instret` -> `newv` (deep else-if mux cascade) -> `st_mtimecmp` -> `st_mcause` (32-bit SB_CARRY ripple on the write logic) -> `idex_wben`/`idex_stop` -> `pc_if`/`ifid_pc` CEN.
 - Targets: (1) parallelize the CSRS CSR-write select (`if/else if` cascade -> `case`), (2) shorten/kill the 32-bit carry ripple in the CSR-state write enables, (3) then move `idex_wben`/stall computation earlier in the stage.
 
+## M10b probe: crt0 gp fix, stdio/file UART probe PASS
+
+### Worked
+- Root cause for the broken probe: crt0 never set `gp`, and picolibc C objects address data gp-relative to `__global_pointer$ = __data_start + 0x800` (doom/ld.ld). The old probe "worked" only by aliasing a wrong memory window; the .bss clear then clobbered text at 0x14/0x18 and execution halted on the zeroed word (illegal).
+- Linker note: `la reg, __global_pointer$` and explicit `auipc %pcrel_hi(__global_pointer$)` pairs get folded by ld into gp-relative no-ops (even via a `__probe_gp__` alias), so crt0 loads gp from a literal instead: `la t0, gp_word; lw gp, 0(t0)` with `gp_word: .word __global_pointer$` in `.rodata` (merged into `.data` by doom/ld.ld).
+- Re-linked probe with crt0 first at 0x0 and ran `run_mmio_big` (DOOM_BIG, CACHE_LAT=5): UART bytes `A B 4 C 8 8 D E F n=8\ns=10054200\n Z`, 25 bytes, `INSN=23891 CYCLES=31194 IPC=0.766 HALT=1`, BPSTAT `BR=5564 TAKEN=4753 MISPRED=605 ACC=89.1`.
+- Sequence is the full success path: WAD open OK, first fread 8 bytes (no `R` branch), fseek OK, second fread 8, write-back count digit now `8` (was `1` in the broken run), fclose OK, cfg open `E`, cfg write/close `F`, no `g` fail marker, final `Z`.
+- Added `#UBYTE %02x %c` per-byte debug line to tb/run_mmio.sv so markers survive even when interleaved with DBG lines.
+- `build/m7/p.hex` still holds probe hex; normal M7/regression hexes must be rebuilt before those suites.
+
+### Next
+- WAD loader: runner loads `~/agent-workspace/downloads/doomwad/doom1.wad` into the DOOM_BIG backing RAM at 0x00C0_0000 (probe already reads it as zeros; now add the real blob).
+- Then link full Doom (`doom/src` + `doom/port_rv32.c` + fsys + crt0), capture frames from backing RAM to PNGs, then F4 SB_MAC16 DSP multiplier round.
+
+### How to run
+```sh
+hdl riscv64-unknown-elf-gcc -march=rv32im_zicsr -mabi=ilp32 -O1 -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o build/doom/probe.elf doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_fs.c build/doom/fsys.o
+hdl riscv64-unknown-elf-objcopy -O binary build/doom/probe.elf build/doom/probe.bin && python3 tools/bin2hex.py build/doom/probe.bin build/doom/probe.hex && cp build/doom/probe.hex build/m7/p.hex
+./build/vlt_big/run_mmio_big | grep "#UBYTE" | head -n 30
+```
+
+
+## M10b probe: crt0 gp fix, stdio/file UART probe PASS
+
+### Worked
+- Root cause for the broken probe: crt0 never set `gp`, and picolibc C objects address data gp-relative to `__global_pointer$ = __data_start + 0x800` (doom/ld.ld). The old probe "worked" only by aliasing a wrong memory window; the .bss clear then clobbered text at 0x14/0x18 and halted on the zeroed word (illegal).
+- Linker note: `la reg, __global_pointer$` and explicit `auipc 

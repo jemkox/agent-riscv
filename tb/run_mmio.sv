@@ -27,10 +27,10 @@ module run_mmio ();
          .rv_valid(rv_valid), .bp_branches(bp_branches),
          .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
 
-  localparam PROG_WORDS = 65536;
+  localparam PROG_WORDS = 1048576; /* 4 MB of word slots: covers a 0x100000 data blob */
   localparam [31:0] UART_ADDR = 32'h1000_0000;
   logic [31:0] prog [0:PROG_WORDS-1];
-  int n, done, cycles, uart_bytes, max_insns;
+  int n, done, cycles, uart_bytes, max_insns, dbg_on = 0, n_dbg = 0;
 
   initial begin
     $readmemh("build/m7/p.hex", prog);
@@ -49,6 +49,7 @@ module run_mmio ();
     clk = 1; #1;
     clk = 0; #1;
     reset = 0;
+    dbg_on = 1;
     #1;
 
     n = 0; done = 0; cycles = 0; uart_bytes = 0; max_insns = 20000000;
@@ -56,9 +57,15 @@ module run_mmio ();
       if (rv_valid) begin
         if (ex_st && (ex_sa == UART_ADDR) && ex_sbe[0]) begin
           $write("%c", ex_sd[7:0]);
+          $display("#UBYTE %02x %c", ex_sd[7:0], ex_sd[7:0]);
           uart_bytes = uart_bytes + 1;
         end
         n = n + 1;
+      end
+      if ((dbg_on && n_dbg < 999999) || (cycles != 0 && (cycles % 4000000) == 0)) begin
+        $display("#DBG c=%0d halt=%0d ex_pc=%08x ex_insn=%08x ex_st=%0d ex_sa=%08x ex_rd=%0d ex_wv=%08x rv=%0d",
+                 cycles, halt, ex_pc, ex_insn, ex_st, ex_sa, ex_rd, ex_wv, rv_valid);
+        n_dbg = n_dbg + 1;
       end
       if (halt) done = 1;
       else begin

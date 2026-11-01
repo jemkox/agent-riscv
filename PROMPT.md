@@ -116,7 +116,15 @@ M10f Playable (do this LAST, after F1-F4, M10a-M10e and P1-P3 are done): a live 
      arrow keys = move/turn, Ctrl = fire, Space = use/open, Enter, Esc, Y/N, and 1-7 = weapons. One command starts it:
      `hdl make play` (it needs the display, so the window must open from inside the sandbox; DISPLAY is passed in).
      Verify it by running it, checking frames still render and that a scripted key sequence moves the player.
-When F1-F4 are done, M10d and M10e are proven with real frame images, the P1-P3 numbers are measured and M10f `make play` works, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
+F4 DONE CHECKLIST (required before `M10 DOOM: MET`; a review found these still open after F4 p1/p2 - you may do them
+before or after the Doom steps, but all must be done and recorded in PROGRESS.md):
+  [ ] Real Fmax work: at least two DESIGN changes on the critical path reported by nextpnr (e.g. register a long
+      path, simplify forwarding/branch compare, pipeline the cache tag compare). Changing the nextpnr seed or
+      timing budget does not count as an optimization round. Table: change -> LC, Fmax.
+  [ ] FPGA multiplier on the SB_MAC16 DSP blocks (currently 0 of 8 used); MUL must be fast on the FPGA build too.
+  [ ] mcycle/minstret restored in the FPGA build (no constant-0 stubs); 32-bit is acceptable if 64-bit does not fit.
+  [ ] Final FPGA numbers (LC, BRAM, DSP, Fmax) and all regressions passing, measured after the three items above.
+When F1-F4 (including the F4 DONE CHECKLIST) are done, M10d and M10e are proven with real frame images, the P1-P3 numbers are measured and M10f `make play` works, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
 
 ## FINAL ACCEPTANCE (only then may you stop)
 - `hdl make test` runs the whole regression from scratch (directed, random differential, official rv32ui + rv32um tests) and prints ALL PASS. Show that output.
