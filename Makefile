@@ -25,7 +25,7 @@ UM_HEXES := $(foreach n,$(UM_NAMES),build/um/$(n).hex)
 UM_BINS := $(foreach n,$(UM_NAMES),build/um/$(n).bin)
 UM_LOGS := $(foreach n,$(UM_NAMES),build/um/logs/$(n).rtl.log build/um/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um lat1 lat5 lat20 m7 fpga fpga_test
+.PHONY: test regress lint clean synth ui um lat1 lat5 lat20 m7 fpga fpga_test doom_mem
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin
 
@@ -175,6 +175,16 @@ build/vlt/run_mmio: build/vlt/run_mmio_lat$(CACHE_LAT)
 
 m7: build/vlt/run_mmio $(M7_HEXS)
 	@bad=0; mkdir -p build/m7/logs; for n in $(M7_NAMES); do cp build/m7/$$n.hex build/m7/p.hex; ./build/vlt/run_mmio > build/m7/logs/$$n.out; grep -q PASS build/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; fi
+
+DOOM_TB := tb/run_doom.sv
+DOOM_MAIN := tb/main_doom.cpp
+DOOM_MAIN_ABS := $(CURDIR)/$(DOOM_MAIN)
+
+build/vlt_doom/run_doom: $(RTL) $(DOOM_TB) $(DOOM_MAIN) | build
+	verilator --cc --exe --build --Wall --timing -O2 -DDOOM_BIG -DCACHE_LAT=1 --top-module run_doom --Mdir build/vlt_doom -o run_doom $(RTL) $(DOOM_TB) $(DOOM_MAIN_ABS)
+
+doom_mem: build/vlt_doom/run_doom | build
+	./build/vlt_doom/run_doom
 
 lat1:
 	$(MAKE) CACHE_LAT=1 test

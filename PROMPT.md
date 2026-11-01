@@ -54,6 +54,37 @@ M7: Memory-mapped UART at a fixed address that the testbench prints. crt0.S + li
 M8 FPGA: Make an FPGA top (cpu + block-RAM memory + UART TX pin) for iCE40 UP5K. Run yosys synth_ice40 → nextpnr-ice40 → icepack until it places, routes and produces build/cpu.bin. Report LUTs used (of 5280), BRAM used, and Max frequency. Then OPTIMIZE: find the critical path from the nextpnr report, improve it (retime, split logic, simplify forwarding/compare paths), and rerun. Keep a table of each optimization and its Fmax/LUT effect. Regression must still pass after every change.
 M9 (stretch, in order, only after M8 is committed): dual-issue in-order superscalar; RV32C compressed; RV32A. Full regression + FPGA build after each; fix or revert if it breaks.
 
+## FIX FIRST: make M5, M6 and M8 real (do this right after M10a, before M10b)
+A review found these weak spots. Fix them, keep every existing test passing, commit after each fix, and record
+measured results in PROGRESS.md (no estimates).
+F1 Real caches (M6 was only a latency model): replace cache32's "tags only, data from backing RAM" behaviour with
+   real direct-mapped (or 2-way) I-cache and D-cache that hold DATA in their own arrays (write-through or write-back,
+   your choice, documented), written so Yosys can map the data/tag arrays to block RAM. Loads must return the cached
+   data. Regression must still pass at CACHE_LAT 1, 5 and 20.
+F2 IPC regression: official rv32ui IPC fell from 0.889 (M5) to 0.209 (M6, CACHE_LAT=1) while the C programs run at
+   0.84-0.94. Find the root cause (cold misses? a stall that never releases early? measurement?) and fix it; report
+   before/after IPC for UI, UM and the 5 C programs.
+F3 Official privileged tests (M5 gap): add riscv-tests isa/rv32mi to the harness (`make mi`) for the CSRs/traps you
+   implement; every test that applies to your machine-mode subset must pass. List any test you skip and why.
+F4 Real FPGA build of THIS CPU (M8 used a separate toy CPU): make rtl/top_pipe.sv itself fit an iCE40 UP5K
+   (5280 LCs, 30 BRAM, 4 SPRAM). Ideas measured in synthesis: register file in BRAM (two read ports via two copies or
+   write-first trick), a much smaller BTB in BRAM or a tiny LUT table (it is 12,159 cells now), real caches from F1 in
+   BRAM, 32-bit or narrower counters where the spec allows, no simulation-only logic in the FPGA build. Produce
+   build/cpu_full.bin from the full CPU with an FPGA top (BRAM/SPRAM memory + UART TX) and report real LUTs, BRAM,
+   and nextpnr Max frequency. Then optimize the critical path at least twice and keep a table of Fmax/LUT changes.
+   If it truly cannot fit, prove it with numbers and fit the largest honest subset (and say exactly what is missing).
+
+## DOOM PERFORMANCE TARGETS (so it is not a slideshow)
+Measure everything; keep a before/after table in PROGRESS.md.
+P1 CPU speed for Doom: multiply <= 4 cycles (M10a); recover IPC >= 0.85 on the C programs with real caches; make the
+   I-cache and D-cache big enough for Doom's hot loops in simulation (e.g. 16-32 KB each); improve the branch
+   predictor if the Doom profile shows mispredicts are a big cost. Target <= 5 million cycles per Doom frame.
+P2 Simulation speed: the Doom testbench must be a Verilator C++ main (no SystemVerilog #delay clock loop, no
+   per-instruction logging, build with -O3 and --x-assign fast --x-initial fast). Measure simulated cycles per real
+   second. Target >= 15 million cycles/s, which with P1 gives >= 3 frames per real second.
+P3 Report: cycles per frame, frames per second at the assumed 50 MHz, and real-time simulation fps; plus where the
+   cycles go (cache misses, mispredicts, multiply/divide stalls) from counters you add.
+
 ## M10: DOOM IN SIMULATION (new goal, after FINAL ACCEPTANCE)
 FINAL ACCEPTANCE (M1-M8) is done; do not redo it. The new goal is to run the shareware Doom on THIS 5-stage
 RV32IM CPU (rtl/top_pipe.sv) in Verilator simulation. Keep every existing test passing (`hdl make test`, `ui`, `um`,
@@ -80,7 +111,7 @@ M10d Port and run: build Doom with riscv64-unknown-elf-gcc -march=rv32im -mabi=i
 M10e Results: record measured cycles per frame, the frame rate at the assumed 50 MHz, and the simulation wall-clock
      speed (frames per real second) in PROGRESS.md and README. Put 3 sample frames in docs/doom/ and, if possible,
      an animated GIF of the demo (ffmpeg is NOT installed; use Python if you make a GIF).
-When M10d and M10e are done and proven with real frame images, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
+When F1-F4 are done, M10d and M10e are proven with real frame images, and the P1-P3 numbers are measured, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
 
 ## FINAL ACCEPTANCE (only then may you stop)
 - `hdl make test` runs the whole regression from scratch (directed, random differential, official rv32ui + rv32um tests) and prints ALL PASS. Show that output.

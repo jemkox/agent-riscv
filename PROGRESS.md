@@ -480,3 +480,23 @@ FINAL ACCEPTANCE: MET
 ### Commit
 - Committed as `M10a: fast multiplier`.
 
+## M10b WIP: paused Doom testbench scaffold
+
+### Worked
+- Added a paused Doom runner scaffold to explore M10b, then parked it before the required F1-F4 work:
+  - `tb/run_doom.sv`: `run_doom` wrapper around `rtl/top_pipe.sv` only; no SV clock/main loop.
+  - `tb/main_doom.cpp`: placeholder Verilator C++ main, currently instantiated and evaluated only to verify the generated top/header path.
+  - Makefile target `build/vlt_doom/run_doom` builds with `--cc --exe --build`, `-DDOOM_BIG`, `-DCACHE_LAT=1`, and `--top-module run_doom`.
+  - Makefile target `doom_mem` runs the scaffold.
+  - `rtl/cache32.sv` has a new `DOOM_BIG` backing-memory variant (`4 * 1024 * 1024` words, 16 MB) used only by the Doom scaffold.
+
+### How to run
+```sh
+hdl make build/vlt_doom/run_doom CACHE_LAT=1
+hdl make doom_mem CACHE_LAT=1
+```
+
+### Notes
+- This is not M10b proof yet: it does not load an ELF, does not load `doom1.wad`, and does not execute Doom.
+- Before continuing M10b, do F1-F4 and P1-P3 as required by the updated `PROMPT.md`; `M10 DOOM: MET` requires those plus real frame images.
+

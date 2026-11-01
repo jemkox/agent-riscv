@@ -34,9 +34,15 @@ module cache32 (
   localparam int IC_LINES   = 4;
   localparam int DC_LINES   = 4;
 `else
+`ifdef DOOM_BIG
+  localparam int BACK_WORDS = 4 * 1024 * 1024;  // 16 MB for the Doom testbench
+  localparam int IC_LINES   = 1024;
+  localparam int DC_LINES   = 1024;
+`else
   localparam int BACK_WORDS = 65536;
   localparam int IC_LINES   = 1024;
   localparam int DC_LINES   = 1024;
+`endif
 `endif
   localparam int BACK_BYTES = BACK_WORDS * 4;
   localparam int BACK_MASK  = BACK_BYTES - 1;
