@@ -16,14 +16,16 @@ module run_hex ();
   logic [4:0]  ex_rd;
   logic [3:0]  ex_sbe;
   logic        ex_st;
+  logic        rv_valid;
 
   `TOP T(.clk(clk), .reset(reset), .lwe(lwe), .lwa(lwa), .lwd(lwd),
          .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
          .ex_wben(wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
-         .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_sbe(ex_sbe));
+         .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_sbe(ex_sbe),
+         .rv_valid(rv_valid));
 
   logic [31:0] prog [0:4095];
-  int n;
+  int n, done;
 
   initial begin
     for (int k = 0; k < 4096; k++) prog[k] = 0;
@@ -48,15 +50,19 @@ module run_hex ();
     reset = 0;
     #1;
     // run: log feeds (instruction about to commit), then commit
-    n = 0;
-
-    while (!halt && n < 200000) begin
-      $display("%08x %08x %0d %08x %0d %08x %08x %0x",
-               ex_pc, ex_insn, ex_rd, wben ? ex_wv : 32'h0,
-               ex_st, ex_sa, ex_sd, ex_sbe);
-      n = n + 1;
-      clk = 1; #1;
-      clk = 0; #1;
+    n = 0; done = 0;
+    while (n < 200000 && done == 0) begin
+      if (rv_valid) begin
+        $display("%08x %08x %0d %08x %0d %08x %08x %0x",
+                 ex_pc, ex_insn, ex_rd, wben ? ex_wv : 32'h0,
+                 ex_st, ex_sa, ex_sd, ex_sbe);
+        n = n + 1;
+      end
+      if (halt) done = 1;
+      else begin
+        clk = 1; #1;
+        clk = 0; #1;
+      end
     end
     if (!halt) $display("#NOTERM after %d instrs", n);
     $display("#SUMMARY INSN=%d HALT=%0d", n, halt ? 1 : 0);

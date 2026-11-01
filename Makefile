@@ -1,4 +1,5 @@
-RTL := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
+RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
+RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
 TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence
 N ?= 200
@@ -55,7 +56,7 @@ build/ui/%.hex: build/ui/%.bin | build/ui
 	python3 tools/bin2hex.py $< $@
 
 build/sim_%.vvp: $(RTL) $(TB) | build
-	iverilog -g2012 -Wall -DTBHEX='"build/$*.hex"' -o build/sim_$*.vvp $(RTL) $(TB)
+	iverilog -g2012 -Wall -DTBHEX='"build/$*.hex"' -DTOPPIPE -o build/sim_$*.vvp $(RTL) $(TB)
 
 test: $(foreach t,$(TESTS),build/sim_$t.vvp) $(foreach t,$(TESTS),build/$t.hex)
 	@bad=0; \
@@ -77,13 +78,13 @@ ui: $(UI_HEXES) build/vlt/run_hex | build/ui build/ui/logs
   if [ $$bad -eq 0 ]; then echo ALL UI PASS; else echo "UI TEST FAILED: $$bad errors"; fi
 
 build/vlt/run_hex: $(RTL) $(TB) | build build/vlt
-	verilator --binary --Wall --timing -O2 --Mdir build/vlt -o run_hex $(RTL) $(TB)
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME --Mdir build/vlt -o run_hex $(RTL) $(TB)
 
 regress: build/vlt/run_hex
 	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; fi
 
 lint:
-	verilator --lint-only -Wall --timing $(RTL) $(TB)
+	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
 
 clean:
 	rm -rf build wave.vcd

@@ -46,4 +46,33 @@ hdl make synth
 - Official riscv-tests are pending.
 
 ### Next step
-- M2: 5-stage pipeline, forwarding, load-use stall, branch flush; switch regression to Verilator and run 5000+ random programs.
+## M2: five-stage pipeline RV32I CPU
+
+### Worked
+- Added `rtl/top_pipe.sv`: IF/ID, ID/EX, EX/MEM, MEM/WB stages with forwarding, load-use stall, branch/JAL/JALR flush, ebreak/system stop, and `rv_valid` retire logging.
+- Added a second decoder (`CEID` in `top_pipe.sv`) for IF/ID operands so forwarding can be applied when operands are latched into ID/EX.
+- Directed tests passed under pipeline: `t01_basic`, `t02_memory`, `t03_control`, `t04_edge`, `t05_jumps`, `t06_fence`.
+- Verilator differential regression passed for 200 generated RV32I programs.
+- Official `rv32ui` passed with pipeline: `ALL UI PASS` (42 tests).
+
+### Failed / fixed
+- Initial pipeline failures used stale operands for instructions whose producer had just retired into MEM/WB or was in EX/MEM.
+  - Fix: added EX/MEM and MEM/WB forwarding at ID/EX capture and in current ID/EX ALU operand selection.
+  - Fix: `read_b` now includes register-reading R-type OP (`ce_op`), not only branch/store, so load-use hazards and second-operand forwarding are detected.
+
+### How to run
+```sh
+hdl make test
+hdl make regress N=200
+hdl make ui
+hdl make lint
+```
+
+### Metrics
+| Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
+|---|---:|---:|---:|---:|
+| M2 | 6 directed + 200 random + 42 UI | ~1.00 expected | n/a | n/a |
+
+### Honest limitations
+- M2 currently targets simulation RV32I behavior and official UI pass; FPGA synthesis of the full pipeline RAM has not been evaluated as the M1 synthesis proof used a small RAM variant.
+- M extension, CSR, and formal verification are not yet included.

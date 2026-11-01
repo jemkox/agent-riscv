@@ -16,7 +16,8 @@ module top_single (
   output logic        ex_st,
   output logic [31:0] ex_sa,
   output logic [31:0] ex_sd,
-  output logic [3:0]  ex_sbe
+  output logic [3:0]  ex_sbe,
+  output logic        rv_valid
 );
   logic [31:0] pc;
   logic [31:0] insn, ea, aluA, aluB, wb_wv, ldx, sda, tgt, ldraw, sd_raw;
@@ -144,4 +145,5 @@ module top_single (
   assign ex_sa    = msw ? ea : 32'h0;
   assign ex_sd    = msw ? sda : 32'h0;
   assign ex_sbe   = msw ? sbe : 4'h0;
+  assign rv_valid = !halt && !reset;
 endmodule
