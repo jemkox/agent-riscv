@@ -273,7 +273,7 @@ build/cpu_full.json: $(FPGA_PIPE_RTL) rtl/fpga_prog_init.sv | build
 	@yosys -p 'read_verilog -sv -Irtl -DFPGA $(FPGA_PIPE_RTL); synth_ice40 -top fpga_pipe_top -json build/cpu_full.json; stat' > build/cpu_full_syn.log
 
 build/cpu_full.asc: build/cpu_full.json | build
-	@nextpnr-ice40 --up5k --package sg48 --json build/cpu_full.json --asc build/cpu_full.asc --freq 10 > build/cpu_full_route.log 2>&1
+	@nextpnr-ice40 --up5k --package sg48 --json build/cpu_full.json --asc build/cpu_full.asc --freq 13 --seed 6 > build/cpu_full_route.log 2>&1
 
 build/cpu_full.bin: build/cpu_full.asc
 	@icepack build/cpu_full.asc build/cpu_full.bin

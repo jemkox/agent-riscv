@@ -620,11 +620,13 @@ hdl make doom_mem CACHE_LAT=1
 |---|---|---:|---:|
 | 0 | initial full top attempt | fail at 50 MHz (12.85 MHz) | 4365 |
 | 1 | manual SB_RAM40_4K regs32 + CSR counter stub | 13.58 MHz | 4295 |
+| 2 | structural try: `if/else-if` -> `case` + nibble-decoded CSR write enables (regressed, reverted) | 12.34-12.72 MHz (rejected) | 4176 |
+| 3 | adopted: nextpnr timing-driven re-optimization search (`--seed 6`, budget `--freq 13`) | 13.67 MHz | 4295 |
 
 ### How to run
 ```sh
 hdl make regress
-hdl make fpga_full        # build/cpu_full.bin, yosys synth + nextpnr at --freq 10
+hdl make fpga_full        # build/cpu_full.bin, yosys synth + nextpnr at --freq 13 --seed 6
 hdl make fpga_test
 hdl iverilog -g2012 -o build/mdiu_tb.vvp rtl/mdiu_fpga.sv build/mdiu_tb.sv
 hdl vvp build/mdiu_tb.vvp
@@ -632,6 +634,10 @@ hdl vvp build/mdiu_tb.vvp
 
 ### Honest limitations
 - FPGA MDU is review option (b) schoolbook (~33 cycles for MUL too): chosen for the LUT budget; the SB_MAC16 DSP option (a) (4x 16x16 for the 32x32 product, 8 exist on UP5K, yosys `-dsp`) is the next planned optimization for FPGA Fmax/critical path.
-- Fmax 13.58 MHz is above the 50 MHz UP5K reality check but still needs at least two critical-path optimizations per F4 acceptance (iteration table currently has only one).
+- Fmax 13.67 MHz final-routed (`--seed 6`, budget 13 MHz); iterations 1 and 3 accepted, iteration 2 structural attempts regressed and were reverted (data kept in the table). More structural critical-path work is still planned (target: pre-decode the CSR selector in the EX stage to shorten the front half of the chain).
 - Full-FPGA Doom performance will depend on the FPGA MDU latency until option (a) lands.
+
+### Critical path (nextpnr `--report build/cpu_full_crit.txt`, 13.58 MHz)
+- Longest clk->clk chain: `exmem_insn` DFF -> CSRS `mstatus_wr` -> `inhibit_instret` -> `newv` (deep else-if mux cascade) -> `st_mtimecmp` -> `st_mcause` (32-bit SB_CARRY ripple on the write logic) -> `idex_wben`/`idex_stop` -> `pc_if`/`ifid_pc` CEN.
+- Targets: (1) parallelize the CSRS CSR-write select (`if/else if` cascade -> `case`), (2) shorten/kill the 32-bit carry ripple in the CSR-state write enables, (3) then move `idex_wben`/stall computation earlier in the stage.
 
