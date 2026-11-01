@@ -6,8 +6,8 @@
 #include <stddef.h>
 #include "doomgeneric.h"
 
-#define UART_ADDR   0x10000000u
-#define FRAME_ADDR  0x10000004u
+#define UART_ADDR   0x1FF00000u
+#define FRAME_ADDR  0x1FF00004u
 
 static volatile uint32_t ms_now;
 
@@ -37,4 +37,14 @@ int DG_GetKey(int *pressed, unsigned char *doomKey)
 {
     (void)pressed; (void)doomKey;
     return 0; // attract-mode demo needs no input
+}
+int main(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    /* Start like "doom -iwad doom1.wad": never let the IWAD search guess (it would pick doom2.wad). */
+    static char *args[] = { "doom", "-iwad", "doom1.wad", 0 };
+    doomgeneric_Create(3, args);
+    for (;;)
+        doomgeneric_Tick();   /* doomgeneric_Create only initializes; the game runs in Tick */
+    return 0;
 }

@@ -56,7 +56,9 @@ module top_pipe (
             .wena(mwb_valid && mwb_wben && (mwb_rd != 5'd0) && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
   cache32 MM(.clk(clk), .reset(reset), .halt(halt), .lwe(lwe), .lwa(lwa), .lwd(lwd),
              .pc_if(pc_if), .fetch_insn(fetch_insn), .fetch_ready(fetch_ready),
-             .idex_valid(idex_valid), .idex_ld(idex_ld), .idex_st(idex_st),
+             // No memory access while a load-use stall holds this instruction: its address/data operands
+             // are not valid yet, and a store would write a wrong address (it is redone after the stall).
+             .idex_valid(idex_valid && !stall), .idex_ld(idex_ld), .idex_st(idex_st),
              .ea(idex_ea), .sd_raw(idex_sd_raw), .ssz(idex_ssz),
              .ld_raw(ldx_raw), .mem_ready(mem_ready));
   /* verilator lint_off PINCONNECTEMPTY */

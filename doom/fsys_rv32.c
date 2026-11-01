@@ -134,10 +134,17 @@ static int fd_alloc(const unsigned char *b, unsigned len, unsigned pos)
     return 0;
 }
 
+/* Only the shareware IWAD exists: answering every *.wad name made the IWAD search find "doom2.wad". */
+static int wad_ok_name(const char *name)
+{
+    if (!name || !(strstr(name, ".wad") || strstr(name, ".WAD"))) return 0;
+    return strstr(name, "doom1") || strstr(name, "DOOM1");
+}
+
 FILE *open(const char *name, int mode, int isdir)
 {
     (void)isdir;
-    if (name && (strstr(name, ".wad") || strstr(name, ".WAD")))
+    if (wad_ok_name(name))
         return (FILE *)(uintptr_t)fd_alloc(
             (const unsigned char *)(uintptr_t)WAD_VADDR, WAD_LEN, 0);
     if (mode & 2) // write sink for config files
