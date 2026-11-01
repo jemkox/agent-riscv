@@ -551,3 +551,53 @@ hdl make doom_mem CACHE_LAT=1
 - UM IPC remains lower than UI because iterative divide dominates `div/rem/remu`, while M10a fast multiply tests are around `IPC=0.83`.
 - F3 (`rv32mi`) and F4 (full `top_pipe` on UP5K with `build/cpu_full.bin`) remain before `M10 DOOM: MET`.
 
+## F3: selected `rv32mi` machine-mode subset
+
+### Worked
+- Added the selected `rv32mi` Makefile subset and MI compile headers:
+  ```makefile
+  MI_NAMES := breakpoint csr illegal instret_overflow lh-misaligned lw-misaligned ma_addr ma_fetch mcsr sbreak scall shamt sw-misaligned zicntr
+  MI_CCFLAGS := -march=rv32im_zicsr_zifencei -mabi=ilp32
+  ```
+- Added local `env/mi/riscv_test.h` for machine-mode MI tests and kept official riscv-tests sources read-only.
+- Fixed `mstatus`/MPP semantics to match these MI tests:
+  - RTL and ISS tie low MPP bit `0x800` to high MPP bit `0x1000`.
+  - ISS `trap_mode` uses machine-mode bit `12`.
+  - `mret` restores `0x1800` behavior.
+- Fixed MI trap_vector behavior to avoid clobbering `t1` in handler tests:
+  ```systemverilog
+  trap_vector: \
+    la t5,mtvec_handler; \
+    beqz t5,other_exception; \
+    jr t5; \
+  ```
+- Added misaligned fetch trap behavior:
+  - ISS and RTL set cause `0` for misaligned JAL/JALR/taken-branch targets.
+  - Top-level `idex_fetch_bad` is computed directly from decoder signals and ALU condition flags, not from `branch_is`, to avoid Verilator `UNOPTFLAT`.
+- Added RV32 shift-amount legality checks for MI `shamt`:
+  - `SLLI` and `SRLI` with `shamt[5] = 1` are illegal in RTL and ISS.
+- Added machine trap causes for `ecall` and `ebreak` used by local MI tests:
+  - `ecall` cause `8`.
+  - `ebreak` cause `3`, matching the local `CAUSE_BREAKPOINT` encoding.
+- Added `mcountinhibit`, `minstret`, and `minstreth` counter behavior:
+  - `csrs.sv` and ISS keep a 64-bit instret state split into low/high halves.
+  - CSR instructions that effectively write an `xret` counter suppress that instruction's automatic instret increment.
+  - Low-half overflow carries into the high half.
+  - `mcountinhibit` bit 0 inhibits cycle and bit 2 inhibits instret.
+- Ran F3 verification:
+  - `hdl make mi` printed `ALL MI PASS`.
+  - `hdl make ui` printed `ALL UI PASS`.
+  - `hdl make um` printed `ALL UM PASS`.
+  - `hdl make test` printed `ALL PASS`.
+  - `hdl make regress` printed `ALL PASS`.
+
+### Metrics
+| Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
+|---|---:|---:|---:|---:|
+| F3 | 14/14 selected `rv32mi`; full existing directed/regression/UI/UM still pass | measured from `hdl make mi` logs; RTL and ISS logs match | unchanged from F1+F2 proof artifacts in this step | n/a |
+
+### Honest limitations
+- F3 covers the selected MI subset required by the prompt, not every possible official `rv32mi` test.
+- MI counter/timer behavior is modeled for the official/local selected tests and the ISS/RTL differential, not as a complete RISC-V privilege implementation.
+- F4 (full `top_pipe` on UP5K with `build/cpu_full.bin`) and M10 Doom remain before `M10 DOOM: MET`.
+

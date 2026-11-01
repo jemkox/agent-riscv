@@ -25,9 +25,17 @@ UM_HEXES := $(foreach n,$(UM_NAMES),build/um/$(n).hex)
 UM_BINS := $(foreach n,$(UM_NAMES),build/um/$(n).bin)
 UM_LOGS := $(foreach n,$(UM_NAMES),build/um/logs/$(n).rtl.log build/um/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um lat1 lat5 lat20 m7 fpga fpga_test doom_mem build/vlt/run_hex build/vlt/run_mmio
-.PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin
-.SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin
+MI_DIR := $(RVTEST_DIR)/rv32mi
+MI_CCFLAGS := -march=rv32im_zicsr_zifencei -mabi=ilp32
+MI_MACROS := $(RVTEST_DIR)/macros/scalar
+MI_NAMES := breakpoint csr illegal instret_overflow lh-misaligned lw-misaligned ma_addr ma_fetch mcsr sbreak scall shamt sw-misaligned zicntr
+MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
+MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
+MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
+
+.PHONY: test regress lint clean synth ui um mi lat1 lat5 lat20 m7 fpga fpga_test doom_mem build/vlt/run_hex build/vlt/run_mmio
+.PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
+.SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
 build:
 	@mkdir -p build
@@ -46,6 +54,12 @@ build/um/logs:
 
 build/vlt:
 	@mkdir -p build/vlt
+
+build/mi:
+	@mkdir -p build/mi
+
+build/mi/logs:
+	@mkdir -p build/mi/logs
 
 build/%.o: tests/%.S | build
 	$(CC) $(CCFLAGS) -c $< -o build/$*.rvo
@@ -84,6 +98,19 @@ build/um/%.bin: build/um/%.elf | build/um
 	$(OC) -O binary $< $@
 
 build/um/%.hex: build/um/%.bin | build/um
+	python3 tools/bin2hex.py $< $@
+
+build/mi/%.o: $(MI_DIR)/%.S env/mi/riscv_test.h | build/mi
+	$(CC) $(MI_CCFLAGS) -c $< -I env/mi -I ../../downloads/riscv-tests/env -I $(MI_MACROS) -o build/mi/$*.rvo
+	$(OC) -O elf32-littleriscv build/mi/$*.rvo $@
+
+build/mi/%.elf: build/mi/%.o tests/link.ld | build/mi
+	$(CC) $(MI_CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
+
+build/mi/%.bin: build/mi/%.elf | build/mi
+	$(OC) -O binary $< $@
+
+build/mi/%.hex: build/mi/%.bin | build/mi
 	python3 tools/bin2hex.py $< $@
 
 build/sim_%.vvp: $(RTL) $(TB) | build
@@ -138,6 +165,16 @@ um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/um build/um/logs
     python3 tools/cmp.py build/um/logs/$$n.rtl.log build/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
   if [ $$bad -eq 0 ]; then echo ALL UM PASS; else echo "UM TEST FAILED: $$bad errors"; fi
+
+mi: $(MI_BINS) $(MI_HEXES) build/vlt/run_hex | build/mi build/mi/logs
+	@bad=0; \
+  for n in $(MI_NAMES); do \
+    cp build/mi/$$n.hex build/p.hex; \
+    ./build/vlt/run_hex > build/mi/logs/$$n.rtl.log; \
+    python3 iss/iss.py --quiet --pass --log build/mi/logs/$$n.iss.log build/mi/$$n.bin > /dev/null || bad=$$((bad+1)); \
+    python3 tools/cmp.py build/mi/logs/$$n.rtl.log build/mi/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+  done; \
+  if [ $$bad -eq 0 ]; then echo ALL MI PASS; else echo "MI TEST FAILED: $$bad errors"; fi
 
 regress: build/vlt/run_hex
 	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; fi

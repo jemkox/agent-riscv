@@ -19,3 +19,5 @@
 - `hdl make regress N=200`: Verilator differential regression passed, `ALL PASS`.
 - `hdl make ui`: official `rv32ui` tests passed, `ALL UI PASS`.
 - `hdl make lint`: pipeline lint passed with no errors.
+- `hdl make mi`: selected `rv32mi` MI subset passed, `ALL MI PASS`.
+- `hdl make ui`, `hdl make um`, `hdl make test`, and `hdl make regress` passed after F3 counter/trap changes.

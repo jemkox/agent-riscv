@@ -8,6 +8,8 @@ module csrs_pipe (
   input  logic [31:0] idex_pc,
   input  logic        ce_sys,
   input  logic        ce_ill,
+  input  logic        ce_fetch_bad,
+  input  logic        ce_mret,
   input  logic        ce_csr,
   input  logic [2:0]  ce_f3,
   input  logic [4:0]  ce_rs1,
@@ -29,6 +31,8 @@ module csrs_pipe (
   output logic        idex_csr_wen,
   output logic        trap_flush,
   output logic        timer_flush,
+  output logic        mret_flush,
+  output logic [31:0] mret_pc,
   output logic [31:0] idex_cs_old,
   output logic [31:0] cs_old,
   output logic [31:0] cs_mtvec,
@@ -36,6 +40,7 @@ module csrs_pipe (
 );
   logic        trap_mode, timer_due, trap_en;
   logic [31:0] trap_pc, trap_cause;
+  logic        mret_active;
   /* verilator lint_off UNUSED */
   logic [31:0] mc_next, mtcmp_next, mstatus_next;
   logic [31:0] cs_mstatus, cs_mepc, cs_mcause, cs_mcycle, cs_minstret, cs_mtimecmp;
@@ -57,9 +62,9 @@ module csrs_pipe (
   always_comb begin
     idex_ld = idex_valid && ld_ok;
     idex_st = idex_valid && st_ok;
-    trap_mode = mstatus_next[11];
-    idex_trap = idex_valid && (ce_sys || ce_ill) && trap_mode;
-    idex_stop = idex_valid && (ce_sys || ce_ill) && !trap_mode;
+    trap_mode = mstatus_next[12];
+    idex_trap = idex_valid && (ce_sys || ce_ill || ce_fetch_bad) && trap_mode;
+    idex_stop = idex_valid && (ce_sys || ce_ill || ce_fetch_bad) && !trap_mode;
     idex_csr_en = idex_valid && ce_csr;
     idex_csr_wen = idex_csr_en && ((ce_f3 == 3'b001) || (ce_f3 == 3'b101) ||
       ((ce_f3 == 3'b010 || ce_f3 == 3'b011) && ce_rs1 != 5'd0) ||
@@ -67,12 +72,23 @@ module csrs_pipe (
     trap_pc = idex_pc;
     timer_due = idex_valid && trap_mode && (mc_next >= mtcmp_next) &&
                 (idex_pc != cs_mtvec);
-    if (idex_trap)
-      trap_cause = (idex_insn == 32'h00100073) ? 32'd1 : (ce_sys ? 32'd0 : 32'd2);
+    if (idex_trap) begin
+      if (idex_insn == 32'h00100073)
+        trap_cause = 32'd3;
+      else if (idex_insn == 32'h00000073)
+        trap_cause = 32'd8;
+      else if (ce_sys || ce_fetch_bad)
+        trap_cause = 32'd0;
+      else
+        trap_cause = 32'd2;
+    end
     else if (timer_due) trap_cause = 32'h8000_0007;
     else trap_cause = 32'h0;
-    trap_flush = idex_trap && !stall && !m_stall;
-    timer_flush = timer_due && !stall && !m_stall && !trap_flush;
+    mret_active = idex_valid && ce_mret && !stall && !m_stall;
+    trap_flush = idex_trap && !stall && !m_stall && !mret_active;
+    timer_flush = timer_due && !stall && !m_stall && !trap_flush && !mret_active;
     trap_en = trap_flush || timer_flush;
+    mret_flush = mret_active && !trap_flush && !timer_flush;
+    mret_pc = cs_mepc;
   end
 endmodule

@@ -26,18 +26,37 @@ def main(argv):
     lines = []
     mask = 0xFFFFFFFF
     cs = {0x300:0,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
-          0x705:0xffffffff}
+          0x705:0xffffffff,0x340:0,0x301:0x40001001,0xb82:0,0x320:0,
+          0xc02:0,0xc82:0}
+    def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
         if n == 0x704: return cs[0xb00]
+        if n == 0xb02 or n == 0xc02: return cs[0xb02]
+        if n == 0xb82 or n == 0xc82: return cs[0xb82]
         return cs.get(n,0)
     def cs_set(n,v):
         if n == 0x704:
             cs[0xb00] = v & mask
+        elif n == 0x301:
+            pass
+        elif n == 0x300:
+            if v & 0x1000: cs[n] = (v | 0x800) & mask
+            else: cs[n] = (v & ~0x800) & mask
+        elif n == 0x320:
+            cs[n] = v & 0x7
+        elif n == 0xc02:
+            cs[0xb02] = v & mask
+        elif n == 0xc82:
+            cs[0xb82] = v & mask
         elif n in cs:
             cs[n] = v & mask
-    def retire_counters():
-        cs[0xb00] = (cs[0xb00] + 1) & mask
-        cs[0xb02] = (cs[0xb02] + 1) & mask
+    def retire_counters(xret=False):
+        if not (cs.get(0x320,0) & 1):
+            cs[0xb00] = (cs[0xb00] + 1) & mask
+        if not (xret or (cs.get(0x320,0) & 4)):
+            old = cs[0xb02]
+            cs[0xb02] = (cs[0xb02] + 1) & mask
+            if cs[0xb02] == 0: cs[0xb82] = (cs[0xb82] + 1) & mask
     def rd8(a):  return mem[a & 0x3FFFF]
     def rw(a):   return int.from_bytes(mem[(a&0x3FFFF):(a+4)&0x3FFFF+0],'little') if False else int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+4)],'little')
     def rw16(a): return int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+2)],'little')
@@ -66,14 +85,14 @@ def main(argv):
         bimm = sx(((ins>>31)&1)<<12 | ((ins>>7)&1)<<11 | ((ins>>25)&0x3F)<<5 | ((ins>>8)&0xF)<<1, 13)
         uimm = (ins & 0xFFFFF000)
         jimm = sx(((ins>>31)&1)<<20 | ((ins>>12)&0xFF)<<12 | ((ins>>20)&1)<<11 | (((ins>>21)&0x3FF)<<1), 21)
-        illegal = False; st = None; ldrd = None; slog = (0,0,0,0)
+        illegal = False; st = None; ldrd = None; slog = (0,0,0,0); cause = 2; xret_write = False
         a0 = reg[r1] if r1 else 0; a1 = reg[r2] if r2 else 0
         wv = None; wv_ok = False; npc = (pc+4) & 0xFFFFFFFF
         neg = (ins>>30)&1
-        trap_mode = ((cs_get(0x300) >> 11) & 1) == 1
+        trap_mode = ((cs_get(0x300) >> 12) & 1) == 1
         if trap_mode and cs_get(0xb00) >= cs_get(0x705) and pc != cs_get(0x305):
             cs[0x341] = pc & mask; cs[0x342] = 0x80000007
-            cs[0x300] = (cs[0x300] | 0x800) & mask
+            cs[0x300] = (cs[0x300] | 0x1800) & mask
             pc = cs_get(0x305) & mask
             steps += 1
             continue
@@ -104,7 +123,8 @@ def main(argv):
                 else: illegal = True
         elif opc == 0x13: # OP-IMM
             sh = iimm & 31
-            if   f3 == 0: wv = a0 + iimm
+            if f3 in (1,5) and ((iimm >> 5) & 1): illegal = True
+            elif f3 == 0: wv = a0 + iimm
             elif f3 == 1: wv = a0 << sh
             elif f3 == 2: wv = 1 if sx(a0,32) < iimm else 0
             elif f3 == 3: wv = 1 if (a0&0xFFFFFFFF) < (iimm&0xFFFFFFFF) else 0
@@ -142,12 +162,17 @@ def main(argv):
             t = {0: a0 == a1, 1: a0 != a1, 4: sx(a0,32)<sx(a1,32), 5: sx(a0,32)>=sx(a1,32),
                  6: a0 < a1, 7: a0 >= a1}.get(f3 if f3 not in (2,3) else 99)
             if t is None: illegal = True
-            elif t: npc = (pc + bimm) & 0xFFFFFFFF
+            elif t:
+                npc = (pc + bimm) & 0xFFFFFFFF
+                if npc & 3: cause = 0; illegal = True
         elif opc == 0x6F: # JAL
             wv = (pc+4) & 0xFFFFFFFF; npc = (pc + jimm) & 0xFFFFFFFF
+            if npc & 3: cause = 0; illegal = True
         elif opc == 0x67: # JALR
             if f3: illegal = True
-            wv = (pc+4) & 0xFFFFFFFF; npc = ((a0 + iimm) & 0xFFFFFFFE)
+            else:
+                wv = (pc+4) & 0xFFFFFFFF; npc = ((a0 + iimm) & 0xFFFFFFFE)
+                if npc & 3: cause = 0; illegal = True
         elif opc == 0x0F:
             if rd or r1: illegal = True
         elif opc == 0x37: wv = uimm
@@ -156,13 +181,13 @@ def main(argv):
             csr_num = (ins >> 20) & 0xFFF
             zimm = (ins >> 15) & 0x1F
             if f3 == 0:
-                if csr_num == 0: cause = 0
-                elif csr_num == 1: cause = 1
+                if csr_num == 0: cause = 8
+                elif csr_num == 1: cause = 3
                 else: cause = 2; illegal = True
                 if illegal:
                     if trap_mode:
                         cs[0x341] = pc & mask; cs[0x342] = cause
-                        cs[0x300] = (cs[0x300] | 0x800) & mask
+                        cs[0x300] = (cs[0x300] | 0x1800) & mask
                         pc = cs_get(0x305) & mask
                         steps += 1
                         continue
@@ -172,7 +197,7 @@ def main(argv):
                     break
                 if trap_mode:
                     cs[0x341] = pc & mask; cs[0x342] = cause
-                    cs[0x300] = (cs[0x300] | 0x800) & mask
+                    cs[0x300] = (cs[0x300] | 0x1800) & mask
                     pc = cs_get(0x305) & mask
                     steps += 1
                     continue
@@ -191,7 +216,8 @@ def main(argv):
                 wena = ((f3 == 1) or (f3 == 5) or
                         ((f3 == 2 or f3 == 3) and (r1 != 0)) or
                         ((f3 == 6 or f3 == 7) and (zimm != 0)))
-                retire_counters()
+                if wena and xret_num(csr_num): xret_write = True
+                retire_counters(xret_write)
                 if rd: reg[rd] = old
                 lines.append((pc,ins,rd, old & mask, 0,0,0,0))
                 if wena: cs_set(csr_num,newv)
@@ -207,8 +233,8 @@ def main(argv):
             illegal = True
         if illegal:
             if trap_mode:
-                cs[0x341] = pc & mask; cs[0x342] = 2
-                cs[0x300] = (cs[0x300] | 0x800) & mask
+                cs[0x341] = pc & mask; cs[0x342] = cause
+                cs[0x300] = (cs[0x300] | 0x1800) & mask
                 pc = cs_get(0x305) & mask
                 steps += 1
                 continue

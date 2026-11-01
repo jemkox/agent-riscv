@@ -42,11 +42,13 @@ module top_pipe (
   logic        exmem_ld = 0, exmem_st = 0, exmem_stop = 0, exmem_wben = 0, mwb_st = 0, mwb_stop = 0, mwb_wben = 0;
   logic        read_a, read_b, ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr, ce_lui, ce_auipc, ce_opi, ce_op;
   logic        ce_sys, ce_fence, ce_ill, ce_m, ceif_ill, ceif_m, ce_csr, exmem_csr_en, exmem_csr_wen;
-  logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out;
+  logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out, mret_flush, ce_mret;
+  logic [31:0] mret_pc;
   logic        ceif_ld, ceif_st, ceif_br, ceif_jalr, ceif_opi, ceif_op, ceif_csr;
   logic [31:0] ifid_r1_fwd, ifid_r2_fwd, idex_r1_cs;
   logic        bp_pred_if, branch_act_taken, branch_is, wrong_pred, bp_upd_enable, ifid_pred_taken = 0;
   logic        idex_pred_taken = 0;
+  logic        idex_fetch_bad;
   logic [31:0] ifid_pred_tgt = 0, idex_pred_tgt = 0, branch_upd_tgt, bp_pred_tgt_if;
 
   regs32 RF(.clk(clk), .reset(reset), .rsel1(ifid_insn[19:15]), .rsel2(ifid_insn[24:20]),
@@ -62,7 +64,7 @@ module top_pipe (
             .a_sel(), .b_sel(ce_bsel), .is_ld(ce_ld), .is_st(ce_st), .is_br(ce_br),
             .is_jal(ce_jal), .is_jalr(ce_jalr), .is_lui(ce_lui), .is_auipc(ce_auipc),
             .is_opi(ce_opi), .is_op(ce_op),              .is_sys(ce_sys), .is_fence(ce_fence),
-             .is_m(ce_m), .m_op(ce_m_op), .is_mret(), .is_ill(ce_ill),
+             .is_m(ce_m), .m_op(ce_m_op),              .is_mret(ce_mret), .is_ill(ce_ill),
              .is_csr(ce_csr), .csr_num(), .i(idex_insn));
   mdiu MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
           .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
@@ -147,7 +149,25 @@ module top_pipe (
 
   always_comb begin
     bp_upd_enable = branch_is && !stall && !m_stall;
-    flush = !stall && flush_ex && !trap_flush && !timer_flush;
+    idex_fetch_bad = 1'b0;
+    if (idex_valid && !ce_ill) begin
+      if (ce_jal && (((idex_pc + jimm) & 32'h3) != 0))
+        idex_fetch_bad = 1'b1;
+      else if (ce_jalr && ((((a_ex + iimm) & 32'hFFFFFFFE) & 32'h3) != 0))
+        idex_fetch_bad = 1'b1;
+      else if (ce_br && ((((idex_pc + bimm) & 32'hFFFFFFFE) & 32'h3) != 0)) begin
+        case (ce_f3)
+          3'b000: if (alu_eq) idex_fetch_bad = 1'b1;
+          3'b001: if (!alu_eq) idex_fetch_bad = 1'b1;
+          3'b100: if (alu_slt_r) idex_fetch_bad = 1'b1;
+          3'b101: if (!alu_slt_r) idex_fetch_bad = 1'b1;
+          3'b110: if (alu_slt_u) idex_fetch_bad = 1'b1;
+          3'b111: if (!alu_slt_u) idex_fetch_bad = 1'b1;
+          default: idex_fetch_bad = 1'b0;
+        endcase
+      end
+    end
+    flush = !stall && flush_ex && !trap_flush && !timer_flush && !mret_flush;
     conflict = !stall && !flush && idex_valid &&
                ((idex_st && (pc_if == idex_ea)) ||
                 (exmem_valid && exmem_st && (pc_if == exmem_ea)));
@@ -155,13 +175,13 @@ module top_pipe (
 
   csrs_pipe CSR1(.clk(clk), .reset(reset), .halt(halt),
             .idex_valid(idex_valid), .idex_insn(idex_insn), .idex_pc(idex_pc),
-            .ce_sys(ce_sys), .ce_ill(ce_ill), .ce_csr(ce_csr), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
+            .ce_sys(ce_sys), .ce_ill(ce_ill), .ce_fetch_bad(idex_fetch_bad), .ce_mret(ce_mret), .ce_csr(ce_csr), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
             .ld_ok(ld_ok), .st_ok(st_ok), .stall(stall), .m_stall(m_stall),
             .exmem_valid(exmem_valid), .exmem_csr_en(exmem_csr_en), .exmem_csr_wen(exmem_csr_wen),
             .exmem_insn(exmem_insn), .exmem_f3(exmem_f3), .exmem_r1(exmem_r1),
             .idex_ld(idex_ld), .idex_st(idex_st), .idex_trap(idex_trap), .idex_stop(idex_stop),
             .idex_csr_en(idex_csr_en), .idex_csr_wen(idex_csr_wen),
-            .trap_flush(trap_flush), .timer_flush(timer_flush),
+            .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .mret_pc(mret_pc),
             .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_mtvec(cs_mtvec), .halt_out(halt_out));
   ldext LDX(.f3(exmem_f3), .raw(exmem_ld_raw), .ext(ldx_ex));
   always_ff @(posedge clk) begin
@@ -191,11 +211,15 @@ module top_pipe (
         idex_pc <= idex_pc; idex_insn <= idex_insn; idex_r1 <= idex_r1; idex_r2 <= idex_r2;
         ifid_valid <= ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
         ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
-      end else if (trap_flush || timer_flush) begin
-        exmem_valid <= 1'b0;
-        exmem_csr_en <= 1'b0; exmem_csr_wen <= 1'b0;
+      end else if (trap_flush || timer_flush || mret_flush) begin
+        exmem_valid <= mret_flush;
+        exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= 5'd0;
+        exmem_wben <= 1'b0; exmem_ld <= 1'b0; exmem_st <= 1'b0; exmem_stop <= 1'b0;
+        exmem_f3 <= 3'b0; exmem_ea <= idex_ea; exmem_sd_log <= 32'h0; exmem_sbe <= 4'h0;
+        exmem_wbval <= 32'h0; exmem_result <= 32'h0;
+        exmem_csr_en <= 1'b0; exmem_csr_wen <= 1'b0; exmem_r1 <= 32'h0;
         idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
-        pc_if <= cs_mtvec;
+        pc_if <= mret_flush ? mret_pc : cs_mtvec;
       end else if (flush) begin
         exmem_valid <= idex_valid;
         exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= ce_rd;
