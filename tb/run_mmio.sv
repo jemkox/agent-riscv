@@ -28,9 +28,21 @@ module run_mmio ();
          .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
 
   localparam PROG_WORDS = 1048576; /* 4 MB of word slots: covers a 0x100000 data blob */
+`ifdef DOOM_BIG
+  localparam [31:0] UART_ADDR = 32'h1FF0_0000; /* above the WAD blob */
+`else
   localparam [31:0] UART_ADDR = 32'h1000_0000;
+`endif
   logic [31:0] prog [0:PROG_WORDS-1];
   int n, done, cycles, uart_bytes, max_insns, dbg_on = 0, n_dbg = 0;
+`ifdef DOOM_BIG
+  localparam DBG_LIMIT = 999999;
+  localparam WAD_WORDS = 1049600; /* 4,198,400-byte WAD slot */
+  localparam [31:0] WAD_VADDR = 32'h00C0_0000;
+  logic [31:0] wprog [0:WAD_WORDS-1];
+`else
+  localparam DBG_LIMIT = 0;
+`endif
 
   initial begin
     $readmemh("build/m7/p.hex", prog);
@@ -43,6 +55,18 @@ module run_mmio ();
         clk = 0; #1;
       end
     end
+`ifdef DOOM_BIG
+    $readmemh("build/doom/wad.hex", wprog);
+    for (int i = 0; i < WAD_WORDS; i++) begin
+      if (wprog[i] != 0) begin
+        lwa = WAD_VADDR + (i << 2); lwd = wprog[i]; lwe = 1;
+        #1;
+        clk = 1; #1;
+        clk = 0; #1;
+      end
+    end
+    for (int i = 0; i < WAD_WORDS; i++) wprog[i] = 0; /* free sim memory */
+`endif
     lwe = 0;
     lwa = 0; lwd = 0;
     #1;
@@ -57,12 +81,14 @@ module run_mmio ();
       if (rv_valid) begin
         if (ex_st && (ex_sa == UART_ADDR) && ex_sbe[0]) begin
           $write("%c", ex_sd[7:0]);
+`ifdef UARTTRACE
           $display("#UBYTE %02x %c", ex_sd[7:0], ex_sd[7:0]);
+`endif
           uart_bytes = uart_bytes + 1;
         end
         n = n + 1;
       end
-      if ((dbg_on && n_dbg < 999999) || (cycles != 0 && (cycles % 4000000) == 0)) begin
+      if ((dbg_on && n_dbg < DBG_LIMIT) || (cycles != 0 && (cycles % 4000000) == 0)) begin
         $display("#DBG c=%0d halt=%0d ex_pc=%08x ex_insn=%08x ex_st=%0d ex_sa=%08x ex_rd=%0d ex_wv=%08x rv=%0d",
                  cycles, halt, ex_pc, ex_insn, ex_st, ex_sa, ex_rd, ex_wv, rv_valid);
         n_dbg = n_dbg + 1;

@@ -40,7 +40,7 @@ module cache32 (
   localparam int DC_LINES   = 4;
 `else
 `ifdef DOOM_BIG
-  localparam int BACK_WORDS = 4 * 1024 * 1024;  // 16 MB for the Doom testbench
+  localparam int BACK_WORDS = 8 * 1024 * 1024;  // 32 MB for the Doom testbench
   localparam int IC_LINES   = 1024;
   localparam int DC_LINES   = 1024;
 `else
@@ -78,7 +78,11 @@ module cache32 (
   int d_idx, d_tag, d_off, d_cache_base, sb;
   logic ic_hit, dc_hit, ic_p_ready, dc_p_ready, dreq, uart_store, uart_load;
   logic dc_ready_now, ic_ready_now, dc_cross_ready;
+`ifdef DOOM_BIG
+  localparam logic [31:0] UART_ADDR = 32'h1FF0_0000; /* above the WAD blob */
+`else
   localparam logic [31:0] UART_ADDR = 32'h1000_0000;
+`endif
 
   function [31:0] rbwb;
     input int addr;

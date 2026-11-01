@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 static void mark(unsigned c) {
-    *(volatile unsigned char *)(uintptr_t)0x10000000u = (unsigned char)c;
+    *(volatile unsigned char *)(uintptr_t)0x1FF00000u = (unsigned char)c;
 }
 int main(void) {
     mark('A');

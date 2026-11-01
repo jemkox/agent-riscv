@@ -28,12 +28,12 @@ UM_LOGS := $(foreach n,$(UM_NAMES),build/um/logs/$(n).rtl.log build/um/logs/$(n)
 MI_DIR := $(RVTEST_DIR)/rv32mi
 MI_CCFLAGS := -march=rv32im_zicsr_zifencei -mabi=ilp32
 MI_MACROS := $(RVTEST_DIR)/macros/scalar
-MI_NAMES := breakpoint csr illegal instret_overflow lh-misaligned lw-misaligned ma_addr ma_fetch mcsr sbreak scall shamt sw-misaligned zicntr
+MI_NAMES := breakpoint csr illegal instret_overflow lh-misaligned lw-misaligned ma_addr ma_fetch mcsr sbreak scall sh-misaligned shamt sw-misaligned zicntr
 MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um mi lat1 lat5 lat20 m7 fpga fpga_test doom_mem fpga_full build/vlt/run_hex build/vlt/run_mmio
+.PHONY: test regress lint clean synth ui um mi lat1 lat5 lat20 m7 fpga fpga_test doom_mem doom_probe fpga_full build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -210,6 +210,34 @@ build/vlt/run_mmio: build/vlt/run_mmio_lat$(CACHE_LAT)
 
 m7: build/vlt/run_mmio $(M7_HEXS)
 	@bad=0; mkdir -p build/m7/logs; for n in $(M7_NAMES); do cp build/m7/$$n.hex build/m7/p.hex; ./build/vlt/run_mmio > build/m7/logs/$$n.out; grep -q PASS build/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; fi
+
+# --- M10b Doom probe: crt0 + picolibc stdio over the fd-table fsys layer ---
+build/doom:
+	@mkdir -p build/doom
+
+build/doom/wad.bin:
+	@cp /home/jemko/agent-workspace/downloads/doomwad/doom1.wad $@
+
+build/doom/wad.hex: build/doom/wad.bin | build/doom
+	python3 tools/bin2hex.py $< $@
+
+build/doom/fsys.o: doom/fsys_rv32.c | build/doom
+	$(CC) $(CCFLAGS) -O1 -c --specs=picolibc.specs -o $@ $<
+
+build/doom/probe.elf: doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_fs.c build/doom/fsys.o | build/doom
+	$(CC) $(CCFLAGS) -O1 -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_fs.c build/doom/fsys.o
+
+build/doom/probe.bin: build/doom/probe.elf | build/doom
+	$(OC) -O binary $< $@
+
+build/doom/probe.hex: build/doom/probe.bin | build/doom
+	python3 tools/bin2hex.py $< $@
+
+build/vlt_big/run_mmio_big: $(RTL) $(TB_MMIO) | build/doom
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DDOOM_BIG -DUARTTRACE -DCACHE_LAT=5 --Mdir build/vlt_big -o run_mmio_big $(RTL) $(TB_MMIO)
+
+doom_probe: build/vlt_big/run_mmio_big build/doom/probe.hex build/doom/wad.hex
+	@mkdir -p build/doom/logs; cp build/doom/probe.hex build/m7/p.hex; ./build/vlt_big/run_mmio_big > build/doom/logs/probe.out; grep "#UBYTE" build/doom/logs/probe.out | head -n 30; grep "#UART_BYTES\|#M7SUM\|#BPSTAT" build/doom/logs/probe.out
 
 DOOM_TB := tb/run_doom.sv
 DOOM_MAIN := tb/main_doom.cpp

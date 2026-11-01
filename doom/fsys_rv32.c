@@ -7,7 +7,7 @@
 #include <string.h>
 #include <stdint.h>
 
-#define UART_ADDR 0x10000000u
+#define UART_ADDR 0x1FF00000u
 #define WAD_VADDR 0x00C00000u
 #define WAD_LEN   4196020u
 
