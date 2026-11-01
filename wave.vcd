@@ -1,0 +1,465 @@
+$date
+	Sun Nov  1 02:26:58 2026
+$end
+$version
+	Icarus Verilog
+$end
+$timescale
+	1s
+$end
+$scope module run_hex $end
+$var wire 1 ! wben $end
+$var wire 1 " rv_valid $end
+$var wire 1 # halt $end
+$var wire 32 $ ex_wv [31:0] $end
+$var wire 1 % ex_st $end
+$var wire 32 & ex_sd [31:0] $end
+$var wire 4 ' ex_sbe [3:0] $end
+$var wire 32 ( ex_sa [31:0] $end
+$var wire 5 ) ex_rd [4:0] $end
+$var wire 32 * ex_pc [31:0] $end
+$var wire 32 + ex_insn [31:0] $end
+$var reg 1 , clk $end
+$var reg 32 - lwa [31:0] $end
+$var reg 32 . lwd [31:0] $end
+$var reg 1 / lwe $end
+$var reg 1 0 reset $end
+$var integer 32 1 cycles [31:0] $end
+$var integer 32 2 done [31:0] $end
+$var integer 32 3 n [31:0] $end
+$scope module T $end
+$var wire 1 , clk $end
+$var wire 32 4 ex_insn [31:0] $end
+$var wire 32 5 ex_pc [31:0] $end
+$var wire 1 % ex_st $end
+$var wire 1 ! ex_wben $end
+$var wire 32 6 ex_wv [31:0] $end
+$var wire 32 7 lwa [31:0] $end
+$var wire 32 8 lwd [31:0] $end
+$var wire 1 / lwe $end
+$var wire 1 0 reset $end
+$var wire 1 " rv_valid $end
+$var wire 32 9 uimm [31:0] $end
+$var wire 32 : simm [31:0] $end
+$var wire 32 ; rf_r2 [31:0] $end
+$var wire 32 < rf_r1 [31:0] $end
+$var wire 32 = ldx_raw [31:0] $end
+$var wire 32 > jimm [31:0] $end
+$var wire 32 ? iimm [31:0] $end
+$var wire 32 @ fetch_insn [31:0] $end
+$var wire 32 A ex_sd [31:0] $end
+$var wire 4 B ex_sbe [3:0] $end
+$var wire 32 C ex_sa [31:0] $end
+$var wire 5 D ex_rd [4:0] $end
+$var wire 1 E ceif_st $end
+$var wire 5 F ceif_rs2 [4:0] $end
+$var wire 5 G ceif_rs1 [4:0] $end
+$var wire 1 H ceif_opi $end
+$var wire 1 I ceif_op $end
+$var wire 1 J ceif_ld $end
+$var wire 1 K ceif_jalr $end
+$var wire 1 L ceif_br $end
+$var wire 1 M ce_sys $end
+$var wire 1 N ce_st $end
+$var wire 5 O ce_rs2 [4:0] $end
+$var wire 5 P ce_rs1 [4:0] $end
+$var wire 5 Q ce_rd [4:0] $end
+$var wire 1 R ce_opi $end
+$var wire 1 S ce_op $end
+$var wire 1 T ce_lui $end
+$var wire 1 U ce_ld $end
+$var wire 1 V ce_jalr $end
+$var wire 1 W ce_jal $end
+$var wire 1 X ce_ill $end
+$var wire 1 Y ce_fence $end
+$var wire 3 Z ce_f3 [2:0] $end
+$var wire 1 [ ce_bsel $end
+$var wire 1 \ ce_br $end
+$var wire 1 ] ce_auipc $end
+$var wire 4 ^ ce_alu_op [3:0] $end
+$var wire 32 _ bimm [31:0] $end
+$var wire 1 ` alu_slt_u $end
+$var wire 1 a alu_slt_r $end
+$var wire 32 b alu_res [31:0] $end
+$var wire 1 c alu_eq $end
+$var reg 32 d a_ex [31:0] $end
+$var reg 32 e aluB_ex [31:0] $end
+$var reg 32 f b_ex [31:0] $end
+$var reg 32 g br_tgt_ex [31:0] $end
+$var reg 1 h conflict $end
+$var reg 1 i exif_fwd $end
+$var reg 32 j exmem_ea [31:0] $end
+$var reg 3 k exmem_f3 [2:0] $end
+$var reg 1 l exmem_fwd $end
+$var reg 32 m exmem_insn [31:0] $end
+$var reg 1 n exmem_ld $end
+$var reg 32 o exmem_pc [31:0] $end
+$var reg 5 p exmem_rd [4:0] $end
+$var reg 32 q exmem_result [31:0] $end
+$var reg 4 r exmem_sbe [3:0] $end
+$var reg 32 s exmem_sd_log [31:0] $end
+$var reg 32 t exmem_sd_raw [31:0] $end
+$var reg 2 u exmem_ssz [1:0] $end
+$var reg 1 v exmem_st $end
+$var reg 1 w exmem_stop $end
+$var reg 1 x exmem_valid $end
+$var reg 1 y exmem_wben $end
+$var reg 32 z exmem_wbval [31:0] $end
+$var reg 1 { flush $end
+$var reg 1 | flush_ex $end
+$var reg 1 # halt $end
+$var reg 1 } id_read_a $end
+$var reg 1 ~ id_read_b $end
+$var reg 32 !" idex_ea [31:0] $end
+$var reg 32 "" idex_insn [31:0] $end
+$var reg 1 #" idex_ld $end
+$var reg 32 $" idex_pc [31:0] $end
+$var reg 32 %" idex_r1 [31:0] $end
+$var reg 32 &" idex_r2 [31:0] $end
+$var reg 4 '" idex_sbe [3:0] $end
+$var reg 32 (" idex_sd_log [31:0] $end
+$var reg 32 )" idex_sd_raw [31:0] $end
+$var reg 2 *" idex_ssz [1:0] $end
+$var reg 1 +" idex_st $end
+$var reg 1 ," idex_stop $end
+$var reg 1 -" idex_valid $end
+$var reg 1 ." idex_wben $end
+$var reg 32 /" idex_wbval [31:0] $end
+$var reg 32 0" ifid_insn [31:0] $end
+$var reg 32 1" ifid_pc [31:0] $end
+$var reg 32 2" ifid_r1_fwd [31:0] $end
+$var reg 32 3" ifid_r2_fwd [31:0] $end
+$var reg 1 4" ifid_valid $end
+$var reg 1 5" ld_ok $end
+$var reg 32 6" ldx_ex [31:0] $end
+$var reg 1 7" mwb_fwd $end
+$var reg 32 8" mwb_insn [31:0] $end
+$var reg 32 9" mwb_pc [31:0] $end
+$var reg 5 :" mwb_rd [4:0] $end
+$var reg 32 ;" mwb_sa [31:0] $end
+$var reg 4 <" mwb_sbe [3:0] $end
+$var reg 32 =" mwb_sd [31:0] $end
+$var reg 1 >" mwb_st $end
+$var reg 1 ?" mwb_stop $end
+$var reg 1 @" mwb_valid $end
+$var reg 1 A" mwb_wben $end
+$var reg 32 B" mwb_wv [31:0] $end
+$var reg 1 C" mwif_fwd $end
+$var reg 32 D" pc_if [31:0] $end
+$var reg 1 E" read_a $end
+$var reg 1 F" read_b $end
+$var reg 1 G" st_ok $end
+$var reg 1 H" stall $end
+$var reg 1 I" taken_ex $end
+$scope module AL $end
+$var wire 32 J" a [31:0] $end
+$var wire 32 K" b [31:0] $end
+$var wire 32 L" sub [31:0] $end
+$var wire 1 ` sltu_r $end
+$var wire 1 a slt_r $end
+$var wire 5 M" sh [4:0] $end
+$var wire 4 N" op [3:0] $end
+$var wire 1 c eq $end
+$var reg 32 O" res [31:0] $end
+$upscope $end
+$scope module CE $end
+$var wire 32 P" i [31:0] $end
+$var wire 1 Q" is_mret $end
+$var wire 5 R" rs2 [4:0] $end
+$var wire 5 S" rs1 [4:0] $end
+$var wire 5 T" rd [4:0] $end
+$var wire 7 U" opc [6:0] $end
+$var wire 7 V" op7 [6:0] $end
+$var wire 1 M is_sys $end
+$var wire 1 N is_st $end
+$var wire 1 R is_opi $end
+$var wire 1 S is_op $end
+$var wire 1 T is_lui $end
+$var wire 1 U is_ld $end
+$var wire 1 V is_jalr $end
+$var wire 1 W is_jal $end
+$var wire 1 Y is_fence $end
+$var wire 1 \ is_br $end
+$var wire 1 ] is_auipc $end
+$var wire 3 W" f3 [2:0] $end
+$var reg 1 X" a_sel $end
+$var reg 4 Y" alu_op [3:0] $end
+$var reg 1 [ b_sel $end
+$var reg 1 X is_ill $end
+$upscope $end
+$scope module CEID $end
+$var wire 32 Z" i [31:0] $end
+$var wire 1 [" is_mret $end
+$var wire 5 \" rs2 [4:0] $end
+$var wire 5 ]" rs1 [4:0] $end
+$var wire 5 ^" rd [4:0] $end
+$var wire 7 _" opc [6:0] $end
+$var wire 7 `" op7 [6:0] $end
+$var wire 1 a" is_sys $end
+$var wire 1 E is_st $end
+$var wire 1 H is_opi $end
+$var wire 1 I is_op $end
+$var wire 1 b" is_lui $end
+$var wire 1 J is_ld $end
+$var wire 1 K is_jalr $end
+$var wire 1 c" is_jal $end
+$var wire 1 d" is_fence $end
+$var wire 1 L is_br $end
+$var wire 1 e" is_auipc $end
+$var wire 3 f" f3 [2:0] $end
+$var reg 1 g" a_sel $end
+$var reg 4 h" alu_op [3:0] $end
+$var reg 1 i" b_sel $end
+$var reg 1 j" is_ill $end
+$upscope $end
+$scope module IM $end
+$var wire 32 k" i [31:0] $end
+$var reg 32 l" bimm [31:0] $end
+$var reg 32 m" iimm [31:0] $end
+$var reg 32 n" jimm [31:0] $end
+$var reg 32 o" simm [31:0] $end
+$var reg 32 p" uimm [31:0] $end
+$upscope $end
+$scope module MM $end
+$var wire 1 , clk $end
+$var wire 32 q" ia [31:0] $end
+$var wire 32 r" la [31:0] $end
+$var wire 32 s" lwa [31:0] $end
+$var wire 32 t" lwd [31:0] $end
+$var wire 1 / lwe $end
+$var wire 32 u" sa [31:0] $end
+$var wire 32 v" sd [31:0] $end
+$var wire 2 w" ssz [1:0] $end
+$var wire 1 x" sw $end
+$var wire 32 y" sbase [31:0] $end
+$var wire 32 z" ld [31:0] $end
+$var wire 32 {" lbase [31:0] $end
+$var wire 32 |" id [31:0] $end
+$var parameter 32 }" BYTES $end
+$var parameter 32 ~" MASK $end
+$var parameter 32 !# WORDS $end
+$upscope $end
+$scope module RF $end
+$var wire 1 , clk $end
+$var wire 1 0 reset $end
+$var wire 5 "# rsel1 [4:0] $end
+$var wire 5 ## rsel2 [4:0] $end
+$var wire 32 $# wdata [31:0] $end
+$var wire 1 %# wena $end
+$var wire 5 &# wsel [4:0] $end
+$var wire 32 '# rs2 [31:0] $end
+$var wire 32 (# rs1 [31:0] $end
+$scope begin $ivl_for_loop0 $end
+$var integer 32 )# i [31:0] $end
+$upscope $end
+$upscope $end
+$upscope $end
+$scope begin $ivl_for_loop1 $end
+$var integer 32 *# k [31:0] $end
+$upscope $end
+$upscope $end
+$enddefinitions $end
+$comment Show the parameter values. $end
+$dumpall
+b10000000000000000 !#
+b111111111111111111 ~"
+b1000000000000000000 }"
+$end
+#12304
+$dumpvars
+b1000000000000 *#
+b100000 )#
+b0 (#
+b0 '#
+b0 &#
+0%#
+b0 $#
+b0 ##
+b0 "#
+b0 |"
+b0 {"
+b100000000000010010011 z"
+b0 y"
+0x"
+b0 w"
+b0 v"
+b0 u"
+b0 t"
+b0 s"
+b0 r"
+b11000 q"
+b0 p"
+b0 o"
+b0 n"
+b0 m"
+b0 l"
+b0 k"
+1j"
+0i"
+b0 h"
+0g"
+b0 f"
+0e"
+0d"
+0c"
+0b"
+0a"
+b0 `"
+b0 _"
+b0 ^"
+b0 ]"
+b0 \"
+0["
+b0 Z"
+b0 Y"
+0X"
+b0 W"
+b0 V"
+b0 U"
+b0 T"
+b0 S"
+b0 R"
+0Q"
+b0 P"
+b0 O"
+b0 N"
+b0 M"
+b0 L"
+b0 K"
+b0 J"
+0I"
+0H"
+0G"
+0F"
+0E"
+b11000 D"
+0C"
+b0 B"
+0A"
+1@"
+1?"
+0>"
+b0 ="
+b0 <"
+b0 ;"
+b0 :"
+b1000 9"
+b1110011 8"
+07"
+b11111111111111111111111110010011 6"
+05"
+14"
+b0 3"
+b0 2"
+b10100 1"
+b0 0"
+b0 /"
+0."
+1-"
+1,"
+0+"
+b0 *"
+b0 )"
+b0 ("
+b0 '"
+b0 &"
+b0 %"
+b10000 $"
+0#"
+b0 ""
+b0 !"
+0~
+0}
+0|
+0{
+b0 z
+0y
+1x
+1w
+0v
+b0 u
+b0 t
+b0 s
+b0 r
+b0 q
+b0 p
+b1100 o
+0n
+b0 m
+0l
+b0 k
+b0 j
+0i
+0h
+b10100 g
+b0 f
+b0 e
+b0 d
+1c
+b0 b
+0a
+0`
+b0 _
+b0 ^
+0]
+0\
+0[
+b0 Z
+0Y
+1X
+0W
+0V
+0U
+0T
+0S
+0R
+b0 Q
+b0 P
+b0 O
+0N
+0M
+0L
+0K
+0J
+0I
+0H
+b0 G
+b0 F
+0E
+b0 D
+b0 C
+b0 B
+b0 A
+b0 @
+b0 ?
+b0 >
+b100000000000010010011 =
+b0 <
+b0 ;
+b0 :
+b0 9
+b0 8
+b0 7
+b0 6
+b1000 5
+b1110011 4
+b11 3
+b1 2
+b110 1
+00
+0/
+b0 .
+b0 -
+0,
+b1110011 +
+b1000 *
+b0 )
+b0 (
+b0 '
+b0 &
+0%
+b0 $
+1#
+1"
+0!
+$end

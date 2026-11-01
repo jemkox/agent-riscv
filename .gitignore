@@ -1,5 +1,2 @@
 build/
-obj_dir/
-wave.vcd
-__pycache__/
-*.vvp
+formal/pipeline/
