@@ -447,7 +447,9 @@ hdl make synth
 - The benchmark score is from the local deterministic `bench.c` M7 self-check program, not SPEC.
 - Branch prediction accuracy is measured from `build/m7/logs/bench.out`, not from official benchmark suites.
 
-FINAL ACCEPTANCE: MET
+NOTE: the section below was the M1-M8 acceptance snapshot (toy FPGA top, single-cycle
+`MUL`/`DIV` MDU, no Doom). Under the amended PROMPT.md goals it is NOT final acceptance:
+F4 (SB_MAC16 DSP MDU round, Fmax) and M10 (Doom frames/speed/playable) are still open.
 
 ## M10a: fast multiplier
 
@@ -623,20 +625,21 @@ hdl make doom_mem CACHE_LAT=1
 | 2 | structural try: `if/else-if` -> `case` + nibble-decoded CSR write enables (regressed, reverted) | 12.34-12.72 MHz (rejected) | 4176 |
 | 3 | adopted: nextpnr timing-driven re-optimization search (`--seed 6`, budget `--freq 13`) | 13.67 MHz | 4295 |
 | 4 | review round: removed `ifdef FPGA` const-0 counter stubs (real 32-bit `mcycle`/`minstret` state + retire increments, hi-word writable but no rollover carry) AND rewrote both 12-way `if/else-if` CSR READ selects (`old`, `idex_old`) as parallel OR-of-ternary reductions (each `rsel` matches <=1 field, so semantics unchanged) | 12.88 MHz (PASS at 12.50 MHz budget, `--seed 6`) | 4808 |
+| 5 | SB_MAC16 DSP MDU round (review item 4): FPGA MDU replaced with 4-cycle MUL on one `SB_MAC16` (four 17x17 signed/unsigned partials `$signed(aHe)*$signed(bLe)` etc., accumulated with 16-bit lane adders + carry bits, no 64-bit ripple adds), DIV/REM unchanged restoring 33-step; `synth_ice40 -dsp`, budget raised `FPGA_FREQ=13` | 13.20 MHz routed (PASS at 13.00 MHz, `--seed 6`; post-synth 13.47 MHz) | 4710 |
 
 ### How to run
 ```sh
 hdl make regress
 hdl make fpga_full        # build/cpu_full.bin, yosys synth + nextpnr at --freq $(FPGA_FREQ) (default 12.5) --seed $(FPGA_SEED) (default 6)
 hdl make fpga_test
-hdl make mdiu_tb          # builds tb/mdiu_tb.sv + rtl/mdiu_fpga.sv with iverilog, runs 46 cases, prints TEST PASSED
-hdl yosys -p 'read_verilog -sv rtl/mdiu_fpga.sv; synth_ice40 -top mdiu_fpga -json build/mdiu_fpga.json; stat'   # 1819 cells: 1173 SB_LUT4 + 314 SB_CARRY + 332 DFF
+hdl make mdiu_tb          # builds tb/mdiu_tb.sv + rtl/mdiu_fpga.sv with verilator --binary, runs 46 cases, prints TEST PASSED
+hdl yosys -p 'read_verilog -sv -DFPGA rtl/mdiu_fpga.sv; synth_ice40 -dsp -top mdiu_fpga -json build/mdiu_fpga.json; stat'   # 1606 cells: 1000 SB_LUT4 + 300 SB_CARRY + 1 SB_MAC16 + 305 DFF
 ```
 
 ### Honest limitations
-- FPGA MDU is review option (b) schoolbook (~33 cycles for MUL too): chosen for the LUT budget; the SB_MAC16 DSP option (a) (4x 16x16 for the 32x32 product, 8 exist on UP5K, yosys `-dsp`) is the next planned optimization for FPGA Fmax/critical path.
-- Fmax table rows 1/3 measured WITH the const-0 counter stubs (13.58/13.67 MHz at budget 13, 4295 LC). After restoring the real counters + parallel read selects (row 4) the same top is 4808 LC / 12.88 MHz routed (PASS at 12.5, seed 6, 8 `SB_RAM40_4K`, 0 SPRAM, 0 `SB_MAC16`); the +613 LC and ~0.8 MHz cost is the counter state itself. Next round (SB_MAC16 DSP MDU) is expected to cut the schoolbook 65-bit adder chain and recover budget headroom; the budget/seed alone no longer count as optimization rounds (checklist wording).
-- Full-FPGA Doom performance will depend on the FPGA MDU latency until option (a) lands.
+- FPGA MDU is now review option (a): MUL/MULH/MULHSU/MULHU complete in 4 cycles using ONE `SB_MAC16` (yosys `synth_ice40 -dsp` mapped the four 17x17 `$signed` partial products to it, one partial per cycle), accumulated by 16-bit lane adders with carry bits (short chains, no 64-bit ripple). DIV/DIVU/REM/REMU stay iterative restoring (~33 cycles) — UM `div/rem/remu` IPC on SIM is unchanged (`0.220-0.223`) because the SIM build uses `rtl/mdiu_fast.sv` anyway, and FPGA `div` latency is unchanged.
+- Fmax table rows 1/3 measured WITH the const-0 counter stubs (13.58/13.67 MHz at budget 13, 4295 LC). Row 4 (real counters + parallel CSR read selects) is 4808 LC / 12.88 MHz. Row 5 (this DSP-MDU round, budget raised to 13): 4710 LC, `1` `SB_MAC16`, `8` `SB_RAM40_4K`, `0` SPRAM, 13.20 MHz routed PASS at 13.00 MHz — a net gain vs row 4 (both Fmax and LC) with the checklist's DSP requirement now met; it is still below the 13.67 MHz row-3 number, which used the CSR-counter stubs and remains the honest gap.
+- Full-FPGA Doom performance now pays 4-cycle MUL instead of ~33; DIV-heavy code still pays ~33 on FPGA.
 
 ### Critical path (nextpnr `--report build/cpu_full_crit.txt`, 13.58 MHz)
 - Longest clk->clk chain: `exmem_insn` DFF -> CSRS `mstatus_wr` -> `inhibit_instret` -> `newv` (deep else-if mux cascade) -> `st_mtimecmp` -> `st_mcause` (32-bit SB_CARRY ripple on the write logic) -> `idex_wben`/`idex_stop` -> `pc_if`/`ifid_pc` CEN.
@@ -681,7 +684,7 @@ hdl make doom_probe   # builds fsys.o + probe elf/hex + wad.hex + run_mmio_big (
 | Item | Result |
 |---|---|
 | `hdl make regress` (N=500/5000) | `ALL PASS` |
-| `hdl make um` / `mi` / `ui` / `m7` | `ALL UM PASS`, `ALL MI PASS`, `ALL UI PASS`, `ALL M7 PASS` |
+| `hdl make um` / `mi` / `ui` / `m7` | `ALL UM PASS`, `ALL MI PASS` (only after restoring the `minstret` low->hi rollover carry in `rtl/csrs.sv` for ALL builds — at c006154 that carry was deleted and `instret_overflow` FAILed; re-measured PASS in this tree), `ALL UI PASS`, `ALL M7 PASS` |
 | `hdl make mdiu_tb` | `TEST PASSED (46 cases)` |
 | FPGA MDU standalone | `1819` cells (`1173 SB_LUT4 + 314 SB_CARRY + 332` DFF) |
 | FPGA full `build/cpu_full.bin` | `4808/5280 LC` (91%), `8` BRAM, `0` SPRAM, `0` `SB_MAC16`, Fmax `12.88 MHz` (PASS at 12.50 MHz, `--seed 6`) |
@@ -689,4 +692,25 @@ hdl make doom_probe   # builds fsys.o + probe elf/hex + wad.hex + run_mmio_big (
 
 ### Next
 - F4 checklist item: FPGA MDU on `SB_MAC16` DSP blocks (MUL fast on FPGA too) + one more critical-path round; re-measure LC/BRAM/DSP/Fmax, then final checklist numbers.
+
+## F4 p3 (round 5): SB_MAC16 DSP MDU on the full FPGA top (MUL in 4 cycles)
+
+### Worked
+- `rtl/mdiu_fpga.sv` rewritten (review item 4): MUL path issue cycle stores 17-bit signed/unsigned half mix (`aHe/aLe/bHe/bLe`, sign-extension per op) and seeds `acc` with `p_il = $signed({1'b0,aL})*$signed({1'b0,bL})`; the next 3 cycles feed the three remaining 17x17 `$signed` partials (`p_hl`, `p_lh`, `p_hh`) through ONE `SB_MAC16` per cycle (one partial per cycle) and accumulate with 16-bit lane adders + carry bits (`hl1/hl2/hl3`, `lh*`, `hh1/hh2`) - no 64-bit ripple add anywhere; MULH/MULHSU/MULHU high word comes straight from the lane adds, MUL low word is `acc[31:0]`. MUL issue->done is now 4 EX cycles (was ~33); DIV/DIVU/REM/REMU still the 33-step restoring divider; div-by-zero and `min/-1` still resolved at issue.
+- `Makefile`: `synth_ice40 -dsp` added to the `build/cpu_full.json` rule; `FPGA_FREQ` raised via the command line for this round; `mdiutb` target switched from `iverilog` to `verilator --binary --timing -O1` (`build/vlt_mdtb/mdtb`) because Icarus approximates the `$signed` half-mixes and prints `sorry: constant selects` for the step `case` (it reported 15 false failures); Verilator is the authoritative check.
+- `tb/mdiu_tb.sv` (46 cases, unchanged expectations) re-run against the new unit: `TEST PASSED (46 cases)`.
+- Standalone unit stat verified with a real `hdl yosys ... synth_ice40 -dsp` run: `1606` cells = `1000 SB_LUT4 + 300 SB_CARRY + 1 SB_MAC16 + 305` DFF (was `1819`).
+- `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=6`: post-synth `13.47 MHz`, routed `13.20 MHz (PASS at 13.00 MHz)`, `build/cpu_full.bin` regenerated; route critical path now runs through the DSP (`CPU.MD.p_hl_SB_MAC16_O_DSP...`).
+
+### Metrics (round 5)
+| Item | Result |
+|---|---|
+| `hdl make test` / `regress` / `ui` / `um` / `mi` / `m7` / `fpga_test` / `lat5` / `lat20` | `ALL PASS`, `ALL PASS`, `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, `ALL M7 PASS`, PASS, `ALL PASS`, `ALL PASS` |
+| `hdl make mdiu_tb` (new DSP MDU, Verilator) | `TEST PASSED (46 cases)` |
+| FPGA MDU standalone (`synth_ice40 -dsp`) | `1606` cells: `1000 SB_LUT4 + 300 SB_CARRY + 1 SB_MAC16 + 305` DFF |
+| FPGA full `build/cpu_full.bin` (`-dsp`, budget 13, seed 6) | `4710/5280 LC` (89%), `8` `SB_RAM40_4K`, `0` SPRAM, `1` `SB_MAC16`, Fmax `13.20 MHz` (PASS at 13.00 MHz) |
+| official UM aggregate (SIM, unchanged unit) | `INSN=1917 CYCLES=3079 IPC=0.623` |
+
+### Next
+- Doom (M10): commit the working-tree fixes (store-stall `idex_valid && !stall` cache MM hookup in `rtl/top_pipe.sv`, byte-exact WAD copy, `fsys_rv32.c` `WAD_LEN` + exact `doom1.wad` open, `w_wad.c` `filelump_t` upstream field order, `-iwad doom1.wad` + `doomgeneric_Tick()` loop in `port_rv32.c`) after adding a directed load-use-then-store test (`lw a2,..; sw x,16(a2)`) and removing the leftover debug prints in `doom/src/*`, `doom/crt0_rv32.S`, `rtl/cache32.sv` DOOM_BIG debug ports; then real frame PNGs from backing RAM and P1/P2/P3 (frames/s, >=15M cycles/s sim speed, playable).
 - Doom: fix mission/gamemode detection so the doom1 blob is treated as shareware (currently the `iwads[]` name table picks `doom2.wad` -> `gamemode = commercial` -> `P_InitSlidingDoorFrames` looks up DOOM2-only `SW1BLUE` and dies); then `frames > 0` PPMs + P1/P2/P3 numbers.

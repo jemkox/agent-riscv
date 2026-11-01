@@ -2,6 +2,10 @@
 // Drives 46 MUL/MULH/MULHSU/MULHU/DIV/DIVU/REM/REMU cases and compares
 // against SV integer math. Self-checking; prints TEST PASSED / FAILED.
 /* verilator lint_off TIMESCALEMOD */
+/* verilator lint_off WIDTHTRUNC */
+/* verilator lint_off DECLFILENAME */
+/* verilator lint_off UNUSEDSIGNAL */
+/* verilator lint_off BLKSEQ */
 module mdui_tb ();
   logic clk = 0;
   logic reset = 1;

@@ -36,7 +36,7 @@ MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test doom_mem doom_probe doom_probe2 doom_elf fpga_full
+.PHONY: test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -219,7 +219,7 @@ build/doom:
 	@mkdir -p build/doom
 
 build/doom/wad.bin: $(WAD_SRC) | build/doom
-	@cp $< $@
+	cp $< $@
 
 build/doom/wad.hex: build/doom/wad.bin | build/doom
 	python3 tools/bin2hex.py $< $@
@@ -235,18 +235,6 @@ build/doom/probe.bin: build/doom/probe.elf | build/doom
 
 build/doom/probe.hex: build/doom/probe.bin | build/doom
 	python3 tools/bin2hex.py $< $@
-
-build/doom/probe2.elf: doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_wad.c build/doom/fsys.o | build/doom
-	$(CC) $(CCFLAGS) -O1 -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_wad.c build/doom/fsys.o
-
-build/doom/probe2.bin: build/doom/probe2.elf | build/doom
-	$(OC) -O binary $< $@
-
-build/doom/probe2.hex: build/doom/probe2.bin | build/doom
-	python3 tools/bin2hex.py $< $@
-
-doom_probe2: build/vlt_big/run_mmio_big build/doom/probe2.hex build/doom/wad.hex
-	@mkdir -p build/doom/logs; cp build/doom/probe2.hex build/m7/p.hex; ./build/vlt_big/run_mmio_big > build/doom/logs/probe2.out; grep "#UBYTE" build/doom/logs/probe2.out | head -n 30; grep "#UART_BYTES\|#M7SUM\|#BPSTAT" build/doom/logs/probe2.out
 
 build/vlt_big/run_mmio_big: $(RTL) $(TB_MMIO) | build/doom
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DDOOM_BIG -DUARTTRACE -DCACHE_LAT=5 --Mdir build/vlt_big -o run_mmio_big $(RTL) $(TB_MMIO)
@@ -342,7 +330,7 @@ rtl/fpga_prog_init.sv: build/fpga_prog.hex
 FPGA_PIPE_RTL := rtl/fpga_pipe_top.sv rtl/cache32_fpga.sv $(filter-out rtl/mdiu_fast.sv,$(RTL_NO_CACHE)) rtl/mdiu_fpga.sv
 
 build/cpu_full.json: $(FPGA_PIPE_RTL) rtl/fpga_prog_init.sv | build
-	@yosys -p 'read_verilog -sv -Irtl -DFPGA $(FPGA_PIPE_RTL); synth_ice40 -top fpga_pipe_top -json build/cpu_full.json; stat' > build/cpu_full_syn.log
+	@yosys -p 'read_verilog -sv -Irtl -DFPGA $(FPGA_PIPE_RTL); synth_ice40 -dsp -top fpga_pipe_top -json build/cpu_full.json; stat' > build/cpu_full_syn.log
 
 build/cpu_full.asc: build/cpu_full.json | build
 	@nextpnr-ice40 --up5k --package sg48 --json build/cpu_full.json --asc build/cpu_full.asc --freq $(FPGA_FREQ) --seed $(FPGA_SEED) > build/cpu_full_route.log 2>&1
@@ -359,8 +347,8 @@ synth:
 	verilator --lint-only -Wall --timing $(RTL_SINGLE) $(TB)
 	yosys -p 'read_verilog -sv -Irtl -DCACHE_LAT=2 $(SYN_FILES); synth -top top_pipe; stat'
 
-build/mdiu_tb.vvp: tb/mdiu_tb.sv rtl/mdiu_fpga.sv | build
-	iverilog -g2012 -o $@ tb/mdiu_tb.sv rtl/mdiu_fpga.sv
+build/vlt_mdtb/mdtb: tb/mdiu_tb.sv rtl/mdiu_fpga.sv | build
+	verilator --binary --timing -O1 --Wall -o mdtb $(filter %.sv,$^) --Mdir build/vlt_mdtb
 
-mdiu_tb: build/mdiu_tb.vvp
-	vvp build/mdiu_tb.vvp | grep -E 'TEST (PASSED|FAILED)'
+mdiu_tb: build/vlt_mdtb/mdtb
+	@./build/vlt_mdtb/mdtb | grep -E 'TEST (PASSED|FAILED)'
