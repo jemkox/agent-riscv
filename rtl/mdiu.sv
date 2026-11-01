@@ -51,6 +51,17 @@ module mdiu (
   logic n_neg_r;
   logic [63:0] new_rem;
 
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire signed [63:0] a_s64 = {{32{a[31]}}, a};
+  wire signed [63:0] b_s64 = {{32{b[31]}}, b};
+  wire [63:0] a_u64 = {32'h0, a};
+  wire [63:0] b_u64 = {32'h0, b};
+  wire signed [63:0] mul_ss = a_s64 * $signed(b_s64);
+  wire signed [63:0] mul_su = a_s64 * $signed(b_u64);
+  wire [63:0] mul_uu = a_u64 * b_u64;
+  wire [31:0] mul_ll = a * b;
+  /* verilator lint_on UNUSEDSIGNAL */
+
   always_comb begin
     n_active = active;
     n_done = 1'b0;
@@ -90,7 +101,14 @@ module mdiu (
         n_m_b = b;
         n_p = 64'h0;
         n_step = 6'd0;
-        n_active = 1'b1;
+        n_active = 1'b0;
+        n_done = 1'b1;
+        case (op)
+          3'd0: n_result = mul_ll;
+          3'd1: n_result = mul_ss[63:32];
+          3'd2: n_result = mul_su[63:32];
+          default: n_result = mul_uu[63:32];
+        endcase
       end else if (b == 32'h0) begin
         n_active = 1'b0;
         n_done = 1'b1;

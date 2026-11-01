@@ -54,6 +54,34 @@ M7: Memory-mapped UART at a fixed address that the testbench prints. crt0.S + li
 M8 FPGA: Make an FPGA top (cpu + block-RAM memory + UART TX pin) for iCE40 UP5K. Run yosys synth_ice40 → nextpnr-ice40 → icepack until it places, routes and produces build/cpu.bin. Report LUTs used (of 5280), BRAM used, and Max frequency. Then OPTIMIZE: find the critical path from the nextpnr report, improve it (retime, split logic, simplify forwarding/compare paths), and rerun. Keep a table of each optimization and its Fmax/LUT effect. Regression must still pass after every change.
 M9 (stretch, in order, only after M8 is committed): dual-issue in-order superscalar; RV32C compressed; RV32A. Full regression + FPGA build after each; fix or revert if it breaks.
 
+## M10: DOOM IN SIMULATION (new goal, after FINAL ACCEPTANCE)
+FINAL ACCEPTANCE (M1-M8) is done; do not redo it. The new goal is to run the shareware Doom on THIS 5-stage
+RV32IM CPU (rtl/top_pipe.sv) in Verilator simulation. Keep every existing test passing (`hdl make test`, `ui`, `um`,
+`regress`, `m7`) after each step, and commit after each step below.
+Inputs (already downloaded, read-only - copy what you need into the project):
+- Doom source: ~/agent-workspace/downloads/doomgeneric (port layer: implement doomgeneric_rv32.c with DG_Init,
+  DG_DrawFrame, DG_SleepMs, DG_GetTicksMs, DG_GetKey, DG_SetWindowTitle; see doomgeneric_xlib.c for an example).
+- Game data: ~/agent-workspace/downloads/doomwad/doom1.wad (shareware v1.9, 4,196,020 bytes).
+- C library: picolibc (`--specs=picolibc.specs`); provide the few syscalls Doom needs (memory allocation via a
+  heap in RAM, file access served from the WAD loaded into memory, output to the UART).
+Steps:
+M10a Fast multiplier: make MUL/MULH/MULHSU/MULHU take at most 4 cycles (divide may stay iterative). Doom multiplies
+     a lot. Measure the new IPC on matmul and the official UM tests.
+M10b Big memory: a Doom testbench (e.g. tb/run_doom.sv or a Verilator C++ main) with at least 16 MB of RAM that loads
+     the program and doom1.wad into memory before reset. Use a simple flat memory for this testbench if the cache
+     latency model is too slow or too small; the CPU core must stay rtl/top_pipe.sv.
+M10c Devices (memory-mapped, documented in README): a 320x200 framebuffer with an 8-bit palette (or 32-bit pixels),
+     a "frame done" register, a key register, and timing from mcycle/mtime at an assumed 50 MHz clock.
+     The testbench writes frames as image files (PNG via a small Python script, or PPM) into build/doom/frames/.
+     Optional: an SDL2 window in a Verilator C++ main (SDL2 is installed) to watch it live.
+M10d Port and run: build Doom with riscv64-unknown-elf-gcc -march=rv32im -mabi=ilp32 -O2. Run with no input so Doom
+     plays its built-in attract-mode demo. Success = the title screen and at least 30 consecutive in-game demo frames
+     are rendered correctly as images (check them; do not claim success from a log line alone).
+M10e Results: record measured cycles per frame, the frame rate at the assumed 50 MHz, and the simulation wall-clock
+     speed (frames per real second) in PROGRESS.md and README. Put 3 sample frames in docs/doom/ and, if possible,
+     an animated GIF of the demo (ffmpeg is NOT installed; use Python if you make a GIF).
+When M10d and M10e are done and proven with real frame images, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
+
 ## FINAL ACCEPTANCE (only then may you stop)
 - `hdl make test` runs the whole regression from scratch (directed, random differential, official rv32ui + rv32um tests) and prints ALL PASS. Show that output.
 - 5000+ random differential tests: 0 mismatches.

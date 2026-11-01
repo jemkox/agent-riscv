@@ -449,3 +449,34 @@ hdl make synth
 
 FINAL ACCEPTANCE: MET
 
+## M10a: fast multiplier
+
+### Worked
+- Replaced the 32-cycle shift-add multiply path in `rtl/mdiu.sv` with a one-EX-cycle multiplier using 64-bit sign/zero extension for `MUL`, `MULH`, `MULHSU`, and `MULHU`.
+- Kept divide/rem iterative; multiply starts and completes without entering the iterative multiply state, so the observed multiply issue is at most one EX cycle, which satisfies the `at most 4 cycles` requirement.
+- Re-ran lint, official UM, M7, FPGA proof simulation, and full regression after the change.
+
+### Failed / fixed
+- Verilator lint initially warned about unused low halves of full 64-bit product temps.
+  - Fix: wrapped the multiply product wires with Verilator `lint_off UNUSEDSIGNAL`/`lint_on` and re-ran lint.
+
+### Metrics
+- Official UM multiply tests now report:
+  - `build/um/logs/mul.rtl.log`: `#SUMMARY INSN=421 CYCLES=507 IPC=0.830`
+  - `build/um/logs/mulh.rtl.log`: `#SUMMARY INSN=421 CYCLES=505 IPC=0.834`
+  - `build/um/logs/mulhsu.rtl.log`: `#SUMMARY INSN=421 CYCLES=505 IPC=0.834`
+  - `build/um/logs/mulhu.rtl.log`: `#SUMMARY INSN=421 CYCLES=505 IPC=0.834`
+  - `build/um/logs/div.rtl.log`, `rem/remu`: still about `IPC=0.220` because divide stays iterative.
+- `build/m7/logs/matmul.out` now reports:
+  - `MATMUL PASS`
+  - `#SUMMARY INSN=35708 CYCLES=41737 IPC=0.856`
+  - previously cycles `172809`, IPC `0.207`.
+- `build/m7/logs/bench.out` still passes with score `4274980064`, total `#M7SUM INSN=105395 CYCLES=116306 IPC=0.906`.
+- Full regression passes:
+  - `hdl make test N=5000 CACHE_LAT=1` printed `ALL PASS`.
+- FPGA proof simulation still passes:
+  - `build/fpga.out` contains `TEST PASSED`.
+
+### Commit
+- Committed as `M10a: fast multiplier`.
+
