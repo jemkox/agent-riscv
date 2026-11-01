@@ -1,25 +1,36 @@
-// M10b wrapper for the Doom runner. The Verilated C++ main loads the ELF and WAD
-// through the loader port and runs top_pipe; this file only exposes the CPU ports.
+// M10b wrapper for the Doom runner: top-level ports so the Verilated C++ main
+// can drive the clock/loader/dbg-readback and watch EX/MEM + retire signals.
 `default_nettype none
-module run_doom ();
-  /* verilator lint_off UNUSED */
-  logic clk = 0, reset = 1;
-  logic lwe = 0, halt, wben;
-  logic [31:0] lwa = 0, lwd = 0;
-  logic [31:0] ex_pc, ex_insn, ex_wv;
-  logic [31:0] ex_sa, ex_sd;
-  logic [4:0]  ex_rd;
-  logic [3:0]  ex_sbe;
-  logic        ex_st;
-  logic        rv_valid;
-  logic [31:0] bp_branches, bp_taken_preds, bp_mispreds;
-
+module run_doom (
+  input  logic        clk,
+  input  logic        reset,
+  input  logic        lwe,
+  input  logic [31:0] lwa,
+  input  logic [31:0] lwd,
+  input  logic        dbg_re,
+  input  logic [31:0] dbg_ra,
+  output logic        halt,
+  output logic [31:0] dbg_rd,
+  output logic [31:0] ex_pc,
+  output logic [31:0] ex_insn,
+  output logic        ex_wben,
+  output logic [4:0]  ex_rd,
+  output logic [31:0] ex_wv,
+  output logic        ex_st,
+  output logic [31:0] ex_sa,
+  output logic [31:0] ex_sd,
+  output logic [3:0]  ex_sbe,
+  output logic        rv_valid,
+  output logic [31:0] bp_branches,
+  output logic [31:0] bp_taken_preds,
+  output logic [31:0] bp_mispreds
+);
   top_pipe T(.clk(clk), .reset(reset), .lwe(lwe), .lwa(lwa), .lwd(lwd),
+             .dbg_re(dbg_re), .dbg_ra(dbg_ra), .dbg_rd(dbg_rd),
              .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
-             .ex_wben(wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
+             .ex_wben(ex_wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
              .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_sbe(ex_sbe),
              .rv_valid(rv_valid), .bp_branches(bp_branches),
              .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
-  /* verilator lint_on UNUSED */
 endmodule
 `default_nettype wire

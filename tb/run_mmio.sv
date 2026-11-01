@@ -19,8 +19,15 @@ module run_mmio ();
   logic        ex_st;
   logic        rv_valid;
   logic [31:0] bp_branches, bp_taken_preds, bp_mispreds;
+`ifdef DOOM_BIG
+  logic dbg_re = 0;
+  logic [31:0] dbg_ra = 0, dbg_rd = 0;
+`endif
 
   `TOP T(.clk(clk), .reset(reset), .lwe(lwe), .lwa(lwa), .lwd(lwd),
+`ifdef DOOM_BIG
+         .dbg_re(dbg_re), .dbg_ra(dbg_ra), .dbg_rd(dbg_rd),
+`endif
          .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
          .ex_wben(wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
          .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_sbe(ex_sbe),

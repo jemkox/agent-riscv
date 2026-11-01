@@ -86,6 +86,12 @@ P3 Report: cycles per frame, frames per second at the assumed 50 MHz, and real-t
    cycles go (cache misses, mispredicts, multiply/divide stalls) from counters you add.
 
 ## M10: DOOM IN SIMULATION (new goal, after FINAL ACCEPTANCE)
+ORDER FROM NOW ON (user decision, overrides the order written elsewhere in this file): playable Doom first.
+  1. Finish M10d: remove debug edits, Doom renders >= 30 correct frames again, all tests pass (fix mi instret_overflow), commit.
+  2. P2 simulation speed (Verilator -O3, no logging) - playability depends on it.
+  3. M10f `hdl make play` (keyboard, SDL2 window).
+  4. Then P1, P3, M10e.
+  5. LAST: the remaining F4 DONE CHECKLIST / FPGA work (Fmax rounds, final FPGA numbers). Do not touch FPGA files before step 4 is done.
 FINAL ACCEPTANCE (M1-M8) is done; do not redo it. The new goal is to run the shareware Doom on THIS 5-stage
 RV32IM CPU (rtl/top_pipe.sv) in Verilator simulation. Keep every existing test passing (`hdl make test`, `ui`, `um`,
 `regress`, `m7`) after each step, and commit after each step below.

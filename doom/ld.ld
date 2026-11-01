@@ -6,19 +6,19 @@
 ENTRY(_start)
 SECTIONS {
   . = 0x0;
-  .text : { *(.text .text.*) }
+  .text : { *(.text .text.*) *(.srodata .srodata.*) }
   . = 0x00100000;
   .data : {
     __data_start = .;
     __data_source = .;
-    *(.data .data.* .rodata .rodata.*)
+    *(.data .data.* .rodata .rodata.* .sdata .sdata.*)
   }
   __data_size = . - __data_start;
   __global_pointer$ = __data_start + 0x800;
   __probe_gp__ = __global_pointer$;
   .bss (NOLOAD) : {
     __bss_start = .;
-    *(.bss .bss.* COMMON)
+    *(.sbss .sbss.* .bss .bss.* COMMON)   /* .sbss too: crt0 must zero it (gametic/maketic live there) */
     . = ALIGN(4);
   }
   __bss_size = . - __bss_start;

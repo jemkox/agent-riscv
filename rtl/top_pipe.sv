@@ -6,6 +6,11 @@ module top_pipe (
   input  logic        lwe,
   input  logic [31:0] lwa,
   input  logic [31:0] lwd,
+`ifdef DOOM_BIG
+  input  logic        dbg_re,
+  input  logic [31:0] dbg_ra,
+  output logic [31:0] dbg_rd,
+`endif
   output logic        halt,
   output logic [31:0] ex_pc,
   output logic [31:0] ex_insn,
@@ -55,6 +60,9 @@ module top_pipe (
             .rs1(rf_r1), .rs2(rf_r2),
             .wena(mwb_valid && mwb_wben && (mwb_rd != 5'd0) && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
   cache32 MM(.clk(clk), .reset(reset), .halt(halt), .lwe(lwe), .lwa(lwa), .lwd(lwd),
+`ifdef DOOM_BIG
+             .dbg_re(dbg_re), .dbg_ra(dbg_ra), .dbg_rd(dbg_rd),
+`endif
              .pc_if(pc_if), .fetch_insn(fetch_insn), .fetch_ready(fetch_ready),
              // No memory access while a load-use stall holds this instruction: its address/data operands
              // are not valid yet, and a store would write a wrong address (it is redone after the stall).
@@ -217,8 +225,10 @@ module top_pipe (
         ifid_valid <= conflict ? 1'b0 : ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
         ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
       end else if (stall || m_stall) begin
+        // Keep the forwarded operands: a value forwarded from MEM/WB this cycle is gone next cycle
+        // (e.g. lw s6; lw a5; blt a5,s6 - s6 leaves WB during the load-use stall on a5).
         exmem_valid <= 1'b0; idex_valid <= idex_valid; idex_m_done <= idex_m_done;
-        idex_pc <= idex_pc; idex_insn <= idex_insn; idex_r1 <= idex_r1; idex_r2 <= idex_r2;
+        idex_pc <= idex_pc; idex_insn <= idex_insn; idex_r1 <= a_ex; idex_r2 <= b_ex;
         ifid_valid <= ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
         ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
       end else if (trap_flush || timer_flush || mret_flush) begin

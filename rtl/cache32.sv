@@ -12,6 +12,11 @@ module cache32 (
   input  logic        lwe,
   input  logic [31:0] lwa,
   input  logic [31:0] lwd,
+`ifdef DOOM_BIG
+  input  logic        dbg_re,
+  input  logic [31:0] dbg_ra,
+  output logic [31:0] dbg_rd,
+`endif
   input  logic [31:0] pc_if,
   output logic [31:0] fetch_insn,
   output logic        fetch_ready,
@@ -242,5 +247,10 @@ module cache32 (
   /* verilator lint_on BLKSEQ */
   /* verilator lint_on WIDTHEXPAND */
   /* verilator lint_on WIDTHTRUNC */
+`ifdef DOOM_BIG
+  // Debug word readback straight from backing RAM (testbench frame capture).
+  assign dbg_rd = { ram[(dbg_ra + 3) & BACK_MASK], ram[(dbg_ra + 2) & BACK_MASK],
+                    ram[(dbg_ra + 1) & BACK_MASK], ram[dbg_ra & BACK_MASK] };
+`endif
 endmodule
 `default_nettype wire

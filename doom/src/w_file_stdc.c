@@ -30,14 +30,21 @@ typedef struct
 
 extern wad_file_class_t stdc_wad_file;
 
+/* RV32 testbench port: direct RAM-backed file access (see fsys_rv32.c) */
+#include <stdint.h>
+extern int fs_open(const char *name);
+extern unsigned fs_length(int fd);
+extern int fs_readat(int fd, unsigned off, void *dst, unsigned len);
+extern int fs_close(int fd);
+
 static wad_file_t *W_StdC_OpenFile(char *path)
 {
     stdc_wad_file_t *result;
-    FILE *fstream;
+    int fd;
 
-    fstream = fopen(path, "rb");
+    fd = fs_open(path);
 
-    if (fstream == NULL)
+    if (fd < 0)
     {
         return NULL;
     }
@@ -47,8 +54,8 @@ static wad_file_t *W_StdC_OpenFile(char *path)
     result = Z_Malloc(sizeof(stdc_wad_file_t), PU_STATIC, 0);
     result->wad.file_class = &stdc_wad_file;
     result->wad.mapped = NULL;
-    result->wad.length = M_FileLength(fstream);
-    result->fstream = fstream;
+    result->fstream = (FILE *)(uintptr_t)fd;
+    result->wad.length = fs_length(fd);
 
     return &result->wad;
 }
@@ -59,30 +66,19 @@ static void W_StdC_CloseFile(wad_file_t *wad)
 
     stdc_wad = (stdc_wad_file_t *) wad;
 
-    fclose(stdc_wad->fstream);
+    fs_close((int)(uintptr_t)stdc_wad->fstream);
     Z_Free(stdc_wad);
 }
-
-// Read data from the specified position in the file into the 
-// provided buffer.  Returns the number of bytes read.
 
 size_t W_StdC_Read(wad_file_t *wad, unsigned int offset,
                    void *buffer, size_t buffer_len)
 {
     stdc_wad_file_t *stdc_wad;
-    size_t result;
 
     stdc_wad = (stdc_wad_file_t *) wad;
 
-    // Jump to the specified position in the file.
-
-    fseek(stdc_wad->fstream, offset, SEEK_SET);
-
-    // Read into the buffer.
-
-    result = fread(buffer, 1, buffer_len, stdc_wad->fstream);
-
-    return result;
+    return (size_t)fs_readat((int)(uintptr_t)stdc_wad->fstream,
+                             offset, buffer, (unsigned)buffer_len);
 }
 
 

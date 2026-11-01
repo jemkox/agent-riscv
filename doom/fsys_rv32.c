@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
 
 #define UART_ADDR 0x1FF00000u
 #define WAD_VADDR 0x00C00000u
@@ -122,11 +123,11 @@ static struct fd_e {
     const unsigned char *buf;
     unsigned len;
     unsigned pos;
-} fdtab[8];
+} fdtab[16];
 
 static int fd_alloc(const unsigned char *b, unsigned len, unsigned pos)
 {
-    for (int i = 1; i < 8; i++)
+    for (int i = 1; i < 16; i++)
         if (!fdtab[i].buf) {
             fdtab[i].buf = b; fdtab[i].len = len; fdtab[i].pos = pos;
             return i;
@@ -149,19 +150,20 @@ FILE *open(const char *name, int mode, int isdir)
             (const unsigned char *)(uintptr_t)WAD_VADDR, WAD_LEN, 0);
     if (mode & 2) // write sink for config files
         return (FILE *)(uintptr_t)fd_alloc(sinkbuf, sizeof sinkbuf, 0);
+    errno = ENOENT;
     return 0;
 }
 
 int close(int fd)
 {
-    if (fd < 1 || fd > 7) return -1;
-    fdtab[fd].pos = 0;
+    if (fd < 1 || fd >= 16) return -1;
+    fdtab[fd].buf = 0; fdtab[fd].len = 0; fdtab[fd].pos = 0;
     return 0;
 }
 
 int write(int fd, const unsigned char *buf, int n)
 {
-    if (fd < 1 || fd > 7 || !fdtab[fd].buf) return -1;
+    if (fd < 1 || fd >= 16 || !fdtab[fd].buf) return -1;
     int left = (int)fdtab[fd].len - (int)fdtab[fd].pos;
     int m = n < left ? n : left;
     for (int i = 0; i < m; i++)
@@ -172,7 +174,7 @@ int write(int fd, const unsigned char *buf, int n)
 
 int read(int fd, unsigned char *buf, int n)
 {
-    if (fd < 1 || fd > 7 || !fdtab[fd].buf) return -1;
+    if (fd < 1 || fd >= 16 || !fdtab[fd].buf) return -1;
     int left = (int)fdtab[fd].len - (int)fdtab[fd].pos;
     if (left <= 0) return 0;
     int m = n < left ? n : left;
@@ -184,7 +186,7 @@ int read(int fd, unsigned char *buf, int n)
 
 int lseek(int fd, long off, int dir)
 {
-    if (fd < 1 || fd > 7) return -1;
+    if (fd < 1 || fd >= 16) return -1;
     unsigned p = fdtab[fd].pos, len = fdtab[fd].len;
     if (dir == 0) p = (unsigned)off;
     else if (dir == 1) p = p + (unsigned)off;
@@ -213,3 +215,40 @@ void *sbrk(void *extra)
     return old;
 }
 void *_sbrk(void *extra) { return sbrk(extra); }
+
+/* trivial FS no-ops for tinystdio/picolibc hooks Doom calls */
+int mkdir(const char *path) { (void)path; return 0; }
+int unlink(const char *path) { (void)path; return 0; }
+int rename(const char *from, const char *to) { (void)from; (void)to; return 0; }
+
+/* direct, bufferless file access for the WAD reader (w_file_stdc.c uses
+   these instead of stdio: the stdio fd-table layer mis-handles the huge
+   20224-byte directory fread) */
+int fs_open(const char *name)
+{
+    if (wad_ok_name(name))
+        return fd_alloc((const unsigned char *)(uintptr_t)WAD_VADDR, WAD_LEN, 0);
+    return -1;
+}
+unsigned fs_length(int fd)
+{
+    if (fd < 1 || fd >= 16 || !fdtab[fd].buf) return 0;
+    return fdtab[fd].len;
+}
+int fs_readat(int fd, unsigned off, void *dst, unsigned len)
+{
+    if (fd < 1 || fd >= 16 || !fdtab[fd].buf) return -1;
+    if (off >= fdtab[fd].len) return 0;
+    unsigned m = fdtab[fd].len - off;
+    if (m > len) m = len;
+    const unsigned char *src = fdtab[fd].buf + off;
+    unsigned char *d = (unsigned char *)dst;
+    for (unsigned i = 0; i < m; i++) d[i] = src[i];
+    return (int)m;
+}
+int fs_close(int fd)
+{
+    if (fd < 1 || fd >= 16) return -1;
+    fdtab[fd].buf = 0; fdtab[fd].len = 0; fdtab[fd].pos = 0;
+    return 0;
+}

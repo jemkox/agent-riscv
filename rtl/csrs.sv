@@ -125,6 +125,7 @@ module csrs (
       if (!inhibit_cycle) after_mcycle = after_mcycle + 32'd1;
       if (!inhibit_instret && !xret_write) begin
         after_minstret = after_minstret + 32'd1;
+        if (min_ref == 32'hFFFF_FFFF) after_minstret_hi = minh_ref + 32'd1;
       end
     end
     if (cs_write_en) begin
@@ -212,6 +213,7 @@ module csrs (
           if (!inhibit_cycle) st_mcycle <= st_mcycle + 32'd1;
           if (!inhibit_instret && !xret_write) begin
             st_minstret <= st_minstret + 32'd1;
+            if (st_minstret == 32'hFFFF_FFFF) st_minstret_hi <= st_minstret_hi + 32'd1;
           end
         end
         if (!halt_in) st_mstatus <= mstatus_wr;
