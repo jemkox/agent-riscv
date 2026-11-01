@@ -25,7 +25,7 @@ UM_HEXES := $(foreach n,$(UM_NAMES),build/um/$(n).hex)
 UM_BINS := $(foreach n,$(UM_NAMES),build/um/$(n).bin)
 UM_LOGS := $(foreach n,$(UM_NAMES),build/um/logs/$(n).rtl.log build/um/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um
+.PHONY: test regress lint clean synth ui um lat1 lat5 lat20 m7
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin
 
@@ -127,6 +127,39 @@ um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/um build/um/logs
 
 regress: build/vlt/run_hex
 	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; fi
+
+TB_MMIO := tb/run_mmio.sv
+M7_NAMES := hello fib sort matmul bench
+M7_CFLAGS := $(CCFLAGS) -O2 -fno-plt -fno-stack-protector -Iprograms
+M7_HEXS := $(foreach n,$(M7_NAMES),build/m7/$(n).hex)
+
+build/m7:
+	@mkdir -p build/m7
+
+build/m7/crt0.o: programs/crt0.S | build/m7
+	$(CC) $(CCFLAGS) -c $< -o $@
+
+build/m7/%.o: programs/%.c | build/m7
+	$(CC) $(M7_CFLAGS) -c $< -o $@
+
+build/m7/%.elf: build/m7/%.o build/m7/crt0.o tools/m7.ld | build/m7
+	$(CC) $(M7_CFLAGS) -nostdlib -nostartfiles -Wl,-Ttools/m7.ld -Wl,-m,elf32lriscv -o $@ build/m7/crt0.o $<
+
+build/m7/%.bin: build/m7/%.elf | build/m7
+	$(OC) -O binary $< $@
+
+build/m7/%.hex: build/m7/%.bin | build/m7
+	python3 tools/bin2hex.py $< $@
+
+build/vlt/run_mmio_lat$(CACHE_LAT): $(RTL) $(TB_MMIO) | build/vlt
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_mmio_lat$(CACHE_LAT) $(RTL) $(TB_MMIO)
+
+build/vlt/run_mmio: build/vlt/run_mmio_lat$(CACHE_LAT)
+	@if test -f $@; then rm $@; fi
+	@if test -f $<; then cp $< $@; fi
+
+m7: build/vlt/run_mmio $(M7_HEXS)
+	@bad=0; mkdir -p build/m7/logs; for n in $(M7_NAMES); do cp build/m7/$$n.hex build/m7/p.hex; ./build/vlt/run_mmio > build/m7/logs/$$n.out; grep -q PASS build/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; fi
 
 lat1:
 	$(MAKE) CACHE_LAT=1 test

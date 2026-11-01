@@ -312,3 +312,83 @@ hdl make synth
 - The cache model is conservative for stores/instruction coherence: stores invalidate matching I-cache lines and the stall split is kept small for test correctness.
 - UI/UM IPC dropped materially after cache integration relative to M5, likely from the conservative pipeline/cache interaction and the existing low branch-predictor/M-unit efficiency; correctness is proven by directed, official UI/UM, and 3x N=5000 random regression at latencies 1, 5, and 20.
 
+## M7: memory-mapped UART, crt0, linker script, C benchmark programs
+
+### Worked
+- Added memory-mapped UART at fixed address `0x10000000` in `rtl/cache32.sv`:
+  ```systemverilog
+  uart_store = dreq && idex_st && (ea == UART_ADDR);
+  uart_load  = dreq && idex_ld && (ea == UART_ADDR);
+  dc_ready_now = dc_hit || dc_p_ready || uart_store || uart_load || (LAT == 1);
+  ```
+  UART stores are ready without cache pending, do not write backing RAM, and do not invalidate the aliasing I-cache line.
+- Added `tb/run_mmio.sv` with a 65536-word loader, memory-mapped UART printing (`$write("%c", ...)`), and `#UART_BYTES`, `#M7SUM INSN=... CYCLES=... IPC=...` summary output.
+- Added `programs/crt0.S`, `tools/m7.ld`, and `programs/m7common.h` for freestanding RV32 C programs:
+  - `crt0.S` sets `sp` from `__stack_top`, calls `main`, then halts via `csrrw x0,0x3ff,t4`.
+  - `tools/m7.ld` places text at 0, `.data` at `0x10000`, `.bss` at `0x18000`, and stack top at `0x21000`.
+  - `m7common.h` writes bytes to the UART MMIO address, prints decimal checksums, and halts self-checked programs through the custom `xhalt` CSR (`0x3ff`).
+- Added C self-checking programs:
+  - `hello.c`: prints `HELLO PASS`.
+  - `fib.c`: recursive fibonacci checks `fib(20)=6765`.
+  - `sort.c`: fills a deterministic 1000-word array with an LCG, insertion-sorts it, checks ordering, and prints a rolling checksum.
+  - `matmul.c`: deterministic 16x16 multiply checks against a closed-form expected cell value and prints a checksum.
+  - `bench.c`: Dhrystone/CoreMark-style benchmark runs the same deterministic routine twice and requires equal checksums.
+- Added Makefile M7 support:
+  ```makefile
+  TB_MMIO := tb/run_mmio.sv
+  M7_NAMES := hello fib sort matmul bench
+  build/m7/%.hex: build/m7/%.bin | build/m7
+      python3 tools/bin2hex.py $< $@
+  build/vlt/run_mmio_lat$(CACHE_LAT): $(RTL) $(TB_MMIO) | build/vlt
+      verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_mmio_lat$(CACHE_LAT) $(RTL) $(TB_MMIO)
+  m7: build/vlt/run_mmio $(M7_HEXS)
+      ... builds all ELF/hex files, copies each `build/m7/$$.hex` to `build/m7/p.hex`, runs `build/vlt/run_mmio`, logs to `build/m7/logs/$$.out`, and greps for `PASS` ...
+  ```
+- Verification passed:
+  - `hdl make m7 CACHE_LAT=1 | tail -60` printed `ALL M7 PASS`.
+  - `hdl make test CACHE_LAT=1 | tail -15` printed `ALL PASS`.
+  - `hdl make test CACHE_LAT=5 | tail -20` printed `ALL PASS`.
+  - `hdl make lint | tail -5` passed with no warnings.
+  - `hdl make synth | tail -40` passed with no errors, no latches, `37473` total cells.
+
+### Failed / fixed
+- GCC rejected the inline `xhalt` asm with extra colons and warned on `puts`.
+  - Fix: renamed the UART string helper to `puts7` and corrected GCC inline asm operand syntax:
+    ```c
+    asm volatile("csrrw x0,0x3ff,%0" : : "r"(1u) : "memory");
+    ```
+- Verilator rejected `int64_t max_insns` and `$writef` in the testbench.
+  - Fix: changed the loop bound to a 32-bit `int max_insns` and replaced UART printing with Verilator-supported:
+    ```systemverilog
+    $write("%c", ex_sd[7:0]);
+    ```
+- Verilator `--Wall` complained about unused runner-side signals and a 4-bit mask expression.
+  - Fix: added testbench-local `lint_off UNUSED`/`lint_off WIDTHTRUNC`, and narrowed the UART condition to:
+    ```systemverilog
+    if (ex_st && (ex_sa == UART_ADDR) && ex_sbe[0])
+    ```
+
+### How to run
+```sh
+hdl make m7 CACHE_LAT=1
+hdl make test CACHE_LAT=1
+hdl make test CACHE_LAT=5
+hdl make lint
+hdl make synth
+grep -H 'PASS|#M7SUM' build/m7/logs/*.out
+```
+
+### Metrics
+| Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
+|---|---:|---:|---:|---:|
+| M7 | 5 C benchmark programs (hello/fib/sort/matmul/bench) via memory-mapped UART, plus existing lat1 test pass and synth proof | hello 0.826, fib 0.938, sort 0.841, matmul 0.207, bench 0.906 | 37473 | n/a |
+
+### Synthesis proof
+- Yosys command reads the small cache proof variant with `-DCACHE_LAT=2`, then synthesizes `top_pipe`.
+- Result: no errors, no latches, `37473` total cells in the hierarchy.
+
+### Honest limitations
+- The M7 UART is a memory-mapped side-effect model consumed by the testbench (`ex_st`/`ex_sa`/`ex_sd`); it is not an external device with FIFO or interrupt behavior.
+- The benchmark self-check calls the same deterministic routine twice to catch CPU/compiler drift; it is not the official Dhrystone/CMDstone benchmark.
+- `matmul.c` uses a closed-form expected value only because the matrices are deterministically generated; it proves the multiply/accumulation result, not arbitrary matrix correctness.
+

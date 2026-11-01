@@ -59,8 +59,9 @@ module cache32 (
   int dc_count = 0;
   int i_w, i_tag, i_idx;
   int d_w, d_tag, d_idx, sb;
-  logic ic_hit, dc_hit, ic_p_ready, dc_p_ready, dreq;
+  logic ic_hit, dc_hit, ic_p_ready, dc_p_ready, dreq, uart_store, uart_load;
   logic ic_ready_now, dc_ready_now;
+  localparam logic [31:0] UART_ADDR = 32'h1000_0000;
 
   function [31:0] rbwb;
     input int addr;
@@ -80,18 +81,20 @@ module cache32 (
 
     ic_hit = ic_valid[i_idx] && (ic_tag[i_idx] == i_tag);
     dc_hit = dc_valid[d_idx] && (dc_tag[d_idx] == d_tag);
-
     dreq = idex_valid && (idex_ld || idex_st) && !reset && !halt && !lwe;
+    uart_store = dreq && idex_st && (ea == UART_ADDR);
+    uart_load  = dreq && idex_ld && (ea == UART_ADDR);
+
     ic_p_ready = ic_pending && (ic_ptag == i_tag) && (ic_count >= READY_AT);
     dc_p_ready = dc_pending && (dc_ptag == d_tag) && (dc_count >= READY_AT);
 
     ic_ready_now = ic_hit || ic_p_ready || (LAT == 1);
-    dc_ready_now = dc_hit || dc_p_ready || (LAT == 1);
+    dc_ready_now = dc_hit || dc_p_ready || uart_store || uart_load || (LAT == 1);
 
     fetch_ready = (reset || halt) ? 1'b1 : ic_ready_now;
     fetch_insn  = ic_ready_now ? rbwb(pc_if) : 32'h0;
     mem_ready   = (reset || halt) ? 1'b1 : (!dreq || dc_ready_now);
-    ld_raw      = dc_ready_now ? rbwb(ea) : 32'h0;
+    ld_raw      = dc_ready_now ? (uart_load ? 32'h0 : rbwb(ea)) : 32'h0;
   end
 
   always_ff @(posedge clk) begin
@@ -132,18 +135,20 @@ module cache32 (
 
       if (dreq) begin
         if (dc_ready_now) begin
-          dc_valid[d_idx] = 1'b1;
-          dc_tag[d_idx]   = d_tag;
-          if (idex_st) begin
-            sb = ea & BACK_MASK;
-            ram[sb]           = sd_raw[7:0];
-            if (ssz == 2'b01 || ssz == 2'b10)
-              ram[(sb + 1) & BACK_MASK] = sd_raw[15:8];
-            if (ssz == 2'b10) begin
-              ram[(sb + 2) & BACK_MASK] = sd_raw[23:16];
-              ram[(sb + 3) & BACK_MASK] = sd_raw[31:24];
+          if (!uart_store && !uart_load) begin
+            dc_valid[d_idx] = 1'b1;
+            dc_tag[d_idx]   = d_tag;
+            if (idex_st) begin
+              sb = ea & BACK_MASK;
+              ram[sb]           = sd_raw[7:0];
+              if (ssz == 2'b01 || ssz == 2'b10)
+                ram[(sb + 1) & BACK_MASK] = sd_raw[15:8];
+              if (ssz == 2'b10) begin
+                ram[(sb + 2) & BACK_MASK] = sd_raw[23:16];
+                ram[(sb + 3) & BACK_MASK] = sd_raw[31:24];
+              end
+              ic_valid[d_idx] = 1'b0;
             end
-            ic_valid[d_idx] = 1'b0;
           end
           dc_pending <= 1'b0;
         end else if (!dc_pending && LAT > 1) begin
