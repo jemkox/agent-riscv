@@ -46,7 +46,8 @@ module top_single (
            .is_ld(is_ld), .is_st(is_st), .is_br(is_br), .is_jal(is_jal),
            .is_jalr(is_jalr), .is_lui(is_lui), .is_auipc(is_auipc),
             .is_opi(is_opi), .is_op(is_op), .is_sys(is_sys), .is_fence(is_fence),
-            .is_m(is_m), .m_op(), .is_mret(), .is_ill(is_ill), .i(insn));
+            .is_m(is_m), .m_op(), .is_mret(), .is_ill(is_ill),
+            .is_csr(), .csr_num(), .i(insn));
   /* verilator lint_on PINCONNECTEMPTY */
   imm32  IM(.i(insn), .iimm(iimm), .simm(simm), .bimm(bimm), .uimm(uimm),
            .jimm(jimm));

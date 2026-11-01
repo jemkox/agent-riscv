@@ -24,6 +24,20 @@ def main(argv):
     steps = 0
     LIM = 200000
     lines = []
+    mask = 0xFFFFFFFF
+    cs = {0x300:0,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
+          0x705:0xffffffff}
+    def cs_get(n):
+        if n == 0x704: return cs[0xb00]
+        return cs.get(n,0)
+    def cs_set(n,v):
+        if n == 0x704:
+            cs[0xb00] = v & mask
+        elif n in cs:
+            cs[n] = v & mask
+    def retire_counters():
+        cs[0xb00] = (cs[0xb00] + 1) & mask
+        cs[0xb02] = (cs[0xb02] + 1) & mask
     def rd8(a):  return mem[a & 0x3FFFF]
     def rw(a):   return int.from_bytes(mem[(a&0x3FFFF):(a+4)&0x3FFFF+0],'little') if False else int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+4)],'little')
     def rw16(a): return int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+2)],'little')
@@ -56,6 +70,13 @@ def main(argv):
         a0 = reg[r1] if r1 else 0; a1 = reg[r2] if r2 else 0
         wv = None; wv_ok = False; npc = (pc+4) & 0xFFFFFFFF
         neg = (ins>>30)&1
+        trap_mode = ((cs_get(0x300) >> 11) & 1) == 1
+        if trap_mode and cs_get(0xb00) >= cs_get(0x705) and pc != cs_get(0x305):
+            cs[0x341] = pc & mask; cs[0x342] = 0x80000007
+            cs[0x300] = (cs[0x300] | 0x800) & mask
+            pc = cs_get(0x305) & mask
+            steps += 1
+            continue
         if opc == 0x33:   # OP
             op7 = (ins >> 25) & 0x7F
             sh = a1 & 31
@@ -132,16 +153,72 @@ def main(argv):
         elif opc == 0x37: wv = uimm
         elif opc == 0x17: wv = (pc + uimm) & 0xFFFFFFFF
         elif opc == 0x73:
-            stopped = 1
-            lines.append((pc,ins,0,0,0,0,0,0)); break
+            csr_num = (ins >> 20) & 0xFFF
+            zimm = (ins >> 15) & 0x1F
+            if f3 == 0:
+                if csr_num == 0: cause = 0
+                elif csr_num == 1: cause = 1
+                else: cause = 2; illegal = True
+                if illegal:
+                    if trap_mode:
+                        cs[0x341] = pc & mask; cs[0x342] = cause
+                        cs[0x300] = (cs[0x300] | 0x800) & mask
+                        pc = cs_get(0x305) & mask
+                        steps += 1
+                        continue
+                    stopped = 1
+                    retire_counters()
+                    lines.append((pc,ins,0,0,0,0,0,0))
+                    break
+                if trap_mode:
+                    cs[0x341] = pc & mask; cs[0x342] = cause
+                    cs[0x300] = (cs[0x300] | 0x800) & mask
+                    pc = cs_get(0x305) & mask
+                    steps += 1
+                    continue
+                stopped = 1
+                retire_counters()
+                lines.append((pc,ins,0,0,0,0,0,0))
+                break
+            elif f3 in (1,2,3,5,6,7):
+                old = cs_get(csr_num)
+                if f3 == 1: newv = a0
+                elif f3 == 2: newv = a0 | old
+                elif f3 == 3: newv = old & ((~a0) & mask)
+                elif f3 == 5: newv = zimm
+                elif f3 == 6: newv = zimm | old
+                else: newv = old & ((~zimm) & mask)
+                wena = ((f3 == 1) or (f3 == 5) or
+                        ((f3 == 2 or f3 == 3) and (r1 != 0)) or
+                        ((f3 == 6 or f3 == 7) and (zimm != 0)))
+                retire_counters()
+                if rd: reg[rd] = old
+                lines.append((pc,ins,rd, old & mask, 0,0,0,0))
+                if wena: cs_set(csr_num,newv)
+                if (csr_num == 0x3ff) and (newv & 1):
+                    stopped = 1
+                    break
+                npc = (pc+4) & mask
+                pc = npc; steps += 1
+                continue
+            else:
+                illegal = True
         else:
             illegal = True
         if illegal:
+            if trap_mode:
+                cs[0x341] = pc & mask; cs[0x342] = 2
+                cs[0x300] = (cs[0x300] | 0x800) & mask
+                pc = cs_get(0x305) & mask
+                steps += 1
+                continue
+            stopped = 1
+            retire_counters()
             lines.append((pc,ins,0,0,0,0,0,0))
             if log:
                 open(log,'w').write("\n".join(
                     "%08x %08x %d %08x %d %08x %08x %x" % t for t in lines) + "\n")
-            print("ERR illegal at %08x insn %08x" % (pc,ins)); return 3
+            print("HALT illegal at %08x insn %08x" % (pc,ins)); return 0
         written = False
         if rd and wv is not None:
             reg[rd] = wv & 0xFFFFFFFF
@@ -152,6 +229,7 @@ def main(argv):
             if wid == 8: w8(ea, v)
             elif wid == 16: w16(ea, v)
             else: w32(ea, v)
+        retire_counters()
         pc = npc; steps += 1
     else:
         if log:
@@ -162,8 +240,8 @@ def main(argv):
         open(log,'w').write("\n".join(
             "%08x %08x %d %08x %d %08x %08x %x" % t for t in lines) + "\n")
     if want_pass:
-        if stopped and reg[3] == 1: return 0
-        print("FAIL: gp=%d" % (reg[3] if stopped else 0)); return 1
+        if (stopped or cs[0x3ff]) and reg[3] == 1: return 0
+        print("FAIL: gp=%d" % (reg[3] if (stopped or cs[0x3ff]) else 0)); return 1
     if not quiet: print("STEPS=%d" % steps)
     return 0
 

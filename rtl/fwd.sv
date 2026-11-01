@@ -6,6 +6,7 @@ module fwd (
   input  logic        ce_jalr,
   input  logic        ce_opi,
   input  logic        ce_op,
+  input  logic        ce_csr,
   input  logic        ld_ok,
   input  logic        st_ok,
   input  logic [4:0]  ce_rs1,
@@ -32,6 +33,7 @@ module fwd (
   input  logic        ceif_st,
   input  logic        ceif_opi,
   input  logic        ceif_op,
+  input  logic        ceif_csr,
   input  logic [4:0]  ceif_rs1,
   input  logic [4:0]  ceif_rs2,
   output logic [31:0] a_ex,
@@ -51,11 +53,11 @@ module fwd (
     else if (mwb_fwd && (ce_rs1 == mwb_rd)) a_ex = mwb_wv;
     if (exmem_fwd && (ce_rs2 == exmem_rd)) b_ex = exmem_result;
     else if (mwb_fwd && (ce_rs2 == mwb_rd)) b_ex = mwb_wv;
-    read_a = idex_valid && ((ce_br || ce_jalr || ld_ok || st_ok || ce_opi || ce_op) && (ce_rs1 != 5'd0));
+    read_a = idex_valid && ((ce_br || ce_jalr || ce_csr || ld_ok || st_ok || ce_opi || ce_op) && (ce_rs1 != 5'd0));
     read_b = idex_valid && ((ce_br || st_ok || ce_op) && (ce_rs2 != 5'd0));
 
     id_read_a = ifid_valid &&
-                ((ceif_br || ceif_jalr || ceif_ld || ceif_st || ceif_opi || ceif_op) && (ceif_rs1 != 5'd0));
+                ((ceif_br || ceif_jalr || ceif_csr || ceif_ld || ceif_st || ceif_opi || ceif_op) && (ceif_rs1 != 5'd0));
     id_read_b = ifid_valid && ((ceif_br || ceif_st || ceif_op) && (ceif_rs2 != 5'd0));
     ifid_r1_fwd = ifid_r1;
     ifid_r2_fwd = ifid_r2;

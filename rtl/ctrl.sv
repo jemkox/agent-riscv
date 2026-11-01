@@ -20,12 +20,14 @@ module ctrl (
   output logic         is_auipc,
   output logic         is_opi,
   output logic         is_op,
-  output logic         is_sys,      // SYSTEM opcode (ecall/ebreak/CSR in M5)
+  output logic         is_sys,      // SYSTEM ECALL/EBREAK in current halt mode
   output logic         is_fence,    // FENCE opcode (no-op in M1)
   output logic         is_m,
   output logic [2:0]   m_op,        // 0 MUL, 1 MULH, 2 MULHSU, 3 MULHU, 4 DIV, 5 DIVU, 6 REM, 7 REMU
   output logic         is_mret,
-  output logic         is_ill
+  output logic         is_ill,
+  output logic         is_csr,      // Zicsr CSRRW/S/C and immediate forms
+  output logic [11:0]  csr_num      // i[31:20]
 );
   logic [6:0] opc;
   assign opc = i[6:0];
@@ -38,7 +40,6 @@ module ctrl (
   assign is_auipc = (opc == 7'b0010111);
   assign is_opi   = (opc == 7'b0010011);
   assign is_op    = (opc == 7'b0110011);
-  assign is_sys   = (opc == 7'b1110011);
   assign is_fence = (opc == 7'b0001111);
   assign is_mret  = 1'b0;
   assign f3  = i[14:12];
@@ -46,10 +47,11 @@ module ctrl (
   assign rs1 = i[19:15];
   assign rs2 = i[24:20];
   assign rd  = i[11:7];
+  assign csr_num = i[31:20];
 
   always_comb begin
     alu_op = 4'd0; a_sel = 0; b_sel = 0;
-    is_ill = 0; is_m = 0; m_op = 3'd0;
+    is_ill = 0; is_m = 0; is_sys = 0; is_csr = 0; m_op = 3'd0;
     case (opc)
       7'b0000011: begin alu_op = 4'd0; b_sel = 1; end                          // LOAD
       7'b0100011: begin alu_op = 4'd0; b_sel = 1; end                          // STORE
@@ -106,7 +108,23 @@ module ctrl (
         end
       end
       7'b0001111: begin end                                             // FENCE
-      7'b1110011: begin end                                             // SYSTEM
+      7'b1110011: begin                                                  // SYSTEM / CSR
+        case (f3)
+          3'b000: begin
+            if (i[31:20] == 12'h000) is_sys = 1;                         // ECALL
+            else if (i[31:20] == 12'h001) is_sys = 1;                    // EBREAK
+            else is_ill = 1;
+          end
+          3'b001: is_csr = 1;
+          3'b010: is_csr = 1;
+          3'b011: is_csr = 1;
+          3'b100: is_ill = 1;
+          3'b101: is_csr = 1;
+          3'b110: is_csr = 1;
+          3'b111: is_csr = 1;
+          default: is_ill = 1;
+        endcase
+      end
       default: is_ill = 1;
     endcase
     if (is_br && (f3 == 3'b010 || f3 == 3'b011)) is_ill = 1;

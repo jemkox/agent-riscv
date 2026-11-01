@@ -1,10 +1,10 @@
-RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv
+RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer
 N ?= 200
 CC := riscv64-unknown-elf-gcc
-CCFLAGS := -march=rv32im -mabi=ilp32
+CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
 UI_CCFLAGS := -march=rv32i_zifencei -mabi=ilp32
 OC := riscv64-unknown-elf-objcopy
 
@@ -88,10 +88,10 @@ build/um/%.hex: build/um/%.bin | build/um
 build/sim_%.vvp: $(RTL) $(TB) | build
 	iverilog -g2012 -Wall -DTBHEX='"build/$*.hex"' -DTOPPIPE -o build/sim_$*.vvp $(RTL) $(TB)
 
-test: $(foreach t,$(TESTS),build/sim_$t.vvp) $(foreach t,$(TESTS),build/$t.bin build/$t.hex)
+test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) build/vlt/run_hex
 	@bad=0; \
 	for t in $(TESTS); do \
-	  vvp build/sim_$$t.vvp > build/$$t.rtl.log 2>&1; \
+	  cp build/$$t.hex build/p.hex; ./build/vlt/run_hex > build/$$t.rtl.log; \
 	  python3 iss/iss.py --quiet --log build/$$t.iss.log build/$$t.bin > /dev/null; \
 	  python3 tools/cmp.py build/$$t.rtl.log build/$$t.iss.log || bad=$$((bad+1)); \
 	 done; \
@@ -132,4 +132,4 @@ clean:
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
 	verilator --lint-only -Wall --timing $(RTL_SINGLE) $(TB)
-	yosys -p 'read_verilog -sv rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32_small.sv 		rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv; synth -top top_pipe; stat'
+	yosys -p 'read_verilog -sv rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32_small.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv; synth -top top_pipe; stat'

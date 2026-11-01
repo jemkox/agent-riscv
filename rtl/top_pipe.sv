@@ -22,53 +22,31 @@ module top_pipe (
   output logic [31:0] bp_mispreds
 );
   logic [31:0] pc_if = 0;
-  logic [31:0] ifid_pc = 0, ifid_insn = 0, idex_pc = 0, idex_insn = 0;
-  logic [31:0] idex_r1 = 0, idex_r2 = 0;
-  logic [31:0] exmem_pc = 0, exmem_insn = 0, exmem_result = 0, exmem_wbval = 0;
-  logic [31:0] exmem_ea = 0, exmem_sd_raw = 0, exmem_sd_log = 0;
+  logic [31:0] ifid_pc = 0, ifid_insn = 0, idex_pc = 0, idex_insn = 0, idex_r1 = 0, idex_r2 = 0;
+  logic [31:0] exmem_pc = 0, exmem_insn = 0, exmem_result = 0, exmem_wbval = 0, exmem_ea = 0,
+               exmem_sd_raw = 0, exmem_sd_log = 0;
   logic [31:0] mwb_pc = 0, mwb_insn = 0, mwb_sa = 0, mwb_sd = 0, mwb_wv = 0;
-  logic [4:0]  exmem_rd = 0, mwb_rd = 0;
-  logic [31:0] a_ex, b_ex, aluB_ex, br_tgt_ex;
-  logic [31:0] iimm, simm, bimm, uimm, jimm;
-  logic [31:0] fetch_insn, rf_r1, rf_r2;
-  logic [31:0] idex_ea, idex_sd_raw, idex_sd_log, idex_wbval;
-  logic [31:0] ldx_raw, ldx_ex;
-  logic [3:0]  ce_alu_op, idex_sbe;
-  logic [3:0]  exmem_sbe = 0, mwb_sbe = 0;
-  logic [1:0]  idex_ssz;
-  logic [1:0]  exmem_ssz = 0;
-  logic [2:0]  ce_f3;
-  logic [2:0]  exmem_f3 = 0;
-  logic [4:0]  ce_rs1, ce_rs2, ce_rd;
-  logic [31:0] alu_res;
-  logic        alu_eq, alu_slt_r, alu_slt_u;
-
-  // pipeline valid/stage control bits
-  logic ifid_valid = 0, idex_valid = 0, exmem_valid = 0, mwb_valid = 0;
-  logic idex_m_done = 1'b1;
-  logic m_stall, m_done_now;
-  logic exmem_ld = 0, exmem_st = 0, exmem_stop = 0, exmem_wben = 0;
-  logic mwb_st = 0, mwb_stop = 0, mwb_wben = 0;
-  logic stall, flush, conflict, flush_ex;
-  logic ld_ok, st_ok, idex_stop, idex_wben, idex_ld, idex_st;
-  logic read_a, read_b;
-  logic ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr;
-  logic ce_lui, ce_auipc, ce_opi, ce_op, ce_sys, ce_fence;
-  logic ce_ill, ce_m;
-  logic ceif_ill, ceif_m;
-  logic [2:0] ce_m_op;
-  logic [31:0] md_result;
-  logic [4:0] ceif_rs1, ceif_rs2;
-  logic ceif_ld, ceif_st, ceif_br, ceif_jalr, ceif_opi, ceif_op;
-  logic [31:0] ifid_r1_fwd, ifid_r2_fwd;
-  logic if_br, if_jal, if_jalr, if_bp;
-  logic bp_q_valid, bp_q_taken, ifid_pred_taken = 0, idex_pred_taken = 0;
-  logic [31:0] bp_q_target, ifid_pred_tgt = 0, idex_pred_tgt = 0;
-  logic bp_pred_if;
-  logic [31:0] bp_pred_tgt_if;
-  logic branch_act_taken, branch_is, wrong_pred, bp_upd_enable;
-  logic [31:0] branch_upd_tgt;
-  // stats counters live in btb.sv.
+  logic [4:0]  exmem_rd = 0, mwb_rd = 0, ce_rs1, ce_rs2, ce_rd, ceif_rs1, ceif_rs2;
+  logic [31:0] a_ex, b_ex, aluB_ex, br_tgt_ex, iimm, simm, bimm, uimm, jimm, fetch_insn, rf_r1, rf_r2;
+  logic [31:0] idex_ea, idex_sd_raw, idex_sd_log, idex_wbval, ldx_raw, ldx_ex, alu_res, md_result, exmem_r1 = 0;
+  /* verilator lint_off UNUSED */
+  logic [31:0] cs_old, cs_mtvec, idex_cs_old;
+  /* verilator lint_on UNUSED */
+  logic [3:0]  ce_alu_op, idex_sbe, exmem_sbe = 0, mwb_sbe = 0;
+  logic [1:0]  idex_ssz, exmem_ssz = 0;
+  logic [2:0]  ce_f3, exmem_f3 = 0, ce_m_op;
+  logic        alu_eq, alu_slt_r, alu_slt_u, ld_ok, st_ok, idex_stop, idex_wben, idex_ld, idex_st;
+  logic        stall, flush, conflict, flush_ex, m_stall, m_done_now, idex_m_done = 1'b1;
+  logic        ifid_valid = 0, idex_valid = 0, exmem_valid = 0, mwb_valid = 0;
+  logic        exmem_ld = 0, exmem_st = 0, exmem_stop = 0, exmem_wben = 0, mwb_st = 0, mwb_stop = 0, mwb_wben = 0;
+  logic        read_a, read_b, ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr, ce_lui, ce_auipc, ce_opi, ce_op;
+  logic        ce_sys, ce_fence, ce_ill, ce_m, ceif_ill, ceif_m, ce_csr, exmem_csr_en, exmem_csr_wen;
+  logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out;
+  logic        ceif_ld, ceif_st, ceif_br, ceif_jalr, ceif_opi, ceif_op, ceif_csr;
+  logic [31:0] ifid_r1_fwd, ifid_r2_fwd, idex_r1_cs;
+  logic        bp_pred_if, branch_act_taken, branch_is, wrong_pred, bp_upd_enable, ifid_pred_taken = 0;
+  logic        idex_pred_taken = 0;
+  logic [31:0] ifid_pred_tgt = 0, idex_pred_tgt = 0, branch_upd_tgt, bp_pred_tgt_if;
 
   regs32 RF(.clk(clk), .reset(reset), .rsel1(ifid_insn[19:15]), .rsel2(ifid_insn[24:20]),
             .rs1(rf_r1), .rs2(rf_r2),
@@ -81,7 +59,8 @@ module top_pipe (
             .a_sel(), .b_sel(ce_bsel), .is_ld(ce_ld), .is_st(ce_st), .is_br(ce_br),
             .is_jal(ce_jal), .is_jalr(ce_jalr), .is_lui(ce_lui), .is_auipc(ce_auipc),
             .is_opi(ce_opi), .is_op(ce_op),              .is_sys(ce_sys), .is_fence(ce_fence),
-             .is_m(ce_m), .m_op(ce_m_op), .is_mret(), .is_ill(ce_ill), .i(idex_insn));
+             .is_m(ce_m), .m_op(ce_m_op), .is_mret(), .is_ill(ce_ill),
+             .is_csr(ce_csr), .csr_num(), .i(idex_insn));
   mdiu MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
           .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
           /* verilator lint_off PINCONNECTEMPTY */
@@ -92,36 +71,33 @@ module top_pipe (
   ctrl   CEID(.alu_op(), .f3(), .op7(), .rs1(ceif_rs1), .rs2(ceif_rs2), .rd(),
               .a_sel(), .b_sel(), .is_ld(ceif_ld), .is_st(ceif_st),
               .is_br(ceif_br), .is_jal(), .is_jalr(ceif_jalr),
-              .is_lui(), .is_auipc(), .is_opi(ceif_opi), .is_op(ceif_op),
-              .is_sys(), .is_fence(), .is_m(ceif_m), .m_op(),
-              .is_mret(), .is_ill(ceif_ill), .i(ifid_insn));
+               .is_lui(), .is_auipc(), .is_opi(ceif_opi), .is_op(ceif_op),
+               .is_sys(), .is_fence(), .is_m(ceif_m), .m_op(),
+                .is_mret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .csr_num(), .i(ifid_insn));
   /* verilator lint_on PINCONNECTEMPTY */
   ldst  LDST(.is_ld(ce_ld), .is_st(ce_st), .is_ill(ce_ill), .ld_ok(ld_ok), .st_ok(st_ok));
   fwd   FWDD(.idex_valid(idex_valid), .ce_br(ce_br), .ce_jalr(ce_jalr), .ce_opi(ce_opi),
-             .ce_op(ce_op), .ld_ok(ld_ok), .st_ok(st_ok), .ce_rs1(ce_rs1), .ce_rs2(ce_rs2),
+             .ce_op(ce_op), .ce_csr(ce_csr), .ld_ok(ld_ok), .st_ok(st_ok), .ce_rs1(ce_rs1), .ce_rs2(ce_rs2),
              .idex_r1(idex_r1), .idex_r2(idex_r2),
              .exmem_valid(exmem_valid), .exmem_rd(exmem_rd), .exmem_wben(exmem_wben),
-             .exmem_ld(exmem_ld), .exmem_st(exmem_st), .exmem_stop(exmem_stop),
-             .exmem_result(exmem_result), .mwb_valid(mwb_valid), .mwb_rd(mwb_rd),
+              .exmem_ld(exmem_ld), .exmem_st(exmem_st), .exmem_stop(exmem_stop),
+              .exmem_result(exmem_result), .mwb_valid(mwb_valid), .mwb_rd(mwb_rd),
              .mwb_wben(mwb_wben), .mwb_wv(mwb_wv),
              .ifid_valid(ifid_valid), .ifid_r1(rf_r1), .ifid_r2(rf_r2),
              .ceif_br(ceif_br), .ceif_jalr(ceif_jalr), .ceif_ld(ceif_ld), .ceif_st(ceif_st),
-             .ceif_opi(ceif_opi), .ceif_op(ceif_op), .ceif_rs1(ceif_rs1), .ceif_rs2(ceif_rs2),
+             .ceif_opi(ceif_opi), .ceif_op(ceif_op), .ceif_csr(ceif_csr), .ceif_rs1(ceif_rs1), .ceif_rs2(ceif_rs2),
              .a_ex(a_ex), .b_ex(b_ex), .read_a(read_a), .read_b(read_b),
              .ifid_r1_fwd(ifid_r1_fwd), .ifid_r2_fwd(ifid_r2_fwd));
   imm32  IM(.i(idex_insn), .iimm(iimm), .simm(simm), .bimm(bimm), .uimm(uimm), .jimm(jimm));
   alu    AL(.a(a_ex), .b(aluB_ex), .op(ce_alu_op), .res(alu_res), .eq(alu_eq),
              .slt_r(alu_slt_r), .sltu_r(alu_slt_u));
 
-  ifdec IFDEC(.fetch_insn(fetch_insn), .if_br(if_br), .if_jal(if_jal), .if_jalr(if_jalr), .if_bp(if_bp));
-  btb BTB(.clk(clk), .reset(reset), .q_enable(if_bp), .q_pc(pc_if), .q_br(if_br),
-           .q_jal(if_jal), .q_jalr(if_jalr),            .q_valid(bp_q_valid), .q_taken(bp_q_taken), .q_target(bp_q_target),
-           .out_branches(bp_branches), .out_taken_preds(bp_taken_preds), .out_mispreds(bp_mispreds),
-           .upd_enable(bp_upd_enable), .upd_pc(idex_pc), .upd_taken(branch_act_taken), .upd_target(branch_upd_tgt),
-           .upd_pred_taken(idex_pred_taken), .upd_mispred(wrong_pred));
-  bpif BPIF(.fetch_insn(fetch_insn), .pc_if(pc_if), .if_br(if_br), .if_jal(if_jal), .if_jalr(if_jalr),
-             .bp_q_valid(bp_q_valid), .bp_q_taken(bp_q_taken), .bp_q_target(bp_q_target),
-             .bp_pred_if(bp_pred_if), .bp_pred_tgt_if(bp_pred_tgt_if));
+  fetch_pred FP(.clk(clk), .reset(reset), .fetch_insn(fetch_insn), .pc_if(pc_if),
+              .idex_pc(idex_pc), .bp_upd_enable(bp_upd_enable),               .idex_pred_taken(idex_pred_taken),
+              .branch_act_taken(branch_act_taken),
+              .branch_upd_tgt(branch_upd_tgt), .wrong_pred(wrong_pred),
+              .bp_pred_if(bp_pred_if), .bp_pred_tgt_if(bp_pred_tgt_if),
+              .bp_branches(bp_branches), .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
 
   always_comb begin
     if (st_ok) aluB_ex = simm;
@@ -129,13 +105,8 @@ module top_pipe (
     else aluB_ex = b_ex;
   end
 
-  always_comb begin
-    idex_ld = idex_valid && ld_ok;
-    idex_st = idex_valid && st_ok;
-    idex_stop = idex_valid && (ce_sys || ce_ill);
-    idex_ea = alu_res;
-  end
 
+  assign idex_ea = alu_res;
   store  ST(.st_ok(st_ok), .ce_f3(ce_f3), .ea(idex_ea), .b_ex(b_ex),
             .ssz(idex_ssz), .sd_raw(idex_sd_raw), .sd_log(idex_sd_log), .sbe(idex_sbe));
   branch BR(.idex_valid(idex_valid), .idex_stop(idex_stop), .ce_br(ce_br), .ce_ill(ce_ill),
@@ -148,27 +119,48 @@ module top_pipe (
             .flush_ex(flush_ex), .br_tgt_ex(br_tgt_ex));
 
   always_comb begin
-    idex_wben = idex_valid && (ce_rd != 5'd0) &&
+    idex_wben = idex_valid && ((ce_rd != 5'd0) || ce_csr) &&
                 ((ld_ok) || ce_lui || ce_auipc || ce_jal || (ce_jalr && !ce_ill) ||
-                 (ce_opi && !ce_ill) || (ce_op && !ce_ill)) && !ce_fence && !idex_stop;
+                 (ce_opi && !ce_ill) || (ce_op && !ce_ill) || ce_csr) && !ce_fence &&
+                 !idex_stop && !idex_trap;
     idex_wbval = alu_res;
     if (ce_m && !ce_ill) idex_wbval = md_result;
     else if (ce_lui) idex_wbval = uimm;
     else if (ce_auipc) idex_wbval = idex_pc + uimm;
     else if (ce_jal || (ce_jalr && !ce_ill)) idex_wbval = idex_pc + 32'd4;
+    else if (ce_csr) idex_wbval = 32'h0;
 
+    idex_r1_cs = ifid_r1_fwd;
+    if (ifid_valid && ceif_csr && (ceif_rs1 != 5'd0) && idex_valid && idex_wben && !idex_ld && !idex_st &&
+        (idex_insn[11:7] == ceif_rs1))
+      idex_r1_cs = idex_wbval;
+  end
+
+  always_comb begin
     stall = exmem_valid && exmem_ld && (exmem_rd != 5'd0) &&
             ((read_a && (ce_rs1 == exmem_rd)) || (read_b && (ce_rs2 == exmem_rd)));
     m_stall = idex_valid && ce_m && !ce_ill && !idex_m_done;
+  end
+
+  always_comb begin
     bp_upd_enable = branch_is && !stall && !m_stall;
-    flush = !stall && flush_ex;
+    flush = !stall && flush_ex && !trap_flush && !timer_flush;
     conflict = !stall && !flush && idex_valid &&
                ((idex_st && (pc_if == idex_ea)) ||
                 (exmem_valid && exmem_st && (pc_if == exmem_ea)));
   end
 
+  csrs_pipe CSR1(.clk(clk), .reset(reset), .halt(halt),
+            .idex_valid(idex_valid), .idex_insn(idex_insn), .idex_pc(idex_pc),
+            .ce_sys(ce_sys), .ce_ill(ce_ill), .ce_csr(ce_csr), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
+            .ld_ok(ld_ok), .st_ok(st_ok), .stall(stall), .m_stall(m_stall),
+            .exmem_valid(exmem_valid), .exmem_csr_en(exmem_csr_en), .exmem_csr_wen(exmem_csr_wen),
+            .exmem_insn(exmem_insn), .exmem_f3(exmem_f3), .exmem_r1(exmem_r1),
+            .idex_ld(idex_ld), .idex_st(idex_st), .idex_trap(idex_trap), .idex_stop(idex_stop),
+            .idex_csr_en(idex_csr_en), .idex_csr_wen(idex_csr_wen),
+            .trap_flush(trap_flush), .timer_flush(timer_flush),
+            .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_mtvec(cs_mtvec), .halt_out(halt_out));
   ldext LDX(.f3(exmem_f3), .raw(ldx_raw), .ext(ldx_ex));
-
   always_ff @(posedge clk) begin
     if (reset) begin
       pc_if <= 32'h0;
@@ -176,11 +168,11 @@ module top_pipe (
       ifid_valid <= 1'b0; idex_valid <= 1'b0; exmem_valid <= 1'b0; mwb_valid <= 1'b0;
       idex_m_done <= 1'b1;
     end else if (!halt) begin
-      halt <= halt || exmem_stop;
+      halt <= halt || exmem_stop || halt_out;
       mwb_valid <= exmem_valid;
       mwb_pc <= exmem_pc; mwb_insn <= exmem_insn; mwb_rd <= exmem_rd;
       mwb_wben <= exmem_wben && !exmem_stop;
-      mwb_wv <= exmem_stop ? 32'h0 : (exmem_ld ? ldx_ex : exmem_wbval);
+      mwb_wv <= exmem_csr_en ? cs_old : (exmem_stop ? 32'h0 : (exmem_ld ? ldx_ex : exmem_wbval));
       mwb_stop <= exmem_stop;
       mwb_st <= exmem_st && !exmem_stop;
       mwb_sa <= exmem_ea; mwb_sd <= exmem_sd_log; mwb_sbe <= exmem_sbe;
@@ -192,13 +184,20 @@ module top_pipe (
         idex_m_done <= idex_m_done;
         ifid_valid <= 1'b0;
         pc_if <= ifid_valid ? ifid_pc : pc_if;
+      end else if (trap_flush || timer_flush) begin
+        exmem_valid <= 1'b0;
+        exmem_csr_en <= 1'b0; exmem_csr_wen <= 1'b0;
+        idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
+        pc_if <= cs_mtvec;
       end else if (flush) begin
         exmem_valid <= idex_valid;
         exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= ce_rd;
         exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;
         exmem_f3 <= ce_f3; exmem_ea <= idex_ea; exmem_ssz <= idex_ssz;
         exmem_sd_raw <= idex_sd_raw; exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
-        exmem_wbval <= idex_wbval; exmem_result <= idex_wbval;
+        exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
+        exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
+        exmem_r1 <= idex_r1;
         idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
         pc_if <= br_tgt_ex & 32'hFFFFFFFE;
       end else begin
@@ -207,10 +206,12 @@ module top_pipe (
         exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;
         exmem_f3 <= ce_f3; exmem_ea <= idex_ea; exmem_ssz <= idex_ssz;
         exmem_sd_raw <= idex_sd_raw; exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
-        exmem_wbval <= idex_wbval; exmem_result <= idex_wbval;
+        exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
+        exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
+        exmem_r1 <= idex_r1;
 
         idex_valid <= ifid_valid;
-        idex_pc <= ifid_pc; idex_insn <= ifid_insn; idex_r1 <= ifid_r1_fwd; idex_r2 <= ifid_r2_fwd;
+        idex_pc <= ifid_pc; idex_insn <= ifid_insn; idex_r1 <= idex_r1_cs; idex_r2 <= ifid_r2_fwd;
         idex_pred_taken <= ifid_pred_taken; idex_pred_tgt <= ifid_pred_tgt;
         idex_m_done <= ifid_valid ? !(ceif_m && !ceif_ill) : 1'b1;
         if (conflict) begin

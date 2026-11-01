@@ -176,3 +176,57 @@ hdl make synth
 - Synthesis count is the small-RAM proof variant from `make synth`, not the full simulator memory.
 - Formal verification remains model-level pipeline invariants from M2; branch-predictor equivalence is not yet proven.
 
+## M5: Zicsr, machine-mode traps, counters, timer, xhalt
+
+### Worked
+- Added CSR/SYSTEM decode flags in `rtl/ctrl.sv`: Zicsr `is_csr`, SYSTEM ECALL/EBREAK classification, illegal SYSTEM, and FENCE handling.
+- Added `rtl/csrs.sv`: CSR register state, `mstatus`, `mtvec`, `mepc`, `mcause`, `mcycle`, `minstret`, `mtime`, `mtimecmp`, `xhalt`, counters, and trap/halt state.
+- Added `rtl/csrs_pipe.sv`: wraps CSR read/write/retire, idex-stage CSR old-value read, trap mode, timer flush, trap flush, and `xhalt` halt output.
+- Refactored `rtl/top_pipe.sv` to call `csrs_pipe` and split combinational blocks so `stall`/`m_stall` do not depend on trap outputs; current file is 244 lines.
+- Added `rtl/fetch_pred.sv`: wraps `ifdec`, BTB, and branch prediction target selection; top file remains under 250 lines.
+- Added CSR operand forwarding through `rtl/ctrl.sv`, `rtl/regs32.sv`, `rtl/fwd.sv`, and `idex_r1_cs` path in `rtl/top_pipe.sv`.
+- Added directed tests `t09_csr`, `t10_ecall`, `t11_ebreak`, `t12_illegal`, and `t13_timer`.
+- Updated `iss/iss.py` for Zicsr semantics, machine traps, timer traps, `mstatus`, `mepc`, `mcause`, `mtvec`, `mtimecmp`, `mtime` as read-only `mcycle`, and `xhalt` stop behavior.
+- `make test` passes 13 directed tests, including all M5 CSR/trap/timer tests.
+- `make ui` passes all 42 official RV32UI tests.
+- `make um` passes all 8 official RV32UM tests.
+- `make regress N=5000` passes and prints `ALL PASS`.
+- `make lint` passes with no warnings for the new helpers.
+- `make synth` passes; Yosys small-RAM `top_pipe` synthesis reports `38467` cells and no latches.
+- Measured UI aggregate from RTL logs: `12389 instrs / 13937 cycles`, IPC `0.889`.
+- Measured UM aggregate from RTL logs: `1917 instrs / 9698 cycles`, IPC `0.198`.
+
+### Failed / fixed
+- The first `mstatus`/trap handling created Verilator `UNOPTFLAT` cycles because counter/mstatus/halt updates depended on `trap_en`, while trap enable depended on stale current CSR state.
+  - Fix: compute `after_mcycle`, `after_minstret`, `after_mtimecmp`, `mstatus_next`, and `halt_wr` in a trap-independent block; expose `mc_next`, `mtcmp_next`, `mstatus_next`, and `halt_out` through the helper.
+- The timer test initially fired late because top used stale `cs_mtimecmp`/`cs_mstatus` while the next CSR state was being written in the same cycle.
+  - Fix: timer uses `mc_next >= mtcmp_next`; top trap mode uses `mstatus_next[11]`.
+- After `xhalt`, an extra retire line appeared because the top still used the old halt state rather than the halt produced by the current `xhalt` write.
+  - Fix: `halt_out` is now `halt_wr`, and top `halt <= halt || exmem_stop || halt_out`.
+- Splitting helper modules initially exposed unused helper inputs and width mismatches; removed unused `alu_res`/`idex_pred_tgt` helper inputs and fixed `exmem_r1` as 32-bit.
+- Helper refactoring initially created Verilator cycles through combined top `always_comb` blocks; split top logic so `stall`/`m_stall` are independent of branch/trap/CSR outputs.
+
+### How to run
+```sh
+hdl make test
+hdl make ui
+hdl make um
+hdl make regress N=5000
+hdl make lint
+hdl make synth
+```
+
+### Metrics
+| Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
+|---|---:|---:|---:|---:|
+| M5 | 13 directed + 5000 random + 42 UI + 8 UM | 0.889 UI, 0.198 UM | 38467 (small RAM proof variant) | n/a |
+
+### Synthesis proof
+- Yosys command uses the 16-word `mem32_small.sv` proof variant and synthesizes `top_pipe` with `csrs_pipe`, `fetch_pred`, and CSR helpers.
+- Result: no errors, no latches, `38467` total cells in the hierarchy.
+
+### Honest limitations
+- This is a local Zicsr/trap/timer/xhalt model compatible with the directed tests, ISS, and official UI/UM suites; it is not yet an iCE40 FPGA design, UART, cache, or benchmark SPEC CPU design.
+- Formal proof is still model-level pipeline invariants from M2; CSR/trap/timer equivalence is not fully formalized.
+- The UM IPC remains low because the current multi-cycle M unit dominates those tests; Zicsr/trap additions did not change official UI/UM totals materially.
+
