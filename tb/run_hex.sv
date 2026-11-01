@@ -17,12 +17,14 @@ module run_hex ();
   logic [3:0]  ex_sbe;
   logic        ex_st;
   logic        rv_valid;
+  logic [31:0] bp_branches, bp_taken_preds, bp_mispreds;
 
   `TOP T(.clk(clk), .reset(reset), .lwe(lwe), .lwa(lwa), .lwd(lwd),
          .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
          .ex_wben(wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
          .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_sbe(ex_sbe),
-         .rv_valid(rv_valid));
+         .rv_valid(rv_valid), .bp_branches(bp_branches),
+         .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
 
   logic [31:0] prog [0:4095];
   int n, done, cycles;
@@ -67,6 +69,8 @@ module run_hex ();
     end
     if (!halt) $display("#NOTERM after %d instrs", n);
     $display("#SUMMARY INSN=%0d CYCLES=%0d IPC=%0.3f HALT=%0d", n, cycles, (cycles != 0) ? real'(n) / cycles : 0.0, halt ? 1 : 0);
+    $display("#BPSTAT BR=%0d TAKEN=%0d MISPRED=%0d ACC=%0.3f", bp_branches, bp_taken_preds, bp_mispreds,
+             (bp_branches != 0) ? 100.0 - (100.0 * real'(bp_mispreds)) / real'(bp_branches) : 0.0);
 `ifndef VRUNTIME
     $dumpfile("wave.vcd");
     $dumpvars(0, run_hex);

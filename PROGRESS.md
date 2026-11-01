@@ -141,3 +141,38 @@ hdl make synth
 - M3 is verified in the five-stage pipeline design. The single-cycle top decodes M and prevents M writeback, but it does not execute M instructions and is not expected to pass RV32UM tests.
 - The synthesis cell count is the small-RAM proof variant used by `make synth`, not the full simulator RAM.
 - Formal proof is still model-level pipeline invariants from M2; M execution formal equivalence is not yet proven.
+
+## M4: Branch predictor
+
+### Worked
+- Added a fetch-time BTB + 2-bit saturating-counter predictor in `rtl/btb.sv`: 64 direct-mapped entries indexed by `pc[7:2]`, tagged with `pc[31:8]`.
+- Conditional branches are predicted taken only when the 2-bit counter is `3`; `JAL` is predicted taken; `JALR` is predicted taken only when a valid BTB target exists.
+- Moved fetch branch/jump classification into `rtl/ifdec.sv` and predictor target selection into `rtl/bpif.sv`, keeping `rtl/top_pipe.sv` under the file-size target at 243 lines.
+- Split pipeline helpers into `rtl/branch.sv`, `rtl/store.sv`, `rtl/ldext.sv`, `rtl/ldst.sv`, and `rtl/fwd.sv`.
+- Added directed branch-predictor test `tests/t08_bp.S`; `make test` now includes `t08_bp`.
+- Fixed a branch-prediction inversion in `rtl/branch.sv`: an actual not-taken branch with a predicted-taken path is a misprediction (`wrong_pred = branch_is && pred_taken`).
+- Removed the redundant `ifdef FORMAL` block from `rtl/top_pipe.sv` after the split; the model-level proof target remains `formal/pipe_check.sv`.
+- `make lint` passes for the pipeline top with `top_pipe`, BTB, predictor helpers, and forwarding helpers.
+- `make test`, `make regress N=5000`, `make ui`, and `make um` pass after the split.
+- Measured M4 UI totals from RTL logs: `12389 instrs / 13937 cycles`, IPC `0.889`.
+- Measured M4 UI branch stats: `BR=2187`, predicted taken `129`, mispredictions `503`, accuracy `77.000%`.
+- Measured M4 UM totals from RTL logs: `1917 instrs / 9698 cycles`, IPC `0.198`.
+- Measured M4 UM branch stats: `BR=302`, predicted taken `0`, mispredictions `68`, accuracy `77.483%`.
+- Measured M4 synthesis proof variant: `34491` total cells in the small-RAM pipeline hierarchy.
+
+### Failed / fixed
+- The branch-predictor split exposed an inverted wrong-prediction condition for not-taken branches. Before the fix, directed `t03_control` and `t08_bp` could retire wrong PC paths after an actual not-taken branch predicted taken.
+- A first attempt to move both fetch decode and predictor target selection into one `bpif.sv` created Verilator `UNOPTFLAT` circular combinational logic because `ifdec` outputs fed BTB query while BTB query outputs fed predictor selection.
+- Fix: split decode into `rtl/ifdec.sv` and target selection into `rtl/bpif.sv`, keeping the dependency acyclic.
+
+### Metrics
+| Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
+|---|---:|---:|---:|---:|
+| M4 | 8 directed + 5000 random + 42 UI + 8 UM | 0.889 UI, 0.198 UM | 34491 (small RAM proof variant) | n/a |
+
+### Honest limitations
+- M4 predictor accuracy is measured from the local RV32UI and RV32UM logs, not SPEC or benchmark suites.
+- The UM IPC is low because the current multi-cycle M unit dominates those tests; the predictor still helps the UI mix.
+- Synthesis count is the small-RAM proof variant from `make synth`, not the full simulator memory.
+- Formal verification remains model-level pipeline invariants from M2; branch-predictor equivalence is not yet proven.
+

@@ -1,7 +1,7 @@
-RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32.sv rtl/regs32.sv
+RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im -mabi=ilp32
@@ -132,4 +132,4 @@ clean:
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
 	verilator --lint-only -Wall --timing $(RTL_SINGLE) $(TB)
-	yosys -p 'read_verilog -sv rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32_small.sv rtl/regs32.sv; synth -top top_pipe; stat'
+	yosys -p 'read_verilog -sv rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu.sv rtl/mem32_small.sv 		rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv; synth -top top_pipe; stat'
