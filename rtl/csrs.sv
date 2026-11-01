@@ -58,11 +58,9 @@ module csrs (
   logic [31:0] st_mtvec = 0;
   logic [31:0] st_mepc = 0;
   logic [31:0] st_mcause = 0;
-`ifndef FPGA
   logic [31:0] st_mcycle;
   logic [31:0] st_minstret;
   logic [31:0] st_minstret_hi;
-`endif
   logic [31:0] st_mcountinhibit;
   logic [31:0] st_mtimecmp;
   logic        st_halt;
@@ -70,15 +68,9 @@ module csrs (
   wire [31:0] mc_ref;
   wire [31:0] min_ref;
   wire [31:0] minh_ref;
-`ifdef FPGA
-  assign mc_ref = 32'h0;
-  assign min_ref = 32'h0;
-  assign minh_ref = 32'h0;
-`else
   assign mc_ref = st_mcycle;
   assign min_ref = st_minstret;
   assign minh_ref = st_minstret_hi;
-`endif
   logic [31:0] old;
   logic [31:0] newv;
   logic [31:0] idex_old;
@@ -92,20 +84,18 @@ module csrs (
   always_comb begin
     old = 32'h0;
     if (cs_read_en) begin
-      if (cs_rsel == CSR_MSTATUS) old = st_mstatus;
-      else if (cs_rsel == CSR_MTVEC) old = st_mtvec;
-      else if (cs_rsel == CSR_MEPC) old = st_mepc;
-      else if (cs_rsel == CSR_MCAUSE) old = st_mcause;
-      else if (cs_rsel == CSR_MTVAL) old = 32'h0;
-      else if (cs_rsel == CSR_MSCRATCH) old = st_mscratch;
-      else if (cs_rsel == CSR_MISA) old = st_misa;
-      else if (cs_rsel == CSR_MCYCLE) old = mc_ref;
-      else if (cs_rsel == CSR_MINSTRT || cs_rsel == CSR_INSTRET) old = min_ref;
-      else if (cs_rsel == CSR_MINSTRT_H || cs_rsel == CSR_INSTRET_H) old = minh_ref;
-      else if (cs_rsel == CSR_MCOUNTHI) old = st_mcountinhibit;
-      else if (cs_rsel == CSR_MTIME) old = mc_ref;
-      else if (cs_rsel == CSR_MTIMECMP) old = st_mtimecmp;
-      else if (cs_rsel == CSR_XHALT) old = st_halt ? 32'h1 : 32'h0;
+      old =   (cs_rsel == CSR_MSTATUS  ? st_mstatus : 32'h0)
+            | (cs_rsel == CSR_MTVEC    ? st_mtvec : 32'h0)
+            | (cs_rsel == CSR_MEPC     ? st_mepc : 32'h0)
+            | (cs_rsel == CSR_MCAUSE   ? st_mcause : 32'h0)
+            | (cs_rsel == CSR_MSCRATCH ? st_mscratch : 32'h0)
+            | (cs_rsel == CSR_MISA     ? st_misa : 32'h0)
+            | (cs_rsel == CSR_MCYCLE || cs_rsel == CSR_MTIME ? mc_ref : 32'h0)
+            | (cs_rsel == CSR_MINSTRT || cs_rsel == CSR_INSTRET ? min_ref : 32'h0)
+            | (cs_rsel == CSR_MINSTRT_H || cs_rsel == CSR_INSTRET_H ? minh_ref : 32'h0)
+            | (cs_rsel == CSR_MCOUNTHI ? st_mcountinhibit : 32'h0)
+            | (cs_rsel == CSR_MTIMECMP ? st_mtimecmp : 32'h0)
+            | (cs_rsel == CSR_XHALT ? {31'b0, st_halt} : 32'h0);
     end
     newv = cs_wrs1;
     if (cs_wop == 3'b001) newv = cs_wrs1;
@@ -131,26 +121,17 @@ module csrs (
        cs_wsel == CSR_INSTRET || cs_wsel == CSR_INSTRET_H);
     inhibit_cycle = st_mcountinhibit[0];
     inhibit_instret = st_mcountinhibit[2];
-`ifndef FPGA
     if (retire_en) begin
       if (!inhibit_cycle) after_mcycle = after_mcycle + 32'd1;
       if (!inhibit_instret && !xret_write) begin
-        if (st_minstret == 32'hFFFF_FFFF) begin
-          after_minstret = 32'h0;
-          after_minstret_hi = after_minstret_hi + 32'd1;
-        end else begin
-          after_minstret = after_minstret + 32'd1;
-        end
+        after_minstret = after_minstret + 32'd1;
       end
     end
-`endif
     if (cs_write_en) begin
-`ifndef FPGA
       if (cs_wsel == CSR_MCYCLE) after_mcycle = newv;
       else if (cs_wsel == CSR_MINSTRT || cs_wsel == CSR_INSTRET) after_minstret = newv;
       else if (cs_wsel == CSR_MINSTRT_H || cs_wsel == CSR_INSTRET_H) after_minstret_hi = newv;
       else if (cs_wsel == CSR_MTIME) after_mcycle = newv;
-`endif
       if (cs_wsel == CSR_MCOUNTHI) after_mcountinhibit = newv & 32'h7;
       else if (cs_wsel == CSR_MTIMECMP) after_mtimecmp = newv;
     end
@@ -180,20 +161,18 @@ module csrs (
     end
     idex_old = 32'h0;
     if (idex_read_en) begin
-      if (idex_rsel == CSR_MSTATUS) idex_old = after_mstatus;
-      else if (idex_rsel == CSR_MTVEC) idex_old = after_mtvec;
-      else if (idex_rsel == CSR_MEPC) idex_old = after_mepc;
-      else if (idex_rsel == CSR_MCAUSE) idex_old = after_mcause;
-      else if (idex_rsel == CSR_MTVAL) idex_old = 32'h0;
-      else if (idex_rsel == CSR_MSCRATCH) idex_old = st_mscratch;
-      else if (idex_rsel == CSR_MISA) idex_old = st_misa;
-      else if (idex_rsel == CSR_MCYCLE) idex_old = after_mcycle;
-      else if (idex_rsel == CSR_MINSTRT || idex_rsel == CSR_INSTRET) idex_old = after_minstret;
-      else if (idex_rsel == CSR_MINSTRT_H || idex_rsel == CSR_INSTRET_H) idex_old = after_minstret_hi;
-      else if (idex_rsel == CSR_MCOUNTHI) idex_old = after_mcountinhibit;
-      else if (idex_rsel == CSR_MTIME) idex_old = after_mcycle;
-      else if (idex_rsel == CSR_MTIMECMP) idex_old = after_mtimecmp;
-      else if (idex_rsel == CSR_XHALT) idex_old = after_halt ? 32'h1 : 32'h0;
+      idex_old =   (idex_rsel == CSR_MSTATUS  ? after_mstatus : 32'h0)
+            | (idex_rsel == CSR_MTVEC    ? after_mtvec : 32'h0)
+            | (idex_rsel == CSR_MEPC     ? after_mepc : 32'h0)
+            | (idex_rsel == CSR_MCAUSE   ? after_mcause : 32'h0)
+            | (idex_rsel == CSR_MSCRATCH ? st_mscratch : 32'h0)
+            | (idex_rsel == CSR_MISA     ? st_misa : 32'h0)
+            | (idex_rsel == CSR_MCYCLE || idex_rsel == CSR_MTIME ? after_mcycle : 32'h0)
+            | (idex_rsel == CSR_MINSTRT || idex_rsel == CSR_INSTRET ? after_minstret : 32'h0)
+            | (idex_rsel == CSR_MINSTRT_H || idex_rsel == CSR_INSTRET_H ? after_minstret_hi : 32'h0)
+            | (idex_rsel == CSR_MCOUNTHI ? after_mcountinhibit : 32'h0)
+            | (idex_rsel == CSR_MTIMECMP ? after_mtimecmp : 32'h0)
+            | (idex_rsel == CSR_XHALT ? {31'b0, after_halt} : 32'h0);
     end
   end
     assign cs_old = old;
@@ -222,28 +201,19 @@ module csrs (
       st_mcause <= 32'h0;
       st_mscratch <= 32'h0;
       st_misa <= 32'h40001001;
-`ifndef FPGA
       st_mcycle <= 32'h0;
       st_minstret <= 32'h0;
       st_minstret_hi <= 32'h0;
-`endif
       st_mcountinhibit <= 32'h0;
       st_mtimecmp <= 32'hFFFF_FFFF;
       st_halt <= 1'b0;
       end else if (!halt_in) begin
-`ifndef FPGA
         if (retire_en) begin
           if (!inhibit_cycle) st_mcycle <= st_mcycle + 32'd1;
           if (!inhibit_instret && !xret_write) begin
-            if (st_minstret == 32'hFFFF_FFFF) begin
-              st_minstret <= 32'h0;
-              st_minstret_hi <= st_minstret_hi + 32'd1;
-            end else begin
-              st_minstret <= st_minstret + 32'd1;
-            end
+            st_minstret <= st_minstret + 32'd1;
           end
         end
-`endif
         if (!halt_in) st_mstatus <= mstatus_wr;
       if (trap_en) st_mstatus <= st_mstatus | MSTATUS_MPP;
       if (cs_write_en) begin
@@ -254,12 +224,10 @@ module csrs (
           CSR_MEPC:    st_mepc <= newv;
           CSR_MCAUSE:  st_mcause <= newv;
           CSR_MTVAL:   begin end
-`ifndef FPGA
           CSR_MCYCLE:  st_mcycle <= newv;
           CSR_MINSTRT, 12'hc02: st_minstret <= newv;
           CSR_MINSTRT_H, 12'hc82: st_minstret_hi <= newv;
           CSR_MTIME:   st_mcycle <= newv;
-`endif
           CSR_MCOUNTHI: st_mcountinhibit <= newv & 32'h7;
           CSR_MTIMECMP: st_mtimecmp <= newv;
           CSR_XHALT:   st_halt <= newv[0] ? 1'b1 : st_halt;

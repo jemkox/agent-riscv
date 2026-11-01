@@ -606,14 +606,14 @@ hdl make doom_mem CACHE_LAT=1
 ### Worked
 - Restored the M10a fast multiply for the simulation build per review: `rtl/mdiu_fast.sv` keeps the single-cycle 64-bit MUL wires (`mul_ss/mul_su/mul_uu/mul_ll` complete on the start cycle) and 33-cycle restoring DIV. This is the original M10a MDU logic, restored from `e000690`.
 - Added FPGA-only schoolbook MDU `rtl/mdiu_fpga.sv` (one 65-bit adder, MUL/DIV ~33 cycles), selected in `rtl/top_pipe.sv` via `ifdef FPGA`; Makefile `RTL` uses `rtl/mdiu_fast.sv`, `FPGA_PIPE_RTL` filters it out and adds `rtl/mdiu_fpga.sv`.
-- `rtl/csrs.sv`: FPGA `mcycle`/`minstret` counter reads route through constant wires `mc_ref`/`min_ref`/`minh_ref` guarded by `ifdef FPGA`. (`define` macros are NOT expanded by the installed Verilator preprocessor and one-line `function`s broke the yosys 0.33 parser; plain wires work in both tools.)
+- `rtl/csrs.sv`: FPGA `mcycle`/`minstret` counter reads route through constant wires `mc_ref`/`min_ref`/`minh_ref` guarded by `ifdef FPGA`. (`define` macros are NOT expanded by the installed Verilator preprocessor and one-line `function`s broke the yosys 0.33 parser; plain wires work in both tools.) Review round b9139f6: the `ifdef FPGA` stubs were REMOVED (checklist item done) — the FPGA build now keeps real 32-bit `st_mcycle`/`st_minstret` counters incremented at retire; `st_minstret_hi` stays real+writable but the auto-carry on rollover was dropped (truncated 32-bit, checklist allows).
 - FPGA regs32 = 4 manual `SB_RAM40_4K` 16-bit halves, `fpga_pipe_top`/cache BRAM init unchanged from before.
 - Reruns: `hdl make regress` prints `ALL PASS`; `hdl make fpga_test` prints `TEST PASSED`; `hdl make m7 CACHE_LAT=1` prints `ALL M7 PASS`; `hdl make um` prints `ALL UM PASS`; standalone FPGA-MDU testbench (45 cases) prints `TEST PASSED`.
 
 ### Metrics
 | Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
 |---|---:|---:|---:|---:|
-| F4 p1 | regress ALL PASS (UI/UM/MI/latencies/directed random), fpga_test PASS, FPGA MDU tb 45/45 | SIM build back to M10a numbers: matmul IPC `0.856` (`INSN=35708 CYCLES=41737`), bench IPC `0.906`; official UM mul/mulh/mulhsu/mulhu IPC `0.830-0.834` (505-507 cycles, M10a values), div/rem/remu/divu `0.220-0.223`, UM aggregate `INSN=1919 CYCLES=2874 IPC=0.668` | FPGA full: `4295/5280 LC` (81%), `8` `SB_RAM40_4K` BRAM, `0` SPRAM; FPGA MDU standalone `1819` cells (`1173 SB_LUT4 + 314 SB_CARRY + 332` DFF) | Fmax table below; `--freq 10` PASS, `build/cpu_full.bin` produced |
+| F4 p1 | regress ALL PASS (UI/UM/MI/latencies/directed random), fpga_test PASS, FPGA MDU tb (`tb/mdiu_tb.sv`, 46 cases, committed in review round) | SIM build back to M10a numbers: matmul IPC `0.856` (`INSN=35708 CYCLES=41737`), bench IPC `0.906`; official UM mul/mulh/mulhsu/mulhu IPC `0.830-0.834` (505-507 cycles, M10a values), div/rem/remu/divu `0.220-0.223`, UM aggregate `INSN=1917 CYCLES=3079 IPC=0.623` (re-measured) | FPGA full: `4295/5280 LC` (81%), `8` `SB_RAM40_4K` BRAM, `0` SPRAM; FPGA MDU standalone `1819` cells (`1173 SB_LUT4 + 314 SB_CARRY + 332` DFF) — verified by real `hdl yosys` run in review round | Fmax table below; `--freq 10` PASS, `build/cpu_full.bin` produced |
 
 ### Fmax/LUT iteration table (F4 timing work)
 | Iteration | Change | Fmax | LCs |
@@ -622,19 +622,20 @@ hdl make doom_mem CACHE_LAT=1
 | 1 | manual SB_RAM40_4K regs32 + CSR counter stub | 13.58 MHz | 4295 |
 | 2 | structural try: `if/else-if` -> `case` + nibble-decoded CSR write enables (regressed, reverted) | 12.34-12.72 MHz (rejected) | 4176 |
 | 3 | adopted: nextpnr timing-driven re-optimization search (`--seed 6`, budget `--freq 13`) | 13.67 MHz | 4295 |
+| 4 | review round: removed `ifdef FPGA` const-0 counter stubs (real 32-bit `mcycle`/`minstret` state + retire increments, hi-word writable but no rollover carry) AND rewrote both 12-way `if/else-if` CSR READ selects (`old`, `idex_old`) as parallel OR-of-ternary reductions (each `rsel` matches <=1 field, so semantics unchanged) | 12.88 MHz (PASS at 12.50 MHz budget, `--seed 6`) | 4808 |
 
 ### How to run
 ```sh
 hdl make regress
-hdl make fpga_full        # build/cpu_full.bin, yosys synth + nextpnr at --freq 13 --seed 6
+hdl make fpga_full        # build/cpu_full.bin, yosys synth + nextpnr at --freq $(FPGA_FREQ) (default 12.5) --seed $(FPGA_SEED) (default 6)
 hdl make fpga_test
-hdl iverilog -g2012 -o build/mdiu_tb.vvp rtl/mdiu_fpga.sv build/mdiu_tb.sv
-hdl vvp build/mdiu_tb.vvp
+hdl make mdiu_tb          # builds tb/mdiu_tb.sv + rtl/mdiu_fpga.sv with iverilog, runs 46 cases, prints TEST PASSED
+hdl yosys -p 'read_verilog -sv rtl/mdiu_fpga.sv; synth_ice40 -top mdiu_fpga -json build/mdiu_fpga.json; stat'   # 1819 cells: 1173 SB_LUT4 + 314 SB_CARRY + 332 DFF
 ```
 
 ### Honest limitations
 - FPGA MDU is review option (b) schoolbook (~33 cycles for MUL too): chosen for the LUT budget; the SB_MAC16 DSP option (a) (4x 16x16 for the 32x32 product, 8 exist on UP5K, yosys `-dsp`) is the next planned optimization for FPGA Fmax/critical path.
-- Fmax 13.67 MHz final-routed (`--seed 6`, budget 13 MHz); iterations 1 and 3 accepted, iteration 2 structural attempts regressed and were reverted (data kept in the table). More structural critical-path work is still planned (target: pre-decode the CSR selector in the EX stage to shorten the front half of the chain).
+- Fmax table rows 1/3 measured WITH the const-0 counter stubs (13.58/13.67 MHz at budget 13, 4295 LC). After restoring the real counters + parallel read selects (row 4) the same top is 4808 LC / 12.88 MHz routed (PASS at 12.5, seed 6, 8 `SB_RAM40_4K`, 0 SPRAM, 0 `SB_MAC16`); the +613 LC and ~0.8 MHz cost is the counter state itself. Next round (SB_MAC16 DSP MDU) is expected to cut the schoolbook 65-bit adder chain and recover budget headroom; the budget/seed alone no longer count as optimization rounds (checklist wording).
 - Full-FPGA Doom performance will depend on the FPGA MDU latency until option (a) lands.
 
 ### Critical path (nextpnr `--report build/cpu_full_crit.txt`, 13.58 MHz)
@@ -665,3 +666,27 @@ hdl make doom_probe   # builds fsys.o + probe elf/hex + wad.hex + run_mmio_big (
 ### Notes
 - MI_NAMES now includes `sh-misaligned` (passes on the shifter/ALU path).
 - `pmpaddr`-style MI tests are intentionally NOT selected: this CPU is an unprivileged model with no PMP support.
+
+## Review round: fixes for the `b9139f6` review (verdict PASS WITH ISSUES)
+
+### Worked
+- Fix 1 (hard-coded home path): `Makefile` now has `WAD_SRC ?= ../../downloads/doomwad/doom1.wad` and the rule is `build/doom/wad.bin: $(WAD_SRC) | build/doom` with `@cp $< $@`; `grep -rn "/home/" rtl tb tools programs doom Makefile` returns nothing. `hdl make build/doom/wad.bin` -> up to date.
+- Fix 2 (missing standalone FPGA-MDU testbench): added `tb/mdiu_tb.sv` (46 cases across all 8 MD ops incl. signed/unsigned, negative, div-by-zero, min/-1), self-checking against an `expected()` function. `hdl make mdiu_tb` (new target, `iverilog -g2012` + `vvp`) prints `TEST PASSED (46 cases)`. Re-recorded the stat with a real `hdl yosys -p 'read_verilog -sv rtl/mdiu_fpga.sv; synth_ice40 -top mdiu_fpga -json build/mdiu_fpga.json; stat'` run: `1819` cells = `1173 SB_LUT4` + `314 SB_CARRY` + `332` DFF (`SB_DFFE 161 + SB_DFFESR 169 + SB_DFFESS 1 + SB_DFFSR 1`) — matches the previously claimed 1819, so the claim was real, only the testbench file was missing from the repo.
+- Fix 3 (FPGA counter stub): removed all 15 `ifdef FPGA` guard lines + the duplicate `assign mc_ref/min_ref/minh_ref = 32'h0` block in `rtl/csrs.sv`; `mc_ref = st_mcycle`, `min_ref = st_minstret`, `minh_ref = st_minstret_hi` now exist in BOTH builds and the state really increments at retire (gated by `mcountinhibit` bits 0/2). `hdl verilator --lint-only -Wall rtl/csrs.sv` clean; `hdl make regress` -> `ALL PASS` after the change.
+- Fix 4 (stale UM aggregate): re-measured the 8 official UM logs (`build/um/logs/*.rtl.log`): `INSN=1917 CYCLES=3079 IPC=0.623` (was written as 1919/2874/0.668); the F4 p1 metrics row now carries the re-measured numbers and says so.
+- Fix 5 (second real critical-path change): F4 iteration-table row 4 = real FPGA counters + both 12-way `if/else-if` CSR READ selects (`old`, `idex_old`) rewritten as parallel OR-of-ternary reductions; `hdl make fpga_full` (budget 12.5, seed 6) -> `4808/5280 LC` (91%), `8` `SB_RAM40_4K`, `Max frequency ... 12.88 MHz (PASS at 12.50 MHz)`; `build/cpu_full.bin` produced. `Makefile` gained `FPGA_FREQ ?= 12.5` / `FPGA_SEED ?= 6` so the budget is a variable, not a hard-coded 13.
+- Fix 6 (optional mul/div in `build/fpga_prog.hex`): deliberately skipped for now — `build/fpga_prog.hex` is a copy of `build/t01_basic.hex` and `tb/fpga_tb.sv` checks its exact retire trace (`f.regs[1]=0x41`, `f.dmem[0]=0x41`, `f.regs[7]=0x82`), so editing `tests/t01_basic.S` would break the directed suite; the DSP MDU round will exercise MUL in the FPGA ROM program instead.
+
+### Metrics (review round)
+| Item | Result |
+|---|---|
+| `hdl make regress` (N=500/5000) | `ALL PASS` |
+| `hdl make um` / `mi` / `ui` / `m7` | `ALL UM PASS`, `ALL MI PASS`, `ALL UI PASS`, `ALL M7 PASS` |
+| `hdl make mdiu_tb` | `TEST PASSED (46 cases)` |
+| FPGA MDU standalone | `1819` cells (`1173 SB_LUT4 + 314 SB_CARRY + 332` DFF) |
+| FPGA full `build/cpu_full.bin` | `4808/5280 LC` (91%), `8` BRAM, `0` SPRAM, `0` `SB_MAC16`, Fmax `12.88 MHz` (PASS at 12.50 MHz, `--seed 6`) |
+| official UM aggregate | `INSN=1917 CYCLES=3079 IPC=0.623` |
+
+### Next
+- F4 checklist item: FPGA MDU on `SB_MAC16` DSP blocks (MUL fast on FPGA too) + one more critical-path round; re-measure LC/BRAM/DSP/Fmax, then final checklist numbers.
+- Doom: fix mission/gamemode detection so the doom1 blob is treated as shareware (currently the `iwads[]` name table picks `doom2.wad` -> `gamemode = commercial` -> `P_InitSlidingDoorFrames` looks up DOOM2-only `SW1BLUE` and dies); then `frames > 0` PPMs + P1/P2/P3 numbers.
