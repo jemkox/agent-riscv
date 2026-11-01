@@ -711,6 +711,31 @@ hdl make doom_probe   # builds fsys.o + probe elf/hex + wad.hex + run_mmio_big (
 | FPGA full `build/cpu_full.bin` (`-dsp`, budget 13, seed 6) | `4710/5280 LC` (89%), `8` `SB_RAM40_4K`, `0` SPRAM, `1` `SB_MAC16`, Fmax `13.20 MHz` (PASS at 13.00 MHz) |
 | official UM aggregate (SIM, unchanged unit) | `INSN=1917 CYCLES=3079 IPC=0.623` |
 
+### Next (F4 checklist, later)
+- F4 checklist remaining: (already done in round 5) — keep for the final FPGA-numbers row after P-steps.
+
+## M10d: Doom renders 31 frames, halt=0 (committed as `b7d6544`)
+
+### Worked
+- Second CPU bug fixed in `rtl/top_pipe.sv`: on a stall (`stall`/`m_stall`) the EX operands now latch the FORWARDED `a_ex`/`b_ex` (they used to latch stale `idex_r1`/`idex_r2`). A `lw s6; lw a5; blt a5,s6` sequence compared a stale `s6` -> "bad texture directory", "gametic>lowtic" and striped frames. Directed test `tests/t15_ld_ld_br.S` (FAILed on the old RTL, PASSes now; committed). The earlier t14 load-use->store test and the `rtl/csrs.sv` `minstret` rollover carry are committed too.
+- `doom/ld.ld`: `.sbss` is now inside `.sbss->.bss` (it was never zeroed).
+- `doom/fsys_rv32.c` + `doom/src/w_file_stdc.c`: explicit `fs_open`/`fs_readat` fd layer (no bogus FILE* casts); debug marks removed from the Doom sources.
+- Doom sources are free of debug prints (`DBG2`/`DBGTR`/`DL`/`CP`/`TR`/`MF`/`S%03d` all gone from the committed tree).
+- Mission detection: `d_main.c` scans lump contents (E1M1/MAP01) so the doom1 blob is treated as shareware regardless of the `iwads[]` name table.
+
+### Metrics (M10d, all measured this session)
+| Item | Result |
+|---|---|
+| `hdl make doom` | `#RUN cycles=124092703 insns=112822564 frames=31 halt=0`; `#frame=` deltas `~2341123-2342297 cycles/frame` |
+| `hdl make test` / `regress` | `ALL PASS` (incl. `t15_ld_ld_br`, `t14_ldst_stall`) |
+| `hdl make ui` / `um` / `mi` | `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS` (incl. `instret_overflow` after the csrs carry) |
+| `hdl make m7` | `ALL M7 PASS` |
+| `hdl make lat5` / `lat20` | `ALL PASS` |
+| Frame images | 31 PPMs in `build/doom/frames/`; samples copied to `docs/doom/title.png`, `mid.png`, `last.png` (320x200) |
+
+### Honest limitations (M10d)
+- The 31 frames are byte-identical (same md5): the clean, un-striped TITLE screen is redrawn every tick; the in-game attract demo does not animate yet (no `DEMO1` playback / status progression). "30 consecutive correct frames" = 31 identical correct title-screen frames; real in-game frames are still open (P1/P3 work + demo lumps).
+
 ### Next
-- Doom (M10): commit the working-tree fixes (store-stall `idex_valid && !stall` cache MM hookup in `rtl/top_pipe.sv`, byte-exact WAD copy, `fsys_rv32.c` `WAD_LEN` + exact `doom1.wad` open, `w_wad.c` `filelump_t` upstream field order, `-iwad doom1.wad` + `doomgeneric_Tick()` loop in `port_rv32.c`) after adding a directed load-use-then-store test (`lw a2,..; sw x,16(a2)`) and removing the leftover debug prints in `doom/src/*`, `doom/crt0_rv32.S`, `rtl/cache32.sv` DOOM_BIG debug ports; then real frame PNGs from backing RAM and P1/P2/P3 (frames/s, >=15M cycles/s sim speed, playable).
-- Doom: fix mission/gamemode detection so the doom1 blob is treated as shareware (currently the `iwads[]` name table picks `doom2.wad` -> `gamemode = commercial` -> `P_InitSlidingDoorFrames` looks up DOOM2-only `SW1BLUE` and dies); then `frames > 0` PPMs + P1/P2/P3 numbers.
+- P2 simulation speed: Doom runner must be a Verilator C++ main (`-O3 --x-assign fast --x-initial fast`, no per-instruction logging); target >= 15M cycles/s (now ~3.5M). Measure cycles/s from wall-clock.
+- Then M10f `hdl make play` (SDL2 window + keyboard), then P1/P3/M10e, then final F4 checklist numbers.
