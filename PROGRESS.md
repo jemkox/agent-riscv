@@ -71,8 +71,15 @@ hdl make lint
 ### Metrics
 | Milestone | Tests passed | IPC | Cells/LUTs | Fmax |
 |---|---:|---:|---:|---:|
-| M2 | 6 directed + 200 random + 42 UI | ~1.00 expected | n/a | n/a |
+| M2 | 6 directed + 5000 random + 42 UI | 0.873 | 16768 (small RAM proof variant) | n/a |
+
+### Formal proof
+- Added `formal/pipe_check.sv` and `formal/pipeline.sby`.
+- `hdl sby -f formal/pipeline.sby` from the `formal/` directory passes k-induction in `mode prove`.
+- Proved compact inductive invariants: PC alignment, no simultaneous stall/flush, valid-stage PC alignment, and architectural x0 writes cannot make x0 nonzero.
+- The full top-level pipeline memory proof was too slow with z3; this is a model-level proof of the pipeline invariants, not full equivalence to `top_pipe.sv`.
 
 ### Honest limitations
 - M2 currently targets simulation RV32I behavior and official UI pass; FPGA synthesis of the full pipeline RAM has not been evaluated as the M1 synthesis proof used a small RAM variant.
-- M extension, CSR, and formal verification are not yet included.
+- M extension, CSR, cache, UART, and FPGA build are not yet included.
+- Formal verification proves the compact model-level invariants, not full equivalence of every pipeline bit.

@@ -1,0 +1,69 @@
+SBY  2:30:49 [pipeline] Removing directory '/home/jemko/agent-workspace/hdl/rv32cpu/formal/pipeline'.
+SBY  2:30:49 [pipeline] Copy '/home/jemko/agent-workspace/hdl/rv32cpu/formal/pipe_check.sv' to '/home/jemko/agent-workspace/hdl/rv32cpu/formal/pipeline/src/pipe_check.sv'.
+SBY  2:30:49 [pipeline] engine_0: smtbmc z3
+SBY  2:30:49 [pipeline] base: starting process "cd pipeline/src; yosys -ql ../model/design.log ../model/design.ys"
+SBY  2:30:49 [pipeline] base: finished (returncode=0)
+SBY  2:30:49 [pipeline] prep: starting process "cd pipeline/model; yosys -ql design_prep.log design_prep.ys"
+SBY  2:30:49 [pipeline] prep: finished (returncode=0)
+SBY  2:30:49 [pipeline] smt2: starting process "cd pipeline/model; yosys -ql design_smt2.log design_smt2.ys"
+SBY  2:30:49 [pipeline] smt2: finished (returncode=0)
+SBY  2:30:49 [pipeline] engine_0.basecase: starting process "cd pipeline; yosys-smtbmc -s z3 --presat --noprogress -t 20  --append 0 --dump-vcd engine_0/trace.vcd --dump-yw engine_0/trace.yw --dump-vlogtb engine_0/trace_tb.v --dump-smtc engine_0/trace.smtc model/design_smt2.smt2"
+SBY  2:30:49 [pipeline] engine_0.induction: starting process "cd pipeline; yosys-smtbmc -s z3 --presat -i --noprogress -t 20  --append 0 --dump-vcd engine_0/trace_induct.vcd --dump-yw engine_0/trace_induct.yw --dump-vlogtb engine_0/trace_induct_tb.v --dump-smtc engine_0/trace_induct.smtc model/design_smt2.smt2"
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Solver: z3
+SBY  2:30:49 [pipeline] engine_0.induction: ##   0:00:00  Solver: z3
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 0..
+SBY  2:30:49 [pipeline] engine_0.induction: ##   0:00:00  Trying induction in step 20..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 0..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 1..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 1..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 2..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 2..
+SBY  2:30:49 [pipeline] engine_0.induction: ##   0:00:00  Trying induction in step 19..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 3..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 3..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 4..
+SBY  2:30:49 [pipeline] engine_0.induction: ##   0:00:00  Temporal induction successful.
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 4..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 5..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 5..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 6..
+SBY  2:30:49 [pipeline] engine_0.induction: ##   0:00:00  Status: passed
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 6..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 7..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 7..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 8..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 8..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 9..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 9..
+SBY  2:30:49 [pipeline] engine_0.induction: finished (returncode=0)
+SBY  2:30:49 [pipeline] engine_0.induction: Status returned by engine for induction: pass
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 10..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 10..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 11..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 11..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 12..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 12..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 13..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 13..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 14..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 14..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 15..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 15..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 16..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 16..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 17..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 17..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 18..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 18..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assumptions in step 19..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Checking assertions in step 19..
+SBY  2:30:49 [pipeline] engine_0.basecase: ##   0:00:00  Status: passed
+SBY  2:30:49 [pipeline] engine_0.basecase: finished (returncode=0)
+SBY  2:30:49 [pipeline] engine_0.basecase: Status returned by engine for basecase: pass
+SBY  2:30:49 [pipeline] summary: Elapsed clock time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY  2:30:49 [pipeline] summary: Elapsed process time [H:MM:SS (secs)]: 0:00:00 (0)
+SBY  2:30:49 [pipeline] summary: engine_0 (smtbmc z3) returned pass for basecase
+SBY  2:30:49 [pipeline] summary: engine_0 (smtbmc z3) returned pass for induction
+SBY  2:30:49 [pipeline] summary: engine_0 did not produce any traces
+SBY  2:30:49 [pipeline] summary: successful proof by k-induction.
+SBY  2:30:49 [pipeline] DONE (PASS, rc=0)

@@ -57,7 +57,7 @@ module top_pipe (
 
   regs32 RF(.clk(clk), .reset(reset), .rsel1(ifid_insn[19:15]), .rsel2(ifid_insn[24:20]),
             .rs1(rf_r1), .rs2(rf_r2),
-            .wena(mwb_valid && mwb_wben && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
+            .wena(mwb_valid && mwb_wben && (mwb_rd != 5'd0) && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
   mem32  MM(.clk(clk), .ia(pc_if), .id(fetch_insn), .la(exmem_ea), .ld(ldx_raw),
             .sw(exmem_valid && exmem_st && !halt && !reset), .sa(exmem_ea),
             .sd(exmem_sd_raw), .ssz(exmem_ssz), .lwe(lwe), .lwa(lwa), .lwd(lwd));
@@ -259,4 +259,24 @@ module top_pipe (
   assign ex_sd    = ex_st ? mwb_sd : 32'h0;
   assign ex_sbe   = ex_st ? mwb_sbe : 4'h0;
   assign rv_valid = mwb_valid && !reset;
+
+`ifdef FORMAL
+  always_comb begin
+    assert(pc_if[1:0] == 2'b00);
+    if (ifid_valid) assert(ifid_pc[1:0] == 2'b00);
+    if (idex_valid) assert(idex_pc[1:0] == 2'b00);
+    assert(!(stall && flush));
+    if (stall) begin
+      assert(exmem_valid && exmem_ld && (exmem_rd != 5'd0));
+      assert(idex_valid);
+      assert((read_a && (ce_rs1 == exmem_rd)) || (read_b && (ce_rs2 == exmem_rd)));
+    end
+    if (flush) assert(idex_valid);
+    if (conflict) begin
+      assert(idex_valid);
+      assert((idex_st && (pc_if == idex_ea)) ||
+             (exmem_valid && exmem_st && (pc_if == exmem_ea)));
+    end
+  end
+`endif
 endmodule

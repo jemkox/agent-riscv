@@ -25,14 +25,14 @@ module run_hex ();
          .rv_valid(rv_valid));
 
   logic [31:0] prog [0:4095];
-  int n, done;
+  int n, done, cycles;
 
   initial begin
     for (int k = 0; k < 4096; k++) prog[k] = 0;
 `ifdef TBHEX
     $readmemh(`TBHEX, prog);
 `else
-    $readmemh("/home/jemko/agent-workspace/hdl/rv32cpu/build/p.hex", prog);
+    $readmemh("build/p.hex", prog);  // relative: run from the project folder
 `endif
     // load phase: CPU frozen under reset, loader port pokes RAM
     reset = 1;
@@ -50,7 +50,7 @@ module run_hex ();
     reset = 0;
     #1;
     // run: log feeds (instruction about to commit), then commit
-    n = 0; done = 0;
+    n = 0; done = 0; cycles = 0;
     while (n < 200000 && done == 0) begin
       if (rv_valid) begin
         $display("%08x %08x %0d %08x %0d %08x %08x %0x",
@@ -62,10 +62,11 @@ module run_hex ();
       else begin
         clk = 1; #1;
         clk = 0; #1;
+        cycles = cycles + 1;
       end
     end
     if (!halt) $display("#NOTERM after %d instrs", n);
-    $display("#SUMMARY INSN=%d HALT=%0d", n, halt ? 1 : 0);
+    $display("#SUMMARY INSN=%0d CYCLES=%0d IPC=%0.3f HALT=%0d", n, cycles, (cycles != 0) ? real'(n) / cycles : 0.0, halt ? 1 : 0);
 `ifndef VRUNTIME
     $dumpfile("wave.vcd");
     $dumpvars(0, run_hex);

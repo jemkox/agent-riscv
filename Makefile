@@ -90,5 +90,6 @@ clean:
 	rm -rf build wave.vcd
 
 synth:
-	verilator --lint-only -Wall --timing $(RTL) $(TB)
-	yosys -p 'read_verilog -sv rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32_small.sv rtl/regs32.sv; synth -top top_single; stat'
+	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
+	verilator --lint-only -Wall --timing $(RTL_SINGLE) $(TB)
+	yosys -p 'read_verilog -sv rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32_small.sv rtl/regs32.sv; synth -top top_pipe; stat'

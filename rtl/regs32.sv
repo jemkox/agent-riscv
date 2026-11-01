@@ -22,4 +22,11 @@ module regs32 (
       rf[wsel] <= wdata;
     end
   end
+`ifdef FORMAL
+  always_comb begin
+    assert(!(wena && (wsel == 5'd0)));
+    if (rsel1 == 5'd0) assert(rs1 == 32'h0);
+    if (rsel2 == 5'd0) assert(rs2 == 32'h0);
+  end
+`endif
 endmodule

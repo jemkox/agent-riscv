@@ -1,0 +1,7 @@
+# running in pipeline/src/
+read_verilog -sv pipe_check.sv
+prep -top pipe_check
+
+hierarchy -smtcheck
+write_jny -no-connections ../model/design.json
+write_rtlil ../model/design.il
