@@ -187,6 +187,20 @@ build, including a **FAIL** where it caught the builder breaking an official
 test. [`PROGRESS.md`](PROGRESS.md) keeps the full history, including the
 failed attempts.
 
+## Who did what
+
+GitHub lists Claude as a contributor because 15 commits carry a
+`Co-Authored-By: Claude` line. Here is what those lines are, next to everyone
+else's part:
+
+| Who | What |
+|---|---|
+| **Me (jemkox)** | The idea and the goals (verified CPU, then Doom, then benchmarks); running the model locally; the agent setup and its rules (built together with Claude); supervising the build, deciding priorities and when to step in. |
+| **Builder agent** (local Qwen 3.8 Flash Next Coder) | The CPU: all RTL except 26 lines (`rtl/`, about 2,700 lines today), the Python reference model, the random test generator, directed tests t01–t14, the testbenches, the FPGA flow, the Doom port's file layer and runner, and the `PROGRESS.md` log. 36 commits on its own, about 11,000 lines added over the build (excluding the vendored Doom source). |
+| **Reviewer agent** (same local model) | The three reports in [`agent/reviews/`](agent/reviews/). |
+| **Claude** (Anthropic), the 15 co-authored commits | 26 lines of RTL: the two Doom bug fixes, plus test t15. Debugging fixes outside the CPU (Doom linker script, file layer, play-window keyboard timing). The agent harness scripts in `agent/`, written with me during setup (~1,600 lines). The CoreMark port (~1,300 lines, mostly EEMBC's own template files), the CI workflow, the installer, and this README and `docs/`. Some of these commits also carried the builder's own work. |
+| **Third-party code** | [doomgeneric](https://github.com/ozkl/doomgeneric) (`doom/src`), EEMBC CoreMark, riscv-tests conventions (`env/`). |
+
 ## What's next
 
 - Run DOOM on a real FPGA board with SDRAM (e.g. an ECP5 board), where it
