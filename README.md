@@ -9,10 +9,12 @@ official RISC-V test suites, routes on a **Lattice iCE40 UP5K** FPGA, and runs
 **DOOM** (shareware, unmodified game logic) cycle-accurately in Verilator, with
 a live window and keyboard.
 
-The whole design, its tests and the Doom port were written autonomously by a
-**local LLM coding agent** running on a consumer PC (no cloud model wrote the
-RTL). I designed the agent setup, the task, and the verification rules it had
-to obey, and reviewed the milestones. See [How it was built](#how-it-was-built).
+The design (about 2,700 lines of RTL), its tests and the Doom port were written
+autonomously by a **local LLM coding agent** running on a consumer PC. I designed
+the agent setup, the task, and the verification rules it had to obey, and
+reviewed the milestones. Claude (Anthropic) assisted with setup and review,
+including the fixes for the two bugs Doom found; every commit it touched is
+marked `Co-Authored-By: Claude`. See [How it was built](#how-it-was-built).
 
 ## Results
 
@@ -149,14 +151,35 @@ optimization history are in [`docs/DESIGN.md`](docs/DESIGN.md).
   "single-cycle RV32I" to "Doom runs".
 - **Supervision:** a watchdog restarted the agent when it stalled, and a
   second, read-only reviewer agent audited each milestone. Claude (Anthropic)
-  was used for setup, reviews and debugging: it found the stall-forwarding bug
-  above, the keyboard timing bug in the play harness, and a play test that
-  passed even with a dead keyboard.
+  was used for setup, reviews and debugging: it diagnosed and fixed both Doom
+  bugs above (about 15 lines in `rtl/top_pipe.sv`, with the builder's and its
+  own directed tests), fixed the Doom linker script and the keyboard timing in
+  the play harness, caught a play test that passed even with a dead keyboard,
+  and wrote this README and the CoreMark port.
+
+```mermaid
+flowchart LR
+  P[PROMPT.md<br/>task + rules] --> B[Builder agent<br/>local 125B LLM, opencode]
+  B -->|hdl sandbox| T[Verilator / Yosys / nextpnr<br/>riscv-gcc, SymbiYosys]
+  T -->|tool output| B
+  B -->|commits + PROGRESS.md| G[(git repo)]
+  W[Watchdog] -->|restart / nudge| B
+  R[Reviewer agent<br/>read-only] -->|milestone audits| B
+  G --> R
+  C[Claude: setup,<br/>reviews, debugging] -.-> G
+```
 - **Timeline:** first commit 2026-10-31 23:27, finished 2026-11-02 10:39
   (about 35 hours).
 
 [`PROGRESS.md`](PROGRESS.md) keeps the full history, including the failed
 attempts.
+
+## What's next
+
+- Run DOOM on a real FPGA board with SDRAM (e.g. an ECP5 board), where it
+  should reach roughly 12–20 fps.
+- Raise the FPGA clock beyond 13 MHz by pipelining the critical path.
+- Atomics, supervisor/user mode and an MMU, on the way to booting Linux.
 
 ## Honest limits
 
