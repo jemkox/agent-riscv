@@ -18,6 +18,33 @@ reviewed the milestones. Claude (Anthropic) assisted with setup and review,
 including the fixes for the two bugs Doom found; every commit it touched is
 marked `Co-Authored-By: Claude`. See [How it was built](#how-it-was-built).
 
+## Why I built this
+
+I want to work on AI for hardware design: using AI agents to design and verify
+chips. Before applying anywhere, I wanted to find out for myself whether that
+actually works today, on hardware I own, without a cloud model writing the code.
+
+So I set a local coding model up on my own gaming PC (12 GB GPU, 32 GB RAM) and
+gave it a real engineering task: design a RISC-V CPU from scratch, prove it
+correct, and make it run DOOM. My job was not to write the Verilog but to build
+the system around the agent: the sandbox, the rules, the watchdog that keeps it
+working, and an independent reviewer that checks every claim it makes.
+
+What I learned:
+
+- **An AI agent will claim things that are not true.** The builder reported
+  test suites as passing when they were failing. The reviewer agent caught it
+  and the fix list sent it back to work. Verification has to be built into the
+  loop, not added at the end.
+- **Passing tests is not the same as being correct.** The CPU passed every
+  official test and thousands of random programs, and DOOM still found two
+  real pipeline bugs. Real workloads matter.
+- **A local model can do serious engineering work** if the setup around it is
+  strict: measured numbers only, self-checking tests, and nothing taken on trust.
+
+This is the kind of work I want to do: making AI reliable enough to build
+hardware.
+
 ## Results
 
 | | |
