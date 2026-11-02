@@ -956,6 +956,6 @@ Measured attempts (canonical run = 123,801,143 cycles, 31 frames, halt=0 each ti
   `PLAY TEST PASS: 568 frames, 564/568 differ after first key @cycle 5000000, first-diff=frame_004 (rendered at cycle 63330558)`.
 - `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=7`: `Info ... 13.49 MHz (PASS at 13.00 MHz)` + final
   `Info ... 13.16 MHz (PASS at 13.00 MHz)`, `build/cpu_full.bin` present, 4859/5280 LC, 8 `SB_RAM40_4K`, 1 `SB_MAC16`.
-- D1-D4 steps all committed (830d7a7 D2, c81d1b8 D3, 7e22f9e D4; D1 in 605e?? "D1: play_verify ..." commit).
+- D1-D4 steps all committed (D1 `ce2fbd9`, D2 `830d7a7`, D3 `c81d1b8`, D4 `7e22f9e`, D5 self-check this commit).
 
 DOOM CPU: DONE
