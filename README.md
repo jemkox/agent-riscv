@@ -24,6 +24,7 @@ to obey, and reviewed the milestones. See [How it was built](#how-it-was-built).
 | Official tests | `rv32ui` all pass, `rv32um` all pass, 15 `rv32mi` tests pass |
 | Random testing | 500–5000 random programs per run, compared instruction-by-instruction with a Python reference model: 0 mismatches |
 | Formal | k-induction proof of pipeline invariants (SymbiYosys) |
+| CoreMark | **3.19 CoreMark/MHz** (EEMBC CoreMark 1.0, CRCs validated, GCC 13.2 `-O2`) |
 | DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
 | FPGA (iCE40 UP5K) | 4859 / 5280 logic cells, 8 BRAM, 1 DSP, **13.16 MHz** (nextpnr seed 7) |
 
@@ -34,6 +35,33 @@ What that means in frames per second:
 | Verilator on a desktop PC (5.8M cycles/s) | ~1.4 fps, playable as a slideshow |
 | Real FPGA at 13 MHz | ~3 fps (needs a board with ~8 MB RAM; see limits) |
 | Same CPU at 50 MHz | ~12.5 fps |
+
+## Benchmark: CoreMark
+
+[EEMBC CoreMark](https://github.com/eembc/coremark) 1.0, 2K performance run,
+500 iterations, on the same CPU configuration that runs Doom (16 KB + 16 KB
+caches, 5-cycle memory latency), timed with the CPU's own `mcycle` counter:
+
+```text
+CoreMark 1.0 : 41.504125 / GCC13.2.0 -O2 / STACK      (reported at the 13 MHz FPGA clock)
+Correct operation validated.
+Total ticks 156,610,941 for 500 iterations = 313,222 cycles/iteration
+=> 3.19 CoreMark/MHz      IPC 0.867, branch mispredictions 13.7%
+```
+
+For context, published numbers of well-known open-source RV32 cores
+(from their READMEs; different compilers and flags, so not an exact comparison):
+
+| Core | CoreMark/MHz |
+|---|---|
+| **rv32cpu (this project)** | **3.19** |
+| lowRISC Ibex, maxperf config | 3.13 |
+| VexRiscv, full max perf (8 KB caches) | 2.57 |
+| lowRISC Ibex, small config | 2.47 |
+| VexRiscv, full (4 KB caches) | 2.30 |
+
+This is a self-run result in cycle-accurate simulation, not an EEMBC-certified
+score. Run it with `make coremark COREMARK_DIR=path/to/coremark`.
 
 ## Two real CPU bugs that only DOOM found
 
@@ -70,6 +98,7 @@ External files (not in this repo), passed in as Make variables:
 
 ```sh
 git clone https://github.com/riscv-software-src/riscv-tests   # official tests
+git clone https://github.com/eembc/coremark                     # CoreMark benchmark
 # DOOM shareware WAD v1.9 (doom1.wad, sha1 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d)
 ```
 
@@ -78,6 +107,7 @@ git clone https://github.com/riscv-software-src/riscv-tests   # official tests
 ```sh
 make test   RVTEST_DIR=path/to/riscv-tests/isa   # directed + official + random, prints ALL PASS
 make all_tests RVTEST_DIR=... WAD_SRC=path/to/doom1.wad  # every suite incl. Doom
+make coremark COREMARK_DIR=path/to/coremark  # CoreMark score
 make doom   WAD_SRC=path/to/doom1.wad   # headless Doom, frames in build/doom/frames
 make play   WAD_SRC=path/to/doom1.wad   # live SDL window with keyboard
 make play_test WAD_SRC=...              # scripted play, must differ from a no-key run
@@ -97,6 +127,7 @@ iss/        Python reference instruction-set simulator
 tools/      random program generator, trace compare, play-test verifier, helpers
 formal/     SymbiYosys pipeline proof
 programs/   small C benchmarks (fib, sort, matmul, ...)
+bench/      CoreMark port (timer = mcycle, UART output)
 doom/       Doom port: crt0, linker script, file layer, MMIO glue; doom/src = doomgeneric (vendored, upstream e257a09)
 docs/       DESIGN.md (detailed design notes and numbers), Doom screenshots
 PROMPT.md   the task specification the AI agent worked from

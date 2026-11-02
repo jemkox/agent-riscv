@@ -36,7 +36,7 @@ MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
+.PHONY: coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -213,6 +213,35 @@ build/vlt/run_mmio: build/vlt/run_mmio_lat$(CACHE_LAT)
 
 m7: build/vlt/run_mmio $(M7_HEXS)
 	@bad=0; mkdir -p build/m7/logs; for n in $(M7_NAMES); do cp build/m7/$$n.hex build/m7/p.hex; ./build/vlt/run_mmio > build/m7/logs/$$n.out; grep -q PASS build/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; fi
+
+# --- CoreMark (EEMBC) on the Doom-configuration CPU (16+16 KB caches, CACHE_LAT=5) ---
+# COREMARK_DIR: an upstream checkout of https://github.com/eembc/coremark (port files in bench/coremark).
+COREMARK_DIR ?= ../../downloads/coremark
+CM_ITER ?= 500
+CM_OPT ?= -O2
+CM_SRCS := $(addprefix $(COREMARK_DIR)/,core_list_join.c core_main.c core_matrix.c core_state.c core_util.c) \
+           bench/coremark/core_portme.c bench/coremark/ee_printf.c bench/coremark/cvt.c
+CM_FLAGS := $(CCFLAGS) $(CM_OPT) -DITERATIONS=$(CM_ITER) -DPERFORMANCE_RUN=1 -DFLAGS_STR='"$(CM_OPT)"'
+
+build/bench:
+	@mkdir -p build/bench
+
+build/bench/coremark.elf: $(CM_SRCS) bench/coremark/core_portme.h doom/crt0_rv32.S doom/exit_rv.S doom/ld.ld | build/bench
+	$(CC) $(CM_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -I bench/coremark -I $(COREMARK_DIR) -o $@ doom/crt0_rv32.S doom/exit_rv.S $(CM_SRCS)
+
+build/bench/coremark.bin: build/bench/coremark.elf
+	$(OC) -O binary $< $@
+
+build/bench/coremark.hex: build/bench/coremark.bin
+	python3 tools/bin2hex.py $< $@
+
+build/vlt_bench/run_bench: $(RTL) tb/run_doom.sv tb/bench_main.cpp | build
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_bench -o run_bench $(RTL) tb/run_doom.sv $(CURDIR)/tb/bench_main.cpp
+	$(MAKE) -C build/vlt_bench -f Vrun_doom.mk OPT_FAST="-O3" run_bench -j 4
+
+coremark: build/vlt_bench/run_bench build/bench/coremark.hex
+	@./build/vlt_bench/run_bench build/bench/coremark.hex | tee build/bench/coremark.out
+	@python3 tools/coremark_score.py build/bench/coremark.out
 
 # --- M10b Doom probe: crt0 + picolibc stdio over the fd-table fsys layer ---
 build/doom:

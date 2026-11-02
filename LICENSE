@@ -27,6 +27,8 @@ keeps its own license:
 - doom/src/   Doom source via doomgeneric (https://github.com/ozkl/doomgeneric),
               GNU GPL v2, see doom/src/LICENSE. One file (w_file_stdc.c) is
               modified to use this project's file layer.
+- bench/coremark/  CoreMark port files from EEMBC's barebones template,
+              Apache 2.0, see bench/coremark/LICENSE.md.
 - env/        Test harness headers following the riscv-tests conventions,
               see env/LICENSE.riscv-tests (BSD).
 

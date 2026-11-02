@@ -959,3 +959,13 @@ Measured attempts (canonical run = 123,801,143 cycles, 31 frames, halt=0 each ti
 - D1-D4 steps all committed (D1 `ce2fbd9`, D2 `830d7a7`, D3 `c81d1b8`, D4 `7e22f9e`, D5 self-check this commit).
 
 DOOM CPU: DONE
+
+## CoreMark (2026-11-02, Claude)
+- EEMBC CoreMark 1.0 (upstream eembc/coremark 1f483d5) ported in `bench/coremark/` (barebones template:
+  `mcycle` timer, UART at 0x1FF00000, CPU_HZ=13 MHz for the seconds line); runner `tb/bench_main.cpp`
+  = DOOM_BIG CPU config (16+16 KB caches, CACHE_LAT=5); `make coremark`, checked by `tools/coremark_score.py`.
+- 400 iterations: 9.64 s at 13 MHz -> CoreMark's own "<10 s" error (CRCs already matched the known 2K values);
+  default raised to `CM_ITER=500`.
+- Result (`-O2`, GCC 13.2): `Correct operation validated`, `CoreMark 1.0 : 41.504125 / GCC13.2.0 -O2 / STACK`,
+  156,610,941 ticks / 500 iterations = 313,222 cycles/iteration = **3.193 CoreMark/MHz**;
+  `#BENCH cycles=180692117 insns=156649049 IPC=0.867`, mispredicts 4,444,349 / 32,391,569 branches (13.7%).
