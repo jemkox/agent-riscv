@@ -1,206 +1,145 @@
-# RV32 CPU (DOOM edition)
+# rv32cpu: a RISC-V CPU that runs DOOM, built by a local AI agent
 
-A 5-stage in-order RV32IM CPU, Verilator-tested against official riscv-tests
-(riscv-tests rv32ui/rv32um/selected rv32mi), a Python ISS, 15 directed tests,
-N=500/5000 random differential programs, a k-induction formal model, and DOOM
-running natively at 123.8M cycles / 31 rendered frames. The full CPU fits and
-routes on iCE40 UP5K (4859 LC, 8 BRAM, 1 DSP, 13.16 MHz).
+<p align="center">
+  <img src="docs/doom/gameplay.gif" width="640" alt="DOOM E1M1 running on the rv32cpu pipeline in Verilator">
+</p>
 
-## ASCII diagram
+A 5-stage pipelined **RV32IM** CPU written in SystemVerilog. It passes the
+official RISC-V test suites, routes on a **Lattice iCE40 UP5K** FPGA, and runs
+**DOOM** (shareware, unmodified game logic) cycle-accurately in Verilator, with
+a live window and keyboard.
 
-```text
-Full simulation CPU:
+The whole design, its tests and the Doom port were written autonomously by a
+**local LLM coding agent** running on a consumer PC (no cloud model wrote the
+RTL). I designed the agent setup, the task, and the verification rules it had
+to obey, and reviewed the milestones. See [How it was built](#how-it-was-built).
 
-  fetch_pred / BTB (2-bit local)
-        |
-        v
-  +--------+   +-----------+   +-----------+   +-----------+   +-----------+
-  | fetch  |-> | decode/ID |-> |    EX     |-> |    MEM    |-> |    WB     |-> regs32
-  +--------+   +-----------+   +-----------+   +-----------+   +-----------+
-      |              |              |              |              |
-    BPIF/imm32     ifdec/CSRs    ALU, branch   cache32 L1 I/D     forwarding
-    pc target     rs1/rs2 read   RV32M MDU     UART+KEY MMIO     load/store
-                                               (LAT 1/5/20,
-                                                pending-fill)
+## Results
 
-FPGA full top (fpga_pipe_top, fits UP5K):
+| | |
+|---|---|
+| ISA | RV32I + M (mul/div) + Zicsr, machine mode, timer interrupt |
+| Pipeline | 5 stages (IF ID EX MEM WB), full forwarding, load-use stall, BTB with 2-bit counters |
+| Caches | 16 KB I + 16 KB D, direct-mapped, 16 B lines, configurable miss latency |
+| Official tests | `rv32ui` all pass, `rv32um` all pass, 15 `rv32mi` tests pass |
+| Random testing | 500–5000 random programs per run, compared instruction-by-instruction with a Python reference model: 0 mismatches |
+| Formal | k-induction proof of pipeline invariants (SymbiYosys) |
+| DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
+| FPGA (iCE40 UP5K) | 4859 / 5280 logic cells, 8 BRAM, 1 DSP, **13.16 MHz** (nextpnr seed 7) |
 
-  16 KB I + 16 KB D direct-mapped (8x SB_RAM40_4K)  +  full pipeline
-  MUL/MULH/MULHSU/MULHU: 4 cycles on one SB_MAC16 DSP; DIV/REM: ~33 restoring cycles
-```
+What that means in frames per second:
 
-## Microarchitecture
+| Where | Speed |
+|---|---|
+| Verilator on a desktop PC (5.8M cycles/s) | ~1.4 fps, playable as a slideshow |
+| Real FPGA at 13 MHz | ~3 fps (needs a board with ~8 MB RAM; see limits) |
+| Same CPU at 50 MHz | ~12.5 fps |
 
-`rtl/top_pipe.sv` is a 5-stage in-order pipeline:
+## Two real CPU bugs that only DOOM found
 
-- fetch + branch prediction: BTB with 2-bit local counters, `jal` predicted taken,
-  mispredict = pipeline restart (measured mispred penalty ~2 cycles);
-- decode/ID: `imm32`, `ifdec`, register reads, CSR stage (`mcycle`/`minstret`
-  real counters, `mcountinhibit` gates them, mtime/mtimecmp timer, `xhalt`);
-- EX: ALU, branch condition, M extension via `mdiu_fast.sv` (SIM) / `mdiu_fpga.sv`
-  (FPGA, `SB_MAC16` DSP), 32-register file;
-- MEM: `cache32.sv` L1 I/D, direct-mapped, 16 B lines, `CACHE_LAT` 1/5/20 with
-  a pending-fill policy that re-forwards ID/EX operands during a fill; MMIO at
-  0x1000_0000 (UART, DOOM_BIG) and 0x1FF0_0000 window (frame/key) for DOOM_BIG;
-- WB: writeback with full forwarding; load-use stall; store forwarding.
+All the official tests and thousands of random programs passed, and the CPU was
+still wrong. Doom exposed two pipeline hazards, which were then turned into
+directed tests that fail on the old RTL:
 
-DOOM_BIG backing RAM is 32 MB (word-array), WAD loaded at 0x00C0_0000.
+1. **Store during a load-use stall.** A store held in EX by a stall still sent
+   its memory access with a not-yet-forwarded address and wrote a random
+   location. In Doom this corrupted libc's character table.
+   Fix: gate memory access with `!stall`. Test: `tests/t14_ldst_stall.S`.
+2. **Forwarded operands lost during a stall.** `lw s6; lw a5; blt a5,s6`: the
+   value of `s6`, forwarded from writeback, was gone by the time the stall
+   ended, so the branch compared a stale register. In Doom: "bad texture
+   directory" and striped frames. Fix: latch the forwarded operands.
+   Test: `tests/t15_ld_ld_br.S`.
 
-## ISA supported
+## Quick start
 
-RV32 base + `M` proven by official tests: `rv32ui` ALL PASS, `rv32um` ALL PASS,
-selected `rv32mi` subset (timer/CSR/ecall/ebreak/instret_overflow/misaligned
-sh etc. - 15 tests) ALL PASS. Not implemented in this build: atomics (A),
-S/U privilege (S), MMU (M14+ roadmap). FPGA proof top `rtl/fpga_top.sv` small
-program subset (addi/lui/sw/lw/add) still exists as a small artifact.
+### Requirements
 
-## Verification approach
-
-- Directed tests `tests/t01..t15` (self-checking, print `TEST PASSED (n instrs)`).
-- Random differential vs the Python ISS (`iss/iss.py` + `tools/gen.py`):
-  `regress N=500`/`N=5000` -> 0 mismatches, `ALL PASS`.
-- Official riscv-tests (`~/downloads/riscv-tests`, read-only copies): `ui`, `um`, `mi`.
-- m7 UART C programs print correct results (`ALL M7 PASS`, score 4274980064).
-- Doom play test verified against a NO-KEY baseline run (key effect proven).
-- FPGA: `fpga_test` simulates the full FPGA top program vs reference; `fpga_full`
-  builds `build/cpu_full.bin` via yosys `synth_ice40 -dsp` + nextpnr + icepack.
-- Formal: `formal/pipeline.sby` k-induction proves model-level pipeline invariants
-  (`mode prove` PASS); not full ISA equivalence.
-
-## The two bugs DOOM found (with directed tests)
-
-1. **load-use stall + store gate** (M10c): a store parked in EX by a load-use
-   stall issued its data-cache access with the not-yet-forwarded address and
-   wrote a garbage address (DOOM: `sw` zeroed picolibc `_ctype_`, lump lookups
-   failed). Fix: gate the data-cache access with `!stall` in `top_pipe.sv`.
-   Directed test `tests/t14_ldst_stall` (failed on the old RTL, passes now).
-2. **stale operands under stall** (M10d): on `stall`/`m_stall` the EX operands
-   latched raw `idex_r1/r2` instead of the FORWARDED `a_ex/b_ex`; `lw s6; lw a5;
-   blt a5,s6` compared a stale register (DOOM: "bad texture directory", striped
-   frames). Fix: latch forwarded operands; directed test `tests/t15_ld_ld_br`
-   (failed on the old RTL, passes now). Also fixed: `minstret` rollover carry in
-   `rtl/csrs.sv` (rv32mi `instret_overflow`).
-
-## Measured metrics
-
-CPU (official suite aggregate, `CACHE_LAT=1`): UI IPC 0.889, UM IPC 0.623;
-m7 C benchmarks: matmul IPC 0.856, bench IPC 0.906; branch prediction accuracy
-77.314% (m7 log, `BR=5648 MISPRED=617` earlier baseline runs).
-
-DOOM run (DOOM_BIG, CACHE_LAT=5, 32 MB RAM, WAD shareware):
-
-```text
-31 frames in            123,801,143 cycles (halt=0, frames all valid)
-cycles/frame            3.99M incl. boot; render-frame deltas ~2.33M
-fps at 50 MHz           12.5      fps at FPGA Fmax 13.16 MHz: 3.3
-simulation speed        5.57M cycles/s (-O3 baseline), best measured 5.80M (PGO+LTO)
-I/D miss rates          0.047% / 1.50%        mst 5.90% st 1.66% mispred 0.84% of branches
-```
-
-FPGA full CPU top (`fpga_pipe_top`, yosys `synth_ice40 -dsp`, nextpnr `--up5k --package sg48`):
-
-```text
-build/cpu_full.bin                produced (icepack)
-LC (seed 7, PASS run)             4859/5280 (3500 LUT4 + 554 LUT+DFF + 670 DFF + 135 CARRY)
-SB_RAM40_4K (BRAM)                8          SB_MAC16 DSP: 1
-Fmax                                13.16 MHz routed, PASS at 13.00 MHz budget, nextpnr --seed 7
-                                  (seed 2 also PASS at 13.07; seed 6 gives 12.76 - seeds shown because they matter)
-Fmax history                      13.67 MHz (CSR-counter stubs), 13.20 MHz (round-5 DSP MDU base, 4710 LC)
-```
-
-FPGA small proof top (`rtl/fpga_top.sv`, `hdl make fpga`): 597/5280 LC, 8/30 RAM,
-23.96 MHz, `build/cpu.bin`.
-
-## Optimization history
-
-- BTB + 2-bit local prediction (77.314% accuracy on m7; mispred restart).
-- L1 I/D caches, 16 B lines, configurable `CACHE_LAT` 1/5/20; pending-fill with
-  operand re-forwarding; DOOM_BIG grew to 16 KB + 16 KB.
-- RV32M MDU; SIM idle-skip graph trim; FPGA MDU moved onto one `SB_MAC16` DSP
-  (4-cycle MUL, review-item checklist).
-- Word-array backing RAM + tag-matched self-mod invalidate: DOOM cycles
-  124,092,703 -> 123,801,143; `-O3` applied to generated C++ via Vrun_doom.mk
-  (Verilator `-O3` alone does not do that): 3.96 -> 5.57M cycles/s.
-- Fmax work: parallel CSR read-selects, real counters, DSP MDU, instret-carry
-  guard (F4 table in PROGRESS.md, rows 0-6 + two measured-and-reverted
-  attempts).
-- P2 D2 round: gprof profile; PGO+LTO 5.80M best; `--threads 2` measured 8x
-  WORSE (0.69M) and rejected; 15M not reached, gap recorded honestly.
-
-## Run commands
+Tested on Ubuntu 24.04:
 
 ```sh
-hdl make all_tests          # every suite: test x2 (LAT 1/5), ui um mi, regress N=500, m7, doom
-hdl make test               # directed + ui/um + random N from scratch, prints ALL PASS
-hdl make regress N=500      # random differential vs ISS
-hdl make ui / um / mi       # official riscv-tests subsets
-hdl make m7                 # UART C programs (correct results)
-hdl make lat1 / lat5 / lat20
-hdl make doom               # headless DOOM: 31 frames + #RUN log
-hdl make play               # live SDL2 window DOOM with keyboard
-hdl make play_test          # scripted DOOM vs no-key baseline (fails if keys do nothing)
-hdl make fpga_full          # full CPU FPGA: build/cpu_full.bin + LC/Fmax (FPGA_FREQ/FPGA_SEED vars)
-hdl make fpga               # small FPGA proof top: build/cpu.bin
-hdl make fpga_test / mdiu_tb
+sudo apt install verilator yosys nextpnr-ice40 fpga-icestorm \
+  gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf libsdl2-dev python3 make
 ```
 
-## DOOM in simulation (M10)
+Versions used: Verilator 5.020, Yosys 0.33, nextpnr 0.6, riscv64-unknown-elf-gcc
+13.2, picolibc 1.8.6, SDL 2.30. SymbiYosys + z3 are only needed for the formal
+check.
 
-DOOM (the shareware `doom1` WAD, port_rv32.c + the public Doom source port
-compiled with `riscv64-unknown-elf-gcc -march=rv32im -mabi=rv32 -Os` against
-picolibc) runs natively on the full 5-stage CPU in Verilator.
-
-Build and run:
+External files (not in this repo), passed in as Make variables:
 
 ```sh
-hdl make doom        # headless: renders 31 frames to build/doom/frames, UART log
-hdl make play        # LIVE window (SDL2, DISPLAY passed into the sandbox), keyboard attached
-hdl make play_test   # scripted headless play, verified vs a NO-KEY baseline run
+git clone https://github.com/riscv-software-src/riscv-tests   # official tests
+# DOOM shareware WAD v1.9 (doom1.wad, sha1 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d)
 ```
 
-`make play` controls: arrow keys = move/turn, Ctrl = fire, Space = use/open,
-Enter, Esc, Y/N confirmations, 1-7 = weapon select. Keys are pushed to a FIFO
-in the testbench and consumed by DOOM through an MMIO load at `0x1FF0_0008`
-(`key_in/key_hit` on the cache MMIO port); the harness polls SDL events every
-65536 cycles (~80 polls/s at 13 MHz).
+### Run
 
-Measured numbers (DOOM_BIG build, 16 KB I + 16 KB D direct-mapped caches, 16 B
-lines, CACHE_LAT=5):
+```sh
+make test   RVTEST_DIR=path/to/riscv-tests/isa   # directed + official + random, prints ALL PASS
+make all_tests RVTEST_DIR=... WAD_SRC=path/to/doom1.wad  # every suite incl. Doom
+make doom   WAD_SRC=path/to/doom1.wad   # headless Doom, frames in build/doom/frames
+make play   WAD_SRC=path/to/doom1.wad   # live SDL window with keyboard
+make play_test WAD_SRC=...              # scripted play, must differ from a no-key run
+make fpga_full FPGA_FREQ=13 FPGA_SEED=7 # synth + place & route for iCE40 UP5K
+```
+
+Controls in `make play`: arrows move, Ctrl fires, Space opens doors, Enter/Esc
+for menus, 1–7 select weapons, `-` shrinks the view (faster).
+
+## Repository layout
 
 ```text
-31 frames in            123,801,143 cycles (halt=0)
-cycles/frame            3.99M average incl. boot (render-frame deltas ~2.33M)
-fps at 50 MHz           12.5        fps at FPGA Fmax 13.16 MHz: 3.3
-simulation speed        5.57M cycles/s baseline (22.2 s), best measured 5.80M (PGO+LTO, 21.33 s)
-I-cache miss rate       0.047%      D-cache miss rate 1.50%
-M/mem-pending stalls    5.90% of cycles  load-use stalls 1.66%  mispreds 188,656/22.53M branches (0.84%)
+rtl/        CPU in SystemVerilog (top_pipe.sv is the pipeline; *_fpga.sv are FPGA variants)
+tb/         Verilator testbenches (C++ and SV), including the Doom play harness
+tests/      15 directed assembly tests
+iss/        Python reference instruction-set simulator
+tools/      random program generator, trace compare, play-test verifier, helpers
+formal/     SymbiYosys pipeline proof
+programs/   small C benchmarks (fib, sort, matmul, ...)
+doom/       Doom port: crt0, linker script, file layer, MMIO glue; doom/src = doomgeneric (vendored, upstream e257a09)
+docs/       DESIGN.md (detailed design notes and numbers), Doom screenshots
+PROMPT.md   the task specification the AI agent worked from
+PROGRESS.md the agent's lab notebook: every milestone, bug, root cause and measurement
 ```
 
-Sample frames (also animated GIF `docs/doom/play_demo.gif`):
-`docs/doom/title.png`, `mid.png`, `last.png` (headless doom run), and
-`play_menu.png`, `play_move_a.png`, `play_move_b.png` (scripted keyboard
-session: Esc opens the menu, Enter x3 + hold Up starts E1M1 and walks - verified
-against the no-key baseline, first frame divergence 564/568 after first key).
+The detailed microarchitecture, verification approach, measured metrics and
+optimization history are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
-Honest limits: shareware WAD only, 320x200 software-render frames, keyboard
-poll granularity means very fast taps can be missed, `play` needs an X display,
-simulation runs at ~1.4 real fps (P2 15M cycles/s target not reached; best 5.80M),
-and the Doom cycles measured here are on the full sim CPU, not the FPGA build.
+## How it was built
 
-## Honest known limitations
+- **The builder** is an open-weight coding model (Qwen 3.8 Flash Next Coder,
+  125B parameters, 1.75-bit quantization) running locally on a PC with a 12 GB
+  GPU and 32 GB RAM, driven by [opencode](https://opencode.ai) in a sandbox that
+  could only run the HDL tools.
+- **The rules** ([`PROMPT.md`](PROMPT.md)): every number must come from tool
+  output, every testbench is self-checking, never edit a test to make it pass,
+  a fresh-clone check before every commit, and a milestone list from
+  "single-cycle RV32I" to "Doom runs".
+- **Supervision:** a watchdog restarted the agent when it stalled, and a
+  second, read-only reviewer agent audited each milestone. Claude (Anthropic)
+  was used for setup, reviews and debugging: it found the stall-forwarding bug
+  above, the keyboard timing bug in the play harness, and a play test that
+  passed even with a dead keyboard.
+- **Timeline:** first commit 2026-10-31 23:27, finished 2026-11-02 10:39
+  (about 35 hours).
 
-- The full CPU FITS in UP5K (4859/5280 LC) but leaves no headroom for a second
-  16 KB cache; the FPGA build is the same CPU, just 32 MB backing RAM is not
-  on-FPGA (FPGA runs its small built-in program, `fpga_test` proves it).
-- FPGA counters are 32-bit truncated at rollover (carry guarded `ifdef FPGA`);
-  SIM has the full carry. rv32mi passes in SIM.
-- No A (atomics), no S/U privilege, no MMU in this build (roadmap continues
-  beyond this goal).
-- Formal proof is model-level pipeline invariants (k-induction), not ISA equivalence.
-- Branch-prediction accuracy is measured on the m7 benchmark; DOOM run stats
-  (0.84% mispred) come from the committed `#STATS` counters.
-- `mst_cnt` lumps mul/div stalls with pending-fill stalls (not separately split).
-- Simulation speed best 5.80M cycles/s; the 15M target was measured and missed
-  honestly (all attempts in PROGRESS.md; --threads made it 8x worse).
-- Keyboard is polled every 65536 sim cycles in the live window (fine at real
-  typing speed, coarse for held-key autorepeat nuances).
+[`PROGRESS.md`](PROGRESS.md) keeps the full history, including the failed
+attempts.
+
+## Honest limits
+
+- DOOM runs in **simulation**. The UP5K has 128 KB of RAM and Doom needs about
+  8 MB, so the FPGA build proves the CPU fits and meets timing, but runs a small
+  built-in program. A board with SDRAM is needed to play it on real hardware.
+- Simulation speed peaked at 5.8M cycles/s; a 15M target was attempted and missed
+  (attempts recorded in `PROGRESS.md`).
+- No atomics (A), no supervisor/user mode, no MMU, so no Linux yet.
+- The formal proof covers pipeline invariants, not full ISA equivalence.
+- The FPGA build truncates the 64-bit counters to 32 bits.
+
+## License
+
+MIT for this project's own code, see [LICENSE](LICENSE). `doom/src` is
+doomgeneric (GPL v2). DOOM is a trademark of id Software; the WAD is not
+included.

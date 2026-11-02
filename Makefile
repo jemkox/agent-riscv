@@ -104,7 +104,7 @@ build/um/%.hex: build/um/%.bin | build/um
 	python3 tools/bin2hex.py $< $@
 
 build/mi/%.o: $(MI_DIR)/%.S env/mi/riscv_test.h | build/mi
-	$(CC) $(MI_CCFLAGS) -c $< -I env/mi -I ../../downloads/riscv-tests/env -I $(MI_MACROS) -o build/mi/$*.rvo
+	$(CC) $(MI_CCFLAGS) -c $< -I env/mi -I $(RVTEST_DIR)/../env -I $(MI_MACROS) -o build/mi/$*.rvo
 	$(OC) -O elf32-littleriscv build/mi/$*.rvo $@
 
 build/mi/%.elf: build/mi/%.o tests/link.ld | build/mi

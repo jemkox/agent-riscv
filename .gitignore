@@ -2,3 +2,7 @@ build/
 formal/pipeline/
 obj_dir/
 wave.vcd
+TODO.md
+start-agent.sh
+__pycache__/
+*.pyc
