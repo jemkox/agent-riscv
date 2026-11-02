@@ -1,0 +1,438 @@
+#!/usr/bin/python3 -I
+"""agent-watchdog: keep the session that is currently running working (safety net for the cpu-loop plugin).
+
+Polls the OpenCode server (127.0.0.1:4096) and follows the most recently active session only. When it has
+been idle for IDLE_SEC and no permission request is waiting, it sends a "continue" message with that
+session's agent -- unless its last reply ends with TASK COMPLETE or NEED USER, the user aborted it, the CPU
+project's PROGRESS.md says FINAL ACCEPTANCE: MET, or MAX_NO_PROGRESS nudges in a row produced no file edit
+or commit (then it pauses with a desktop notification until that session changes files again).
+It also sends notifications for: every commit (milestones marked); TASK COMPLETE / NEED USER / FINAL ACCEPTANCE;
+tests turning red or green again; the model or agent server going down and coming back; no actions for
+QUIET_MIN minutes while a session is busy; low disk space; context compactions (desktop only); and an hourly
+progress digest. If ~/.config/cpu-agent/ntfy-topic
+exists, the same notifications also go to that ntfy.sh topic (phone app "ntfy").
+Log: ~/agent-workspace/.agent-logs/watchdog.log
+"""
+import re
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+
+CPU_SESSION = "ses_BUILDER_SESSION_ID"
+ACTIVITY = os.path.expanduser("~/agent-workspace/.agent-logs/activity.log")
+STOP_RE = re.compile(r"^\s*(TASK COMPLETE|NEED USER:.*)\s*$", re.I | re.M)
+SERVER = os.environ.get("CPU_AGENT_SERVER", "http://127.0.0.1:4096")
+PROJECT = os.path.expanduser("~/agent-workspace/hdl/rv32cpu")
+LOG = os.path.expanduser("~/agent-workspace/.agent-logs/watchdog.log")
+POLL_SEC = 30
+IDLE_SEC = 60
+MAX_NO_PROGRESS = 6
+DONE_MARK = "DOOM CPU: DONE"   # the current goal's finish line in PROGRESS.md
+DIGEST_SEC = 3600          # hourly progress digest
+DOWN_SEC = 90              # model/server unreachable this long -> alert
+QUIET_MIN = 30             # busy but no logged action for this long -> alert
+DISK_MIN_GB = 5
+PHASE_GAP = 5 * 60         # "what it's doing" notifications: on a change of activity, at most every 5 min
+# (pattern on the logged action, what to call it); first match wins
+PHASES = [
+    (r"COMMIT", None),                                            # commits have their own notification
+    (r"^run\s+(hdl\s+)?(grep|rg|sed -n|cat|head|tail|ls|wc|find|tree|stat|file|which)\b|^run\s+git (log|diff|status|show)\b",
+     "🔎 Reading code"),
+    (r"\bsby\b", "🧮 Formal proof (SymbiYosys)"),
+    (r"nextpnr|icepack|icetime", "🧩 FPGA place & route (nextpnr)"),
+    (r"\byosys\b|make synth", "🏭 Synthesizing the CPU (Yosys)"),
+    (r"make (ui|um)\b", "🧪 Official RISC-V tests"),
+    (r"make regress", "🎲 Random differential tests"),
+    (r"make test|run_hex|vvp|tb/", "🧪 Running the testbench"),
+    (r"verilator --lint|make lint", "🔍 Linting Verilog (Verilator)"),
+    (r"verilator", "⚙️ Building the Verilator simulator"),
+    (r"iverilog", "⚙️ Compiling with Icarus Verilog"),
+    (r"qemu-riscv", "🖥️ Comparing against QEMU"),
+    (r"^(edit|write)\s+(rtl|formal)/", "✏️ Editing Verilog"),
+    (r"^(edit|write)\s+(tests|sw)/", "✏️ Writing test programs"),
+    (r"^(edit|write)\s+(tb)/", "✏️ Editing the testbench"),
+    (r"^(edit|write)\s+.*(PROGRESS|README|notes)", "📝 Updating notes"),
+    (r"^(edit|write)\b", "✏️ Editing files"),
+    (r"riscv64-unknown-elf-|\.S\b|\.c\b.*gcc", "🛠️ Compiling RISC-V programs"),
+    (r"iss\.py|gen\.py|cmp\.py", "🐍 Reference simulator / test generator"),
+    (r"^(read|grep|glob)\b", "🔎 Reading code"),
+]
+
+
+TEST_PHASES = {"🧪 Running the testbench", "🎲 Random differential tests", "🧪 Official RISC-V tests",
+               "🖥️ Comparing against QEMU", "🧮 Formal proof (SymbiYosys)"}
+TEST_SUMMARY_GAP = 3 * 60  # "testing finished" summaries at most every 3 min; runs in between are merged
+
+
+def phase_of(body):
+    body = body.split("  →")[0]   # classify the command only, never its output
+    for pat, name in PHASES:
+        if re.search(pat, body):
+            return name
+    return None
+
+
+TEST_ALERT_GAP = 15 * 60   # at most one "tests failing" alert per session per 15 min (debugging flips a lot)
+TEST_PASS_RE = re.compile(r"ALL PASS|ALL [A-Z]+ PASS|TEST PASSED")
+TEST_FAIL_RE = re.compile(r"TEST FAILED|[A-Z]+ TEST FAILED|\bFAIL\b")   # build/lint errors (%Error) are not test results
+NUDGE = ("Continue autonomously: make a tool call now and work on the next unfinished step (no chat summaries). "
+         "If the task is fully done, end with the line TASK COMPLETE.")
+
+
+def log(msg):
+    os.makedirs(os.path.dirname(LOG), exist_ok=True)
+    with open(LOG, "a") as f:
+        f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + msg + "\n")
+
+
+NTFY_TOPIC_FILE = os.path.expanduser("~/.config/cpu-agent/ntfy-topic")
+
+
+def notify(msg, title="CPU agent watchdog", urgent=False, low=False, phone=True):
+    """Desktop notification, and (if a topic is configured and phone=True) the same on ntfy.
+    urgent -> high priority / stays on screen; low -> quiet ntfy priority."""
+    subprocess.run(["notify-send", "-a", "CPU agent", "-u", "critical" if urgent else ("low" if low else "normal"),
+                    title, msg], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not phone:
+        return
+    try:
+        topic = open(NTFY_TOPIC_FILE).read().strip()
+    except OSError:
+        return
+    if topic:
+        try:
+            body = json.dumps({"topic": topic, "title": title, "message": msg, "priority": 4 if urgent else (2 if low else 3)})
+            req = urllib.request.Request("https://ntfy.sh/", data=body.encode(), method="POST",
+                                         headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=10).close()
+        except Exception as e:
+            log(f"ntfy failed: {e!r}")
+
+
+class FeedWatcher:
+    """Reads new lines of the activity feed and turns commits and finish/help messages into notifications."""
+
+    def __init__(self):
+        try:
+            self.pos = os.path.getsize(ACTIVITY)   # only announce what happens from now on
+        except OSError:
+            self.pos = 0
+        self.tests = {}          # session tag -> "pass" / "fail" (last test result seen)
+        self.phase = {}          # session tag -> current activity name
+        self.phase_sent = {}     # session tag -> (activity, time) of the last "doing now" notification
+        self.testrun = {}        # session tag -> results collected since the last "testing finished" summary
+        self.summary_at = {}     # session tag -> time of the last "testing finished" summary
+        self.fail_line = {}      # session tag -> the failing result, for the "green again" message
+        self.red_alert_at = {}   # session tag -> when we last sent "tests failing"
+        self.red_alerted = set() # sessions whose red state was announced (only those get "green again")
+        self.reset_digest()
+
+    def reset_digest(self):
+        self.d = {"commits": 0, "edits": 0, "tests": 0, "fails": 0, "last": "", "phases": {}}
+
+    def poll(self):
+        try:
+            size = os.path.getsize(ACTIVITY)
+            if size < self.pos:
+                self.pos = 0
+            with open(ACTIVITY, errors="replace") as f:
+                f.seek(self.pos)
+                lines = f.read().splitlines()
+                self.pos = f.tell()
+        except OSError:
+            return
+        for ln in lines:
+            m = re.match(r"(\d\d:\d\d):\d\d\s+\[([^\]]+)\] (.*)", ln)
+            if not m:
+                continue
+            hhmm, who, body = m.groups()
+            where = "" if who == "cpu" else f" (session …{who})"
+            if not body.startswith(("nudge", "not continuing", "context compacted")):
+                self.d["last"] = f"{hhmm} {body.split('  →')[0].strip()[:70]}"
+            if re.match(r"(edit|write)\b", body):
+                self.d["edits"] += 1
+            ph = phase_of(body)
+            if ph and self.phase.get(who) in TEST_PHASES and ph not in TEST_PHASES and not ph.startswith("🔎") \
+                    and self.testrun.get(who, {}).get("runs") \
+                    and time.time() - self.summary_at.get(who, 0) >= TEST_SUMMARY_GAP:
+                tr = self.testrun.pop(who)
+                if tr["fail"] and tr["pass"]:
+                    verdict = f"⚠️ {tr['pass']} passed, {tr['fail']} failed ({tr['first_fail'][:60]})"
+                elif tr["fail"]:
+                    verdict = f"❌ {tr['fail']} failed: {tr['first_fail']}"
+                elif tr["pass"]:
+                    verdict = f"✅ {tr['pass']} passed"
+                else:
+                    verdict = "debug runs, no pass/fail result"
+                runs = f"{tr['runs']} test run{'s' if tr['runs'] != 1 else ''}"
+                activity = ph.split(" ", 1)[1].split(" (")[0]
+                activity = activity[0].lower() + activity[1:]   # "Editing Verilog" -> "editing Verilog"
+                notify(f"Previous tests ({runs}): {verdict}\nNow {activity}.", f"{ph}{where}", low=not tr["fail"])
+                self.summary_at[who] = time.time()
+                self.phase_sent[who] = (ph, time.time())
+                self.phase[who] = ph
+                self.d["phases"][ph] = self.d["phases"].get(ph, 0) + 1
+                continue
+            if ph:
+                self.d["phases"][ph] = self.d["phases"].get(ph, 0) + 1
+                sent_ph, sent_at = self.phase_sent.get(who, (None, 0))
+                if ph != self.phase.get(who) and ph != sent_ph and time.time() - sent_at >= PHASE_GAP \
+                        and not ph.startswith("🔎"):   # reading code alone is not worth a ping
+                    detail = body.split("  →")[0]
+                    detail = re.sub(r"^(run|edit|write|read)\s+", "", detail).strip()[:80]
+                    notify(detail, f"{ph}{where}", low=True)
+                    self.phase_sent[who] = (ph, time.time())
+                self.phase[who] = ph
+            if "→" in body:
+                result = body.split("→", 1)[1].strip()
+                state = "fail" if TEST_FAIL_RE.search(result) else ("pass" if TEST_PASS_RE.search(result) else None)
+                if state or phase_of(body) in TEST_PHASES:
+                    tr = self.testrun.setdefault(who, {"runs": 0, "pass": 0, "fail": 0, "last": "", "cmd": "",
+                                                       "first_fail": ""})
+                    tr["runs"] += 1
+                    tr["pass"] += state == "pass"
+                    tr["fail"] += state == "fail"
+                    tr["last"] = result[:90]
+                    tr["cmd"] = re.sub(r"^run\s+", "", body.split("  →")[0]).strip()[:70]
+                    if state == "fail" and not tr["first_fail"]:
+                        tr["first_fail"] = result[:90]
+                if state:
+                    self.d["tests"] += 1
+                    self.d["fails"] += state == "fail"
+                    prev = self.tests.get(who)
+                    if state == "fail" and prev == "pass" and time.time() - self.red_alert_at.get(who, 0) >= TEST_ALERT_GAP:
+                        self.red_alert_at[who] = time.time()
+                        self.red_alerted.add(who)
+                        notify(f"{result[:90]}\n{body.split('→')[0].replace('run', '', 1).strip()[:70]}",
+                               f"❌ Tests failing{where}")
+                        self.fail_line[who] = result[:60]
+                    elif state == "pass" and prev == "fail" and who in self.red_alerted:
+                        self.red_alerted.discard(who)
+                        notify(f"{result[:90]} (was: {self.fail_line.get(who, 'failing')})",
+                               f"🟢 Tests passing again{where}")
+                    self.tests[who] = state
+            if body.startswith("context compacted"):
+                notify("The agent's conversation was summarized to free up context; it continues from the summary.",
+                       f"🗜️ Context compacted{where}", low=True, phone=False)
+            if body.startswith("COMMIT"):
+                self.d["commits"] += 1
+                subject = (re.search(r"-m [\"']([^\"']+)", body) or [None, body[7:]])[1]
+                if re.match(r"M\d+\b", subject):
+                    notify(subject, f"✅ Milestone done{where}", urgent=True)
+                else:
+                    notify(subject, f"Commit{where}")
+            elif body.startswith("not continuing: agent said: TASK COMPLETE"):
+                notify("The agent reports the task is complete.", f"🏁 Task complete{where}", urgent=True)
+            elif body.startswith("not continuing: agent said: NEED USER"):
+                notify(body.split("NEED USER:", 1)[-1].strip() or "The agent needs your input.",
+                       f"❓ Agent needs you{where}", urgent=True)
+            elif DONE_MARK in body:
+                notify(f"PROGRESS.md says {DONE_MARK}.", "🎉 Goal finished", urgent=True)
+
+
+class HealthWatcher:
+    """Model/server reachability, long silences, disk space and the hourly digest."""
+
+    def __init__(self):
+        self.down_since = {}     # name -> first time it was unreachable
+        self.alerted = set()
+        self.quiet_alerted = False
+        self.disk_alerted = False
+        self.last_digest = time.time()
+
+    @staticmethod
+    def reachable(url):
+        try:
+            urllib.request.urlopen(url, timeout=5).close()
+            return True
+        except Exception:
+            return False
+
+    def check_up(self, name, url):
+        now = time.time()
+        if self.reachable(url):
+            self.down_since.pop(name, None)
+            if name in self.alerted:
+                self.alerted.discard(name)
+                notify(f"{name} is answering again.", f"✅ {name} back up")
+            return
+        first = self.down_since.setdefault(name, now)
+        if now - first >= DOWN_SEC and name not in self.alerted:
+            self.alerted.add(name)
+            notify(f"{name} has not answered for {int(now - first)} s. The agent cannot work until it is back "
+                   "(it restarts automatically; otherwise use Start in Strata Coder).", f"🔴 {name} is down",
+                   urgent=True)
+
+    def poll(self, feed, session_busy):
+        self.check_up("Strata model", "http://127.0.0.1:8080/health")
+        self.check_up("Agent server", SERVER + "/session/status")
+        try:
+            silent_min = (time.time() - os.path.getmtime(ACTIVITY)) / 60
+        except OSError:
+            silent_min = 0
+        if session_busy and silent_min >= QUIET_MIN and not self.quiet_alerted:
+            self.quiet_alerted = True
+            notify(f"The agent is busy but has not run a command or edited a file for {int(silent_min)} min. "
+                   "It may be thinking through something big, or be stuck.", "🤔 No actions for a while")
+        elif silent_min < 1:
+            self.quiet_alerted = False
+        free_gb = shutil.disk_usage(os.path.expanduser("~")).free / 1e9
+        if free_gb < DISK_MIN_GB and not self.disk_alerted:
+            self.disk_alerted = True
+            notify(f"Only {free_gb:.1f} GB free on your home disk. Builds and logs may start failing.",
+                   "💾 Low disk space", urgent=True)
+        elif free_gb > DISK_MIN_GB + 2:
+            self.disk_alerted = False
+        if time.time() - self.last_digest >= DIGEST_SEC:
+            self.last_digest = time.time()
+            d = feed.d
+            if d["commits"] or d["edits"] or d["tests"]:
+                top = sorted(d["phases"].items(), key=lambda kv: -kv[1])[:3]
+                total = sum(d["phases"].values()) or 1
+                mostly = ", ".join(f"{name.split(' ', 1)[1]} {round(100 * n / total)}%" for name, n in top)
+                msg = (f"{d['commits']} commits · {d['edits']} edits · {d['tests']} test runs ({d['fails']} failing)"
+                       + (f"\nMostly: {mostly}" if top else "")
+                       + (f"\nNow: {d['last']}" if d["last"] else ""))
+                notify(msg, "📊 Last hour", low=True)
+            else:
+                notify("No commits, edits or test runs in the last hour.", "📊 Last hour: no activity")
+            feed.reset_digest()
+
+
+def api(path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(SERVER + path, data=data, method="POST" if data else "GET",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        raw = r.read()
+    return json.loads(raw) if raw.strip() else None
+
+
+def active_session():
+    """The most recently updated session (the one that is running or ran last)."""
+    sessions = api("/session") or []
+    sessions = [x for x in sessions if not x.get("parentID")]
+    return max(sessions, key=lambda x: x.get("time", {}).get("updated", 0))["id"] if sessions else None
+
+
+def busy(sid):
+    st = api("/session/status") or {}
+    return st.get(sid, {}).get("type", "idle") != "idle"
+
+
+def waiting_for_user(sid):
+    return any(p.get("sessionID") == sid for p in (api("/permission") or []))
+
+
+def last_messages(sid, n=6):
+    return api(f"/session/{sid}/message?limit={n}") or []
+
+
+def stop_reason(sid):
+    if sid == CPU_SESSION:
+        try:
+            # only a line that is exactly the marker counts; the agent also mentions it in its notes
+            if re.search(r"^\s*" + re.escape(DONE_MARK) + r"\s*$", open(os.path.join(PROJECT, "PROGRESS.md")).read(), re.M):
+                return f"{DONE_MARK} in PROGRESS.md"
+        except OSError:
+            pass
+    msgs = last_messages(sid, 1)
+    if not msgs or msgs[-1]["info"]["role"] != "assistant":
+        return None
+    last = msgs[-1]
+    # (A tool still marked "running" while the session is idle is a leftover from a crash or restart,
+    # e.g. a command killed for memory, so it does not block the nudge.)
+    err = last["info"].get("error") or {}
+    if "abort" in str(err.get("name", "")).lower():
+        return "stopped by the user"
+    m = STOP_RE.search("\n".join(p.get("text", "") for p in last.get("parts", []) if p.get("type") == "text"))
+    return f"agent said: {m.group(1)[:80]}" if m else None
+
+
+def session_agent(sid):
+    for m in reversed(last_messages(sid)):
+        if m["info"]["role"] == "user" and m["info"].get("agent"):
+            return m["info"]["agent"]
+    return None
+
+
+def progress_marks(sid):
+    """How many edit/write/commit lines this session has in the activity feed (written by the plugin)."""
+    t = "cpu" if sid == CPU_SESSION else sid[-5:]
+    try:
+        with open(ACTIVITY) as f:
+            return sum(1 for ln in f if f"[{t}]" in ln and re.search(r"\] (edit|write|COMMIT)", ln))
+    except OSError:
+        return 0
+
+
+def main():
+    log("started (follows the active session)")
+    feed = FeedWatcher()
+    health = HealthWatcher()
+    session_busy = False
+    idle_since, current, marks, no_progress, paused, said = None, None, 0, 0, False, None
+    while True:
+        time.sleep(POLL_SEC)
+        feed.poll()
+        try:
+            health.poll(feed, session_busy)
+        except Exception as e:
+            log(f"health check error: {e!r}")
+        try:
+            sid = active_session()
+            if not sid:
+                continue
+            if sid != current:
+                current, idle_since, marks, no_progress, paused, said = sid, None, progress_marks(sid), 0, False, None
+                log(f"following {sid}")
+            session_busy = busy(sid)
+            if session_busy or waiting_for_user(sid):
+                idle_since = None
+                continue
+            now = time.time()
+            if idle_since is None:
+                idle_since = now
+                continue
+            if now - idle_since < IDLE_SEC:
+                continue
+            why = stop_reason(sid)
+            if why:
+                if why != said:
+                    log(f"not continuing {sid}: {why}")
+                    said = why
+                idle_since = now
+                continue
+            said = None
+            m = progress_marks(sid)
+            if m != marks:
+                marks, no_progress = m, 0
+                if paused:
+                    log("files changed again; resuming")
+                    paused = False
+            else:
+                no_progress += 1
+            if no_progress >= MAX_NO_PROGRESS:
+                if not paused:
+                    log(f"{no_progress} nudges without a file edit or commit; pausing")
+                    notify("No file changes after several nudges. Check it; the watchdog is paused until it "
+                           "changes files again.", "⚠️ Agent seems stuck", urgent=True)
+                    paused = True
+                idle_since = now
+                continue
+            agent = session_agent(sid)
+            api(f"/session/{sid}/prompt_async", {**({"agent": agent} if agent else {}),
+                                                  "parts": [{"type": "text", "text": NUDGE}]})
+            log(f"nudged {sid} (no-progress streak {no_progress})")
+            idle_since = None
+        except Exception as e:  # server restarting, model server down, ...: try again next poll
+            log(f"poll error: {e!r}")
+            idle_since = None
+
+
+if __name__ == "__main__":
+    sys.exit(main())

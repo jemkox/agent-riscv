@@ -1,0 +1,13 @@
+#!/bin/sh
+# Make sure the Strata model is serving on 127.0.0.1:8080 (used at login by strata-model.service, part of the
+# CPU agent loop). Starts it with the same options as the Strata Coder app's Start button and the context size
+# chosen there, then waits until it answers.
+health() { curl -fs -m 3 http://127.0.0.1:8080/health >/dev/null; }
+health && exit 0
+ctx=$(python3 -c 'import json,os; print(json.load(open(os.path.expanduser("~/.config/strata-coder-panel.json"))).get("context","128k"))' 2>/dev/null)
+"$HOME/.local/bin/strata" launch --family coder --model IQ1_M --context "${ctx:-128k}" --kv int8 --vision cpu \
+  --access local --port 8080 --no-tui --restart </dev/null
+i=0; until health; do
+  i=$((i+1)); [ $i -gt 120 ] && { echo "Strata did not start within 10 minutes" >&2; exit 1; }
+  sleep 5
+done

@@ -1,0 +1,8 @@
+[Unit]
+Description=Strata model on 127.0.0.1:8080 (started at login for the CPU agent loop)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/strata-model-up
+TimeoutStartSec=15min

@@ -1,0 +1,49 @@
+#!/bin/sh
+# cpu-agent [start|window|stop|status|log]: run the RISC-V CPU agent unattended.
+#   start (default): enable and start the OpenCode server and the watchdog (systemd user units in
+#                    ~/.config/systemd/user; they also start the Strata model and come back at every login).
+#                    The Strata Coder app's Agent tab (via ~/.local/bin/agent) attaches to this server.
+#   window: also open the agent's TUI in a separate terminal window.
+#   (start also runs cpu-agent-reviewer: an independent review of the builder's commits, at most hourly.)
+#   stop:   stop the watchdog, the reviewer and the server and turn off their autostart.   status: show both units.   log: follow the watchdog log.
+#   activity: follow the live activity feed (every file edit, test run and commit the agent makes).
+SESSION="${CPU_AGENT_SESSION:-ses_BUILDER_SESSION_ID}"
+URL=http://127.0.0.1:4096
+case "${1:-start}" in
+  start|window)
+    W="$HOME/.config/systemd/user/default.target.wants"; mkdir -p "$W"
+    for u in cpu-agent-server cpu-agent-watchdog cpu-agent-reviewer; do ln -sf "../$u.service" "$W/$u.service"; done
+    systemctl --user daemon-reload
+    curl -fs -m 3 http://127.0.0.1:8080/health >/dev/null || echo "Starting the Strata model first (takes a minute)…"
+    systemctl --user start strata-model.service || { echo "the Strata model did not start (journalctl --user -u strata-model)" >&2; exit 1; }
+    systemctl --user start cpu-agent-server.service
+    i=0; until curl -fs -m 1 "$URL/session/status" >/dev/null; do
+      i=$((i+1)); [ $i -gt 120 ] && { echo "the OpenCode server did not start (journalctl --user -u cpu-agent-server)" >&2; exit 1; }
+      sleep 0.5
+    done
+    systemctl --user start cpu-agent-watchdog.service cpu-agent-reviewer.service
+    echo "CPU agent running in the background. Open it in Strata Coder's Agent tab (pick its session)."
+    [ "$1" = window ] || exit 0
+    systemd-run --user --quiet --collect -E DISPLAY="${DISPLAY:-:0}" -E XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}" \
+      xfce4-terminal --title="CPU Agent" --hide-menubar --geometry=150x45 "--color-bg=#242424" "--color-text=#dedede" \
+      -x "$HOME/.local/bin/opencode" attach "$URL" --dir "$HOME/agent-workspace" --session "$SESSION"
+    ;;
+  stop)
+    systemctl --user stop cpu-agent-reviewer cpu-agent-watchdog cpu-agent-server 2>/dev/null
+    rm -f "$HOME/.config/systemd/user/default.target.wants/cpu-agent-server.service" \
+          "$HOME/.config/systemd/user/default.target.wants/cpu-agent-watchdog.service" \
+          "$HOME/.config/systemd/user/default.target.wants/cpu-agent-reviewer.service"
+    systemctl --user daemon-reload
+    echo "stopped (autostart off; the model keeps running)"
+    ;;
+  status)
+    systemctl --user --no-pager status cpu-agent-server cpu-agent-watchdog cpu-agent-reviewer | grep -E '●|Active:'
+    ;;
+  log)
+    tail -n 30 -f "$HOME/agent-workspace/.agent-logs/watchdog.log"
+    ;;
+  activity)
+    tail -n 40 -f "$HOME/agent-workspace/.agent-logs/activity.log"
+    ;;
+  *) echo "usage: cpu-agent [start|window|stop|status|log|activity]" >&2; exit 2 ;;
+esac

@@ -132,6 +132,7 @@ programs/   small C benchmarks (fib, sort, matmul, ...)
 bench/      CoreMark port (timer = mcycle, UART output)
 doom/       Doom port: crt0, linker script, file layer, MMIO glue; doom/src = doomgeneric (vendored, upstream e257a09)
 docs/       DESIGN.md (detailed design notes and numbers), Doom screenshots
+agent/      the agent harness: sandbox, loop plugin, watchdog, reviewer, and 3 real review reports
 PROMPT.md   the task specification the AI agent worked from
 PROGRESS.md the agent's lab notebook: every milestone, bug, root cause and measurement
 ```
@@ -171,8 +172,11 @@ flowchart LR
 - **Timeline:** first commit 2026-10-31 23:27, finished 2026-11-02 10:39
   (about 35 hours).
 
-[`PROGRESS.md`](PROGRESS.md) keeps the full history, including the failed
-attempts.
+The complete harness (sandbox, loop plugin, watchdog, reviewer agent) is in
+[`agent/`](agent/), together with three reports the reviewer wrote during the
+build, including a **FAIL** where it caught the builder breaking an official
+test. [`PROGRESS.md`](PROGRESS.md) keeps the full history, including the
+failed attempts.
 
 ## What's next
 
