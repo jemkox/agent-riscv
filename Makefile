@@ -36,7 +36,7 @@ MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
 
-.PHONY: test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
+.PHONY: test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -294,7 +294,11 @@ play: build/vlt_play/run_play build/doom/doom.hex build/doom/wad.hex build/doom/
 
 PLAY_SCRIPT ?= @3000000,enter:2000000,@30000000,enter:2000000,@30000000,enter:2000000,@60000000,up:400000000
 play_test: build/vlt_play/run_play build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
-	@rm -f build/play/frames/frame_*.ppm; mkdir -p build/play/frames build/play/logs; PLAY_SCRIPT="$(PLAY_SCRIPT)" ./build/vlt_play/run_play 1600000000 | tail -n 2; python3 tools/play_verify.py; python3 tools/ppm2png.py build/play/frames/frame_342.ppm=docs/doom/play_menu.png build/play/frames/frame_500.ppm=docs/doom/play_move_a.png build/play/frames/frame_560.ppm=docs/doom/play_move_b.png
+	@rm -rf build/play build/play_baseline; mkdir -p build/play/logs build/play/frames build/play_baseline/logs build/play_baseline/frames
+	@PLAY_SCRIPT= ./build/vlt_play/run_play 1600000000 build/play_baseline | tail -n 1
+	@PLAY_SCRIPT="$(PLAY_SCRIPT)" ./build/vlt_play/run_play 1600000000 build/play | tail -n 1
+	@PLAY_SCRIPT="$(PLAY_SCRIPT)" python3 tools/play_verify.py
+	@python3 tools/ppm2png.py build/play/frames/frame_342.ppm=docs/doom/play_menu.png build/play/frames/frame_500.ppm=docs/doom/play_move_a.png build/play/frames/frame_560.ppm=docs/doom/play_move_b.png
 
 doom_mem: build/vlt_doom/run_doom | build
 	./build/vlt_doom/run_doom
@@ -308,6 +312,22 @@ lat5:
 
 lat20:
 	$(MAKE) CACHE_LAT=20 test
+
+# D1: one target running every regression suite from the milestone rules.
+all_tests:
+	@echo "== [1/6] test (CACHE_LAT=1) =="
+	$(MAKE) test
+	@echo "== [2/6] test CACHE_LAT=5 =="
+	$(MAKE) CACHE_LAT=5 test
+	@echo "== [3/6] ui um mi =="
+	$(MAKE) ui um mi
+	@echo "== [4/6] regress N=500 =="
+	$(MAKE) regress N=500
+	@echo "== [5/6] m7 =="
+	$(MAKE) m7
+	@echo "== [6/6] doom (31 frames) =="
+	$(MAKE) doom
+	@echo "ALL TESTS DONE"
 
 lint:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)

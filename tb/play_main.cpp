@@ -65,6 +65,9 @@ int main(int argc, char **argv) {
     Verilated::commandArgs(argc, argv);
     const char *script = getenv("PLAY_SCRIPT");
     uint64_t max_cycles = (argc > 1) ? atoll(argv[1]) : 100000000ull;
+    const char *outdir = (argc > 2) ? argv[2] : "build/play";
+    char lpath[128];
+    snprintf(lpath, sizeof lpath, "%s/logs/run.out", outdir);
     const int FB_W = 320, FB_H = 200;
 
     std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
@@ -159,7 +162,7 @@ int main(int argc, char **argv) {
         pitchw = scr->pitch / scr->format->BytesPerPixel;
     }
 
-    FILE *log = fopen("build/play/logs/run.out", "w");
+    FILE *log = fopen(lpath, "w");
     bool done = false;
     uint64_t frames = 0;
     while (!done && cyc < max_cycles) {
@@ -193,7 +196,7 @@ int main(int argc, char **argv) {
         if (model->ex_st && model->ex_sa == FRAME_ADDR) {
             uint32_t fb = read_word(fb_sym);
             char p[96];
-            snprintf(p, sizeof p, "build/play/frames/frame_%03llu.ppm",
+            snprintf(p, sizeof p, "%s/frames/frame_%03llu.ppm", outdir,
                      (unsigned long long)frames);
             FILE *ppm = fopen(p, "w");
             std::vector<uint32_t> pix(FB_W * FB_H);

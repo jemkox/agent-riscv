@@ -899,3 +899,23 @@ M10 DOOM: MET
   (docs/doom/play_walk_strip.png: frames 78/110/151).
 - Regressions after the fix: test, test CACHE_LAT=5, ui, um, mi, regress N=500, m7 ALL PASS; doom 31 frames halt=0.
 - Open: play_verify.py should compare against a no-key baseline instead of frame 0.
+
+## D1 play-test vs no-key baseline + `all_tests` (2026-11-02)
+- `tb/play_main.cpp`: run_play now takes `argv[2]` = output dir (default `build/play`); frames go to
+  `<dir>/frames/`, log to `<dir>/logs/run.out`.
+- `tools/play_verify.py` rewritten: `play_test` runs the SAME binary twice for 1,600,000,000 cycles -
+  once headless with `PLAY_SCRIPT=` empty (baseline, `build/play_baseline`) and once with the script
+  (`build/play`) - then compares frame-by-frame: every frame that finished rendering BEFORE the first
+  scripted key press (parsed with the same grammar as the C++: first press @cycle 5,000,000) must be
+  byte-identical AND saved at the same cycle, and at least one frame rendered after the press must
+  differ. Frame counts may diverge after keys change Doom (scripted 568 vs baseline 581 - handled by
+  comparing the common prefix).
+- Real scripted run: `PLAY TEST PASS: 568 frames, 564/568 differ after first key @cycle 5000000,
+  first-diff=frame_004 (rendered at cycle 63330558)` (exit 0).
+- Negative control (keys truly fed but Doom-relevant no-op `z`, both dirs 581 frames):
+  `PLAY TEST FAIL: keys have NO effect - all 581 frames after first key @5000000 identical to no-key baseline`
+  with exit=1 (make fails). The old frame-0-diff check could not fail like this; the new one catches a dead keyboard.
+- `hdl make all_tests` added (runs: test CACHE_LAT=1, test CACHE_LAT=5, ui um mi, regress N=500, m7, doom).
+  Full run output: `ALL PASS` x2, `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, regress `ALL PASS` (N=500),
+  `ALL M7 PASS`, doom `#RUN cycles=123801143 insns=112822612 frames=31 halt=0`, then `ALL TESTS DONE`,
+  no `Error` lines.
