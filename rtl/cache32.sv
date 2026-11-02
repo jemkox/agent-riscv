@@ -65,9 +65,13 @@ module cache32 (
   localparam int LINE_BYTES = 16;
   localparam int LINE_SHIFT = 4;
 
-  (* BRAM = 1 *) logic [7:0] ram [0:BACK_BYTES-1];
-  (* BRAM = 1 *) logic [7:0] ic_data [0:IC_LINES*LINE_BYTES-1];
-  (* BRAM = 1 *) logic [7:0] dc_data [0:DC_LINES*LINE_BYTES-1];
+  // P2 speed: backing + cache lines are WORD arrays (VlUnpacked<uint32_t>):
+  // 1-2 word ops instead of 4-16 byte ops per access; byte semantics kept via
+  // rbwb/rb_ic/rb_dc word merge + lane-masked RMW stores. Byte order little
+  // endian within the word (byte b == rw[b>>2] lane (b&3)*8).
+  (* BRAM = 1 *) logic [31:0] rw  [0:BACK_WORDS-1];
+  (* BRAM = 1 *) logic [31:0] icw [0:IC_LINES*4-1];
+  (* BRAM = 1 *) logic [31:0] dcw [0:DC_LINES*4-1];
   (* BRAM = 1 *) logic [31:0] ic_tag [0:IC_LINES-1];
   (* BRAM = 1 *) logic [31:0] dc_tag [0:DC_LINES-1];
   (* BRAM = 1 *) logic [31:0] ic_ep  [0:IC_LINES-1];
@@ -81,6 +85,8 @@ module cache32 (
   int dc_count = 0;
   int i_idx, i_tag, i_mbase;
   int d_idx, d_tag, d_off, d_cache_base, sb;
+  int w0, sft, msk, nby;
+  int i_s, i_t;
   logic ic_hit, dc_hit, ic_p_ready, dc_p_ready, dreq, uart_store, uart_load;
   logic dc_ready_now, ic_ready_now, dc_cross_ready;
 `ifdef DOOM_BIG
@@ -91,28 +97,30 @@ module cache32 (
 
   function [31:0] rbwb;
     input int addr;
-    int b;
-    b = addr & BACK_MASK;
-    rbwb = { ram[(b + 3) & BACK_MASK], ram[(b + 2) & BACK_MASK],
-             ram[(b + 1) & BACK_MASK], ram[b & BACK_MASK] };
+    int w, s;
+    w = (addr >> 2) & (BACK_WORDS - 1);
+    s = (addr & 3) * 8;
+    rbwb = (s == 0) ? rw[w] : ((rw[w] >> s) | (rw[(w + 1) & (BACK_WORDS - 1)] << (32 - s)));
   endfunction
 
   function [31:0] rb_ic;
     input [31:0] addr;
     int base, off;
-    base = ((addr >> LINE_SHIFT) & IC_MASK) * LINE_BYTES;
+    base = ((addr >> LINE_SHIFT) & IC_MASK) * 4;
     off  = addr & (LINE_BYTES - 1);
-    rb_ic = { ic_data[base + off + 3], ic_data[base + off + 2],
-              ic_data[base + off + 1], ic_data[base + off] };
+    if ((off & 3) == 0) rb_ic = icw[base + (off >> 2)];
+    else rb_ic = (icw[base + (off >> 2)] >> ((off & 3) * 8)) |
+                 (icw[base + (off >> 2) + 1] << (32 - ((off & 3) * 8)));
   endfunction
 
   function [31:0] rb_dc;
     input [31:0] addr;
     int base, off;
-    base = ((addr >> LINE_SHIFT) & DC_MASK) * LINE_BYTES;
+    base = ((addr >> LINE_SHIFT) & DC_MASK) * 4;
     off  = addr & (LINE_BYTES - 1);
-    rb_dc = { dc_data[base + off + 3], dc_data[base + off + 2],
-              dc_data[base + off + 1], dc_data[base + off] };
+    if ((off & 3) == 0) rb_dc = dcw[base + (off >> 2)];
+    else rb_dc = (dcw[base + (off >> 2)] >> ((off & 3) * 8)) |
+                 (dcw[base + (off >> 2) + 1] << (32 - ((off & 3) * 8)));
   endfunction
 
   always_comb begin
@@ -150,10 +158,14 @@ module cache32 (
   always_ff @(posedge clk) begin
     if (lwe) begin
       sb = lwa & BACK_MASK;
-      ram[sb]                       = lwd[7:0];
-      ram[(sb + 1) & BACK_MASK]     = lwd[15:8];
-      ram[(sb + 2) & BACK_MASK]     = lwd[23:16];
-      ram[(sb + 3) & BACK_MASK]     = lwd[31:24];
+      w0 = sb >> 2; sft = (lwa & 3) * 8;
+      if (sft == 0) rw[w0] = lwd;
+      else begin
+        rw[w0] = (rw[w0] & ~(32'hFFFF_FFFF << sft)) | (lwd << sft);
+        rw[(w0 + 1) & (BACK_WORDS - 1)] =
+          (rw[(w0 + 1) & (BACK_WORDS - 1)]
+           & ~(32'hFFFF_FFFF >> (32 - sft))) | (lwd >> (32 - sft));
+      end
     end
 
     if (reset) begin
@@ -171,9 +183,9 @@ module cache32 (
     end else if (!halt) begin
       if (ic_ready_now) begin
         if (!ic_hit) begin
-          for (int b = 0; b < LINE_BYTES; b++)
-            ic_data[i_idx*LINE_BYTES+b] =
-              ram[((pc_if & 32'hFFFFFFF0) + b) & BACK_MASK];
+          for (int w = 0; w < LINE_BYTES/4; w++)
+            icw[i_idx*4+w] =
+              rw[((((pc_if & 32'hFFFFFFF0) >> 2) + w)) & (BACK_WORDS - 1)];
           ic_ep[i_idx] = epoch;
           ic_tag[i_idx] = i_tag;
         end
@@ -192,33 +204,41 @@ module cache32 (
         if (dc_ready_now) begin
           if (!(uart_store || uart_load)) begin
             if (!dc_hit) begin
-              for (int b = 0; b < LINE_BYTES; b++)
-                dc_data[d_idx*LINE_BYTES+b] =
-                  ram[((ea & 32'hFFFFFFF0) + b) & BACK_MASK];
+              for (int w = 0; w < LINE_BYTES/4; w++)
+                dcw[d_idx*4+w] =
+                  rw[((((ea & 32'hFFFFFFF0) >> 2)) + w) & (BACK_WORDS - 1)];
               dc_ep[d_idx] = epoch;
               dc_tag[d_idx] = d_tag;
             end
             if (idex_st) begin
-              sb = ea & BACK_MASK;
-              ram[sb] = sd_raw[7:0];
-              if (d_off < LINE_BYTES)
-                dc_data[d_idx*LINE_BYTES+d_off] = sd_raw[7:0];
-              if (ssz == 2'b01 || ssz == 2'b10) begin
-                ram[(sb + 1) & BACK_MASK] = sd_raw[15:8];
-                if ((d_off + 1) < LINE_BYTES)
-                  dc_data[d_idx*LINE_BYTES+d_off+1] = sd_raw[15:8];
+              w0  = (ea >> 2) & (BACK_WORDS - 1);
+              sft = (ea & 3) * 8;
+              nby = (ssz == 2'b00) ? 1 : (ssz == 2'b01) ? 2 : 4;
+              msk = (nby == 4) ? 32'hFFFF_FFFF
+                               : ((32'h1 << (nby * 8)) - 32'h1);
+              rw[w0] = (rw[w0] & ~(msk << sft)) | (sd_raw << sft);
+              if ((ea & 3) + nby > 4)
+                rw[(w0 + 1) & (BACK_WORDS - 1)] =
+                  (rw[(w0 + 1) & (BACK_WORDS - 1)] & ~(msk >> (32 - sft))) |
+                  (sd_raw >> (32 - sft));
+              if (d_off <= 12) begin
+                dcw[d_idx*4+(d_off>>2)] =
+                  (dcw[d_idx*4+(d_off>>2)] & ~(msk << sft)) | (sd_raw << sft);
+                if ((d_off & 3) + nby > 4)
+                  dcw[d_idx*4+(d_off>>2)+1] =
+                    (dcw[d_idx*4+(d_off>>2)+1] & ~(msk >> (32 - sft))) |
+                    (sd_raw >> (32 - sft));
               end
-              if (ssz == 2'b10) begin
-                ram[(sb + 2) & BACK_MASK] = sd_raw[23:16];
-                ram[(sb + 3) & BACK_MASK] = sd_raw[31:24];
-                if ((d_off + 2) < LINE_BYTES)
-                  dc_data[d_idx*LINE_BYTES+d_off+2] = sd_raw[23:16];
-                if ((d_off + 3) < LINE_BYTES)
-                  dc_data[d_idx*LINE_BYTES+d_off+3] = sd_raw[31:24];
-              end
-              ic_ep[(ea >> LINE_SHIFT) & IC_MASK] = 32'd0;
+              i_s = (ea >> LINE_SHIFT) & IC_MASK;
+              i_t = ea >> (LOGIC + LINE_SHIFT);
+              if (ic_ep[i_s] == epoch && ic_tag[i_s] == i_t)
+                ic_ep[i_s] = 32'd0;
               if (d_off > 12) begin
-                ic_ep[((ea >> LINE_SHIFT) + 1) & IC_MASK] = 32'd0;
+                if (ic_ep[(i_s + 1) & IC_MASK] == epoch &&
+                    (ic_tag[(i_s + 1) & IC_MASK] == i_t ||
+                     ic_tag[(i_s + 1) & IC_MASK] == (i_t + 32'h1)))
+                  ic_ep[(i_s + 1) & IC_MASK] = 32'd0;
+                dc_ep[d_idx] = 32'd0;
                 dc_ep[(d_idx + 1) & DC_MASK] = 32'd0;
               end
             end else begin
@@ -251,8 +271,7 @@ module cache32 (
   // Debug word readback straight from backing RAM (only when dbg_re set; C++
   // P2 runner now reads rootp->ram directly, so this runs at most once per
   // loader/capture call, not every eval).
-  assign dbg_rd = dbg_re ? { ram[(dbg_ra + 3) & BACK_MASK], ram[(dbg_ra + 2) & BACK_MASK],
-                             ram[(dbg_ra + 1) & BACK_MASK], ram[dbg_ra & BACK_MASK] } : 32'h0;
+  assign dbg_rd = dbg_re ? rbwb(dbg_ra) : 32'h0;
 `endif
 endmodule
 `default_nettype wire

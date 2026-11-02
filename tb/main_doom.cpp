@@ -89,11 +89,11 @@ int main(int argc, char **argv) {
     load_words(wad, WAD_ADDR);
 
     auto read_word = [&](uint32_t addr) -> uint32_t {
-        auto &ram = model->rootp->run_doom__DOT__T__DOT__MM__DOT__ram;
-        uint32_t m = addr & 0x1FFFFFFu;
-        return ((uint32_t)ram[m] | ((uint32_t)ram[(m + 1) & 0x1FFFFFFu] << 8) |
-                ((uint32_t)ram[(m + 2) & 0x1FFFFFFu] << 16) |
-                ((uint32_t)ram[(m + 3) & 0x1FFFFFFu] << 24));
+        auto &rww = model->rootp->run_doom__DOT__T__DOT__MM__DOT__rw;
+        uint32_t w = (addr >> 2) & 0x7FFFFFu;
+        uint32_t s = (addr & 3) * 8;
+        if (s == 0) return rww[w];
+        return (rww[w] >> s) | (rww[(w + 1) & 0x7FFFFFu] << (32 - s));
     };
 
     FILE *uartlog = fopen("build/doom/logs/run.out", "w");
