@@ -125,7 +125,12 @@ module csrs (
       if (!inhibit_cycle) after_mcycle = after_mcycle + 32'd1;
       if (!inhibit_instret && !xret_write) begin
         after_minstret = after_minstret + 32'd1;
+`ifndef FPGA
+        // 64-bit instret rollover carry: SIM builds only (MI instret_overflow).
+        // FPGA build keeps the truncated 32-bit low counter + real writable hi
+        // (the 32-bit AND-accumulate+carry chain regressed the FPGA netlist).
         if (min_ref == 32'hFFFF_FFFF) after_minstret_hi = minh_ref + 32'd1;
+`endif
       end
     end
     if (cs_write_en) begin
@@ -213,7 +218,9 @@ module csrs (
           if (!inhibit_cycle) st_mcycle <= st_mcycle + 32'd1;
           if (!inhibit_instret && !xret_write) begin
             st_minstret <= st_minstret + 32'd1;
+`ifndef FPGA
             if (st_minstret == 32'hFFFF_FFFF) st_minstret_hi <= st_minstret_hi + 32'd1;
+`endif
           end
         end
         if (!halt_in) st_mstatus <= mstatus_wr;

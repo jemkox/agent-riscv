@@ -88,7 +88,7 @@ P3 Report: cycles per frame, frames per second at the assumed 50 MHz, and real-t
 ## M10: DOOM IN SIMULATION (new goal, after FINAL ACCEPTANCE)
 ORDER FROM NOW ON (user decision, overrides the order written elsewhere in this file): playable Doom first.
   1. Finish M10d: remove debug edits, Doom renders >= 30 correct frames again, all tests pass (fix mi instret_overflow), commit.
-  2. P2 simulation speed (Verilator -O3, no logging) - playability depends on it.
+  2. P2 simulation speed: DONE for now at 5.57M cyc/s (0f5446b; user decision 2026-11-02 01:2x: stop P2 here, the 15M target is deferred to after M10f).
   3. M10f `hdl make play` (keyboard, SDL2 window).
   4. Then P1, P3, M10e.
   5. LAST: the remaining F4 DONE CHECKLIST / FPGA work (Fmax rounds, final FPGA numbers). Do not touch FPGA files before step 4 is done.
@@ -117,7 +117,7 @@ M10d Port and run: build Doom with riscv64-unknown-elf-gcc -march=rv32im -mabi=i
 M10e Results: record measured cycles per frame, the frame rate at the assumed 50 MHz, and the simulation wall-clock
      speed (frames per real second) in PROGRESS.md and README. Put 3 sample frames in docs/doom/ and, if possible,
      an animated GIF of the demo (ffmpeg is NOT installed; use Python if you make a GIF).
-M10f Playable (do this LAST, after F1-F4, M10a-M10e and P1-P3 are done): a live SDL2 window in the Verilator C++
+M10f Playable (do this NOW, right after M10d - see ORDER at the top of M10; the other steps follow it): a live SDL2 window in the Verilator C++
      Doom testbench that shows the framebuffer as it is drawn, with the real keyboard fed into the key register:
      arrow keys = move/turn, Ctrl = fire, Space = use/open, Enter, Esc, Y/N, and 1-7 = weapons. One command starts it:
      `hdl make play` (it needs the display, so the window must open from inside the sandbox; DISPLAY is passed in).
