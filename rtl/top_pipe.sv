@@ -13,6 +13,11 @@ module top_pipe (
   // M10f: keyboard FIFO feed for DG_GetKey (see cache32 KEY_ADDR)
   input  logic [31:0] key_in,
   output logic        key_hit,
+  // P3 counters (misses, M-unit stalls, load-use stalls)
+  output logic [31:0] stat_icm,
+  output logic [31:0] stat_dcm,
+  output logic [31:0] mst_cnt,
+  output logic [31:0] st_cnt,
 `endif
   output logic        halt,
   output logic [31:0] ex_pc,
@@ -57,6 +62,9 @@ module top_pipe (
   logic        bp_pred_if, branch_act_taken, branch_is, wrong_pred, bp_upd_enable, ifid_pred_taken = 0;
   logic        idex_pred_taken = 0;
   logic        idex_fetch_bad;
+`ifdef DOOM_BIG
+  // mst_cnt/st_cnt are output ports (declared in the header), incremented below.
+`endif
   logic [31:0] ifid_pred_tgt = 0, idex_pred_tgt = 0, branch_upd_tgt, bp_pred_tgt_if;
 
   regs32 RF(.clk(clk), .reset(reset), .rsel1(ifid_insn[19:15]), .rsel2(ifid_insn[24:20]),
@@ -66,6 +74,7 @@ module top_pipe (
 `ifdef DOOM_BIG
              .dbg_re(dbg_re), .dbg_ra(dbg_ra), .dbg_rd(dbg_rd),
              .key_in(key_in), .key_hit(key_hit),
+             .stat_icm(stat_icm), .stat_dcm(stat_dcm),
 `endif
              .pc_if(pc_if), .fetch_insn(fetch_insn), .fetch_ready(fetch_ready),
              // No memory access while a load-use stall holds this instruction: its address/data operands
@@ -212,8 +221,17 @@ module top_pipe (
       halt <= 1'b0;
       ifid_valid <= 1'b0; idex_valid <= 1'b0; exmem_valid <= 1'b0; mwb_valid <= 1'b0;
       idex_m_done <= 1'b1;
+`ifdef DOOM_BIG
+      mst_cnt <= 32'd0;
+      st_cnt <= 32'd0;
+`endif
     end else if (!halt) begin
       halt <= halt || exmem_stop || halt_out;
+`ifdef DOOM_BIG
+      // P3 counters: M-unit + mem-pending stalls and load-use stalls
+      mst_cnt <= mst_cnt + (m_stall ? 32'd1 : 32'd0);
+      st_cnt <= st_cnt + (stall ? 32'd1 : 32'd0);
+`endif
       mwb_valid <= exmem_valid;
       mwb_pc <= exmem_pc; mwb_insn <= exmem_insn; mwb_rd <= exmem_rd;
       mwb_wben <= exmem_wben && !exmem_stop;

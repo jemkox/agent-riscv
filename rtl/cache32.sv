@@ -28,10 +28,13 @@ module cache32 (
   input  logic [1:0]  ssz,
   output logic [31:0] ld_raw,
 `ifdef DOOM_BIG
-  // M10f keyboard FIFO byte feed for DG_GetKey (C++ testbench writes it each
+  // M10f keyboard FIFO feed for DG_GetKey (C++ testbench writes it each
   // cycle; key_hit pulses when a load at KEY_ADDR consumed the head).
   input  logic [31:0] key_in,
   output logic        key_hit,
+  // P3 counters: I/D cache misses (pending-fill initiations)
+  output logic [31:0] stat_icm = 0,
+  output logic [31:0] stat_dcm = 0,
 `endif
   output logic        mem_ready
 );
@@ -222,6 +225,9 @@ module cache32 (
         ic_pending <= 1'b1;
         ic_count   <= 1;
         ic_ptag    <= i_tag;
+`ifdef DOOM_BIG
+        stat_icm   <= stat_icm + 32'd1;
+`endif
       end else if (ic_pending && (ic_ptag == i_tag) && !ic_hit) begin
         ic_count <= ic_count + 1;
       end else begin
@@ -285,6 +291,9 @@ module cache32 (
           dc_pending <= 1'b1;
           dc_count   <= 1;
           dc_ptag    <= d_tag;
+`ifdef DOOM_BIG
+          stat_dcm   <= stat_dcm + 32'd1;
+`endif
         end else if (dc_pending && (dc_ptag == d_tag) && !dc_hit) begin
           dc_count <= dc_count + 1;
         end else begin

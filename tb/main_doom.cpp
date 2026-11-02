@@ -152,6 +152,9 @@ int main(int argc, char **argv) {
         if ((cyc & 0xFFFFF) == 0 && uartlog) fflush(uartlog);
     }
     if (uartlog) {
+        fprintf(uartlog, "#STATS icm=%u dcm=%u mst=%u st=%u br=%u taken=%u mis=%u\n",
+                model->stat_icm, model->stat_dcm, model->mst_cnt, model->st_cnt,
+                model->bp_branches, model->bp_taken_preds, model->bp_mispreds);
         fprintf(uartlog, "#RUN cycles=%llu insns=%llu frames=%llu halt=%d\n",
                 (unsigned long long)cyc, (unsigned long long)insn,
                 (unsigned long long)frames, model->halt ? 1 : 0);

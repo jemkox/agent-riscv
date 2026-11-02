@@ -821,3 +821,44 @@ hdl make doom_probe   # builds fsys.o + probe elf/hex + wad.hex + run_mmio_big (
 
 ### Next
 - P2 15M target (deferred to after M10f), then P1 metrics/P3 counters/M10e, then F4 DONE checklist.
+
+## P1 + P3 metrics measured (after M10f `b72bf3e`, canonical LAT=5 Doom run)
+### Worked
+- Added DOOM_BIG-only stat counters as Verilog output ports: `stat_icm`/`stat_dcm`
+  in `cache32.sv` (incremented when a pending I/D fill starts), `mst_cnt`/`st_cnt`
+  in `top_pipe.sv` (M-unit/mem-pending stalls and load-use stalls).
+- `tb/main_doom.cpp` reads them straight off the Verilated object and prints
+  `#STATS icm=... dcm=... mst=... st=... br=... taken=... mis=...` into
+  `build/doom/logs/run.out`.
+- `lat1`, `lat20`, `m7`, `test`, `regress`, `ui`, `um`, `mi` re-run after the
+  port surgery: `ALL PASS` (9 suite lines, counters are `DOOM_BIG`-only so the
+  non-DOOM suites never see them).
+
+### Metrics (P1/P3, one line from `build/doom/logs/run.out`)
+| Counter | Value | Rate |
+|---|---|---|
+| RUN cycles / insns / frames | 123,801,143 / 112,822,612 / 31 | 3.99M cyc/frame avg incl boot; render-frame delta ~2.33M, P1 target <= 5M/frame MET |
+| I-cache misses | 53,295 | 0.047% of insns (16 KB, 16 B lines, direct-mapped, LAT=5 fill) |
+| D-cache misses | 1,688,067 | 1.50% of insns (16 KB, same geometry) |
+| M-unit + mem-pending stalls (`mst_cnt`) | 7,303,116 | 5.90% of RUN cycles |
+| Load-use stalls (`st_cnt`) | 2,058,095 | 1.66% of RUN cycles |
+| Branches / taken-preds / mispredicts | 22,531,620 / 13,927,098 / 188,656 | 61.8% taken, mispred 0.84% of branches |
+| fps @ 50 MHz | 12.5 fps (50M / 3.99M per frame) | render-frame deltas give 21.4 fps |
+| real-time fps | ~1.40 (31 frames in ~22.2s wall, 5.57M cyc/s) | per-frame deltas ~2.4 |
+
+Counters add no sim-cycle cost: the canonical run stays at 123,801,143 cycles
+(identical to the pre-counter run), fps/mipred/mstall numbers are now a real
+P3 breakdown of the Doom frame (5.9% M/mem stalls + 1.7% load-use + 0.3% mispred
+flushes ~ the rest is steady pipeline + fetch traffic).
+
+### Honest limitations (P1/P3)
+- `mst_cnt` lumps M-unit stalls together with load/store pending-fill stalls
+  (both stall via `m_stall`); the split between mul/div and mem-pending inside
+  it is not separately counted.
+- Mispredict penalty cycles are not measured directly (only the mispred event
+  count); flush cost is derived from the pipeline's ~2-cycle restart.
+- I/D associativity: direct-mapped only (16 KB each side); no 2-way measured.
+
+### Next
+- P2 15M target now that M10f is done (try `--gft` + `-march=native` knobs),
+  then the F4 DONE checklist; MET needs P2 >= 15M so no `M10 DOOM: MET` yet.
