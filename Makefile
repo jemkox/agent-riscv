@@ -9,21 +9,30 @@ CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
 UI_CCFLAGS := -march=rv32i_zifencei -mabi=ilp32
 OC := riscv64-unknown-elf-objcopy
 
-RVTEST_DIR ?= ../../downloads/riscv-tests/isa
-WAD_SRC ?= ../../downloads/doomwad/doom1.wad
+# External inputs (not in the repo). `make deps` clones the two public ones into deps/ at pinned
+# revisions; the DOOM shareware WAD you copy to deps/doom1.wad yourself. Any of them can also be
+# given on the command line (RVTEST_DIR=..., COREMARK_DIR=..., WAD_SRC=...).
+RISCV_TESTS_URL ?= https://github.com/riscv-software-src/riscv-tests.git
+RISCV_TESTS_REV ?= 3df703cd52d5f0d8224e3c50bf03c6cb70efff98
+COREMARK_URL ?= https://github.com/eembc/coremark.git
+COREMARK_REV ?= 1f483d5b8316753a742cbf5590caf5bd0a4e4777
+WAD_SHA1 := 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d
+RVTEST_DIR ?= $(firstword $(wildcard deps/riscv-tests/isa ../../downloads/riscv-tests/isa) deps/riscv-tests/isa)
+COREMARK_DIR ?= $(firstword $(wildcard deps/coremark ../../downloads/coremark) deps/coremark)
+WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.wad) deps/doom1.wad)
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
 UI_DIR := $(RVTEST_DIR)/rv32ui
 UI_MACROS := $(RVTEST_DIR)/macros/scalar
 UM_DIR := $(RVTEST_DIR)/rv32um
 UM_MACROS := $(RVTEST_DIR)/macros/scalar
-UI_NAMES := $(basename $(notdir $(shell ls $(UI_DIR)/*.S)))
+UI_NAMES := $(basename $(notdir $(shell ls $(UI_DIR)/*.S 2>/dev/null)))
 UI_HEXES := $(foreach n,$(UI_NAMES),build/ui/$(n).hex)
 UI_BINS := $(foreach n,$(UI_NAMES),build/ui/$(n).bin)
 UI_LOGS := $(foreach n,$(UI_NAMES),build/ui/logs/$(n).rtl.log build/ui/logs/$(n).iss.log)
 
 UM_CCFLAGS := -march=rv32im_zifencei -mabi=ilp32
-UM_NAMES := $(basename $(notdir $(shell ls $(UM_DIR)/*.S)))
+UM_NAMES := $(basename $(notdir $(shell ls $(UM_DIR)/*.S 2>/dev/null)))
 UM_HEXES := $(foreach n,$(UM_NAMES),build/um/$(n).hex)
 UM_BINS := $(foreach n,$(UM_NAMES),build/um/$(n).bin)
 UM_LOGS := $(foreach n,$(UM_NAMES),build/um/logs/$(n).rtl.log build/um/logs/$(n).iss.log)
@@ -36,12 +45,31 @@ MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
 
-.PHONY: coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
 build:
 	@mkdir -p build
+
+# --- external inputs ---
+deps:
+	@mkdir -p deps
+	@if [ ! -d deps/riscv-tests ]; then git clone -q $(RISCV_TESTS_URL) deps/riscv-tests && git -C deps/riscv-tests checkout -q $(RISCV_TESTS_REV) && git -C deps/riscv-tests submodule -q update --init env; fi
+	@if [ ! -d deps/coremark ]; then git clone -q $(COREMARK_URL) deps/coremark && git -C deps/coremark checkout -q $(COREMARK_REV); fi
+	@echo "deps: riscv-tests $$(git -C deps/riscv-tests rev-parse --short HEAD), coremark $$(git -C deps/coremark rev-parse --short HEAD)"
+	@[ -f deps/doom1.wad ] && echo "deps: doom1.wad present" || echo "deps: for Doom, copy the shareware doom1.wad (v1.9, sha1 $(WAD_SHA1)) to deps/doom1.wad"
+
+need_rvtests:
+	@[ -f $(RVTEST_DIR)/rv32ui/addi.S ] || { echo "riscv-tests not found at $(RVTEST_DIR): run 'make deps' or pass RVTEST_DIR=path/to/riscv-tests/isa" >&2; exit 1; }
+	@[ -f $(RVTEST_DIR)/../env/encoding.h ] || { echo "riscv-tests env/ submodule missing: git -C $(RVTEST_DIR)/.. submodule update --init env" >&2; exit 1; }
+
+need_coremark:
+	@[ -f $(COREMARK_DIR)/core_main.c ] || { echo "CoreMark not found at $(COREMARK_DIR): run 'make deps' or pass COREMARK_DIR=path/to/coremark" >&2; exit 1; }
+
+need_wad:
+	@[ -f "$(WAD_SRC)" ] || { echo "doom1.wad not found at $(WAD_SRC): copy the shareware WAD (v1.9) to deps/doom1.wad or pass WAD_SRC=path" >&2; exit 1; }
+	@echo "$(WAD_SHA1)  $(WAD_SRC)" | sha1sum -c --quiet - || { echo "$(WAD_SRC) is not the v1.9 shareware doom1.wad (sha1 $(WAD_SHA1))" >&2; exit 1; }
 
 build/ui:
 	@mkdir -p build/ui
@@ -119,7 +147,7 @@ build/mi/%.hex: build/mi/%.bin | build/mi
 build/sim_%.vvp: $(RTL) $(TB) | build
 	iverilog -g2012 -Wall -DTBHEX='"build/$*.hex"' -DTOPPIPE -o build/sim_$*.vvp $(RTL) $(TB)
 
-test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/ui build/ui/logs build/um build/um/logs
+test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | need_rvtests build/ui build/ui/logs build/um build/um/logs
 	@bad=0; mkdir -p build/rand; \
 	for t in $(TESTS); do \
 	 cp build/$$t.hex build/p.hex; ./build/vlt/run_hex > build/$$t.rtl.log; \
@@ -143,7 +171,7 @@ test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(U
 	 done; \
 	 if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; fi
 
-ui: $(UI_BINS) $(UI_HEXES) build/vlt/run_hex | build/ui build/ui/logs
+ui: $(UI_BINS) $(UI_HEXES) build/vlt/run_hex | need_rvtests build/ui build/ui/logs
 	@bad=0; \
   for n in $(UI_NAMES); do \
     cp build/ui/$$n.hex build/p.hex; \
@@ -159,7 +187,7 @@ build/vlt/run_hex_lat$(CACHE_LAT): $(RTL) $(TB) | build build/vlt
 build/vlt/run_hex: build/vlt/run_hex_lat$(CACHE_LAT)
 	@cp -f $< $@
 
-um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/um build/um/logs
+um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | need_rvtests build/um build/um/logs
 	@bad=0; \
   for n in $(UM_NAMES); do \
     cp build/um/$$n.hex build/p.hex; \
@@ -169,7 +197,7 @@ um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | build/um build/um/logs
   done; \
   if [ $$bad -eq 0 ]; then echo ALL UM PASS; else echo "UM TEST FAILED: $$bad errors"; fi
 
-mi: $(MI_BINS) $(MI_HEXES) build/vlt/run_hex | build/mi build/mi/logs
+mi: $(MI_BINS) $(MI_HEXES) build/vlt/run_hex | need_rvtests build/mi build/mi/logs
 	@bad=0; \
   for n in $(MI_NAMES); do \
     cp build/mi/$$n.hex build/p.hex; \
@@ -226,6 +254,7 @@ CM_FLAGS := $(CCFLAGS) $(CM_OPT) -DITERATIONS=$(CM_ITER) -DPERFORMANCE_RUN=1 -DF
 build/bench:
 	@mkdir -p build/bench
 
+build/bench/coremark.elf: | need_coremark
 build/bench/coremark.elf: $(CM_SRCS) bench/coremark/core_portme.h doom/crt0_rv32.S doom/exit_rv.S doom/ld.ld | build/bench
 	$(CC) $(CM_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -I bench/coremark -I $(COREMARK_DIR) -o $@ doom/crt0_rv32.S doom/exit_rv.S $(CM_SRCS)
 
@@ -247,8 +276,8 @@ coremark: build/vlt_bench/run_bench build/bench/coremark.hex
 build/doom:
 	@mkdir -p build/doom
 
-build/doom/wad.bin: $(WAD_SRC) | build/doom
-	cp $< $@
+build/doom/wad.bin: | need_wad build/doom
+	cp $(WAD_SRC) $@
 
 build/doom/wad.hex: build/doom/wad.bin | build/doom
 	python3 tools/bin2hex.py $< $@

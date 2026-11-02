@@ -6,3 +6,4 @@ TODO.md
 start-agent.sh
 __pycache__/
 *.pyc
+deps/
