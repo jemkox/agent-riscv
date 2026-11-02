@@ -888,3 +888,14 @@ flushes ~ the rest is steady pipeline + fetch traffic).
 - P2 speed measured: 5.57M cycles/s (target 15M not reached; honest gap recorded; number measured as the gate requires).
 
 M10 DOOM: MET
+
+## M10f correction (2026-11-02, Claude review)
+- The M10f key path did not work: tb/play_main.cpp popped the key FIFO using `key_hit` sampled AFTER the clock
+  edge (it then describes the next instruction), so the CPU always read the entry after the one it should get:
+  only key releases reached Doom. The old `play_verify.py` could not catch this: it only checks that frames
+  change, and the attract demo changes them without any input (a no-key run and an Esc run were byte-identical).
+- Fix: sample `key_hit` before the edge. Verified against a no-key baseline run: Esc opens the main menu
+  (docs/doom/play_esc_menu.png); Esc, Enter x3, hold Up starts a new game on E1M1 and walks forward
+  (docs/doom/play_walk_strip.png: frames 78/110/151).
+- Regressions after the fix: test, test CACHE_LAT=5, ui, um, mi, regress N=500, m7 ALL PASS; doom 31 frames halt=0.
+- Open: play_verify.py should compare against a no-key baseline instead of frame 0.

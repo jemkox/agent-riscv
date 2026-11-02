@@ -176,9 +176,14 @@ int main(int argc, char **argv) {
             if (done) break;
         }
         model->key_in = fifo.empty() ? 0 : fifo.front();
+        model->eval();
+        // key_hit is combinational on the load now in EX, which captures key_in at THIS edge:
+        // sample it before the edge (after the edge it describes the next instruction, and
+        // popping then dropped every key-press, leaving only releases).
+        const bool key_taken = model->key_hit;
         setc(1, 0);
         model->eval();
-        if (model->key_hit && !fifo.empty()) fifo.pop_front();
+        if (key_taken && !fifo.empty()) fifo.pop_front();
         if (model->ex_st && model->ex_sa == UART_ADDR && (model->ex_sbe & 1))
             if (log) fprintf(log, "%c", (char)(model->ex_sd & 0xFF));
         if (model->ex_st && model->ex_sa == FRAME_ADDR) {
