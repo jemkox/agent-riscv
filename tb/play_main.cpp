@@ -141,6 +141,10 @@ int main(int argc, char **argv) {
     SDL_Surface *scr = nullptr;
     Uint32 pitchw = 0;
     if (!headless) {
+        // Plain software window surface: the hdl sandbox has no GPU device, and SDL's default
+        // OpenGL-backed window surface fails there (X_GLXCreateContext BadValue).
+        SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0");
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
         if (SDL_Init(SDL_INIT_VIDEO) != 0) {
             printf("SDL init failed: %s\n", SDL_GetError());
             return 1;
@@ -163,7 +167,7 @@ int main(int argc, char **argv) {
             fifo.push_back(sched[si].second);
             si++;
         }
-        if (!headless) {
+        if (!headless && (cyc & 0xFFFF) == 0) {   // poll the keyboard every 65536 cycles (~80x/s), not every cycle
             SDL_Event e;
             while (SDL_PollEvent(&e)) {
                 if (e.type == SDL_QUIT) { done = true; break; }
