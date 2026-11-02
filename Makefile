@@ -254,7 +254,6 @@ CM_FLAGS := $(CCFLAGS) $(CM_OPT) -DITERATIONS=$(CM_ITER) -DPERFORMANCE_RUN=1 -DF
 build/bench:
 	@mkdir -p build/bench
 
-build/bench/coremark.elf: | need_coremark
 build/bench/coremark.elf: $(CM_SRCS) bench/coremark/core_portme.h doom/crt0_rv32.S doom/exit_rv.S doom/ld.ld | build/bench
 	$(CC) $(CM_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -I bench/coremark -I $(COREMARK_DIR) -o $@ doom/crt0_rv32.S doom/exit_rv.S $(CM_SRCS)
 
@@ -268,7 +267,7 @@ build/vlt_bench/run_bench: $(RTL) tb/run_doom.sv tb/bench_main.cpp | build
 	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_bench -o run_bench $(RTL) tb/run_doom.sv $(CURDIR)/tb/bench_main.cpp
 	$(MAKE) -C build/vlt_bench -f Vrun_doom.mk OPT_FAST="-O3" run_bench -j 4
 
-coremark: build/vlt_bench/run_bench build/bench/coremark.hex
+coremark: need_coremark build/vlt_bench/run_bench build/bench/coremark.hex
 	@./build/vlt_bench/run_bench build/bench/coremark.hex | tee build/bench/coremark.out
 	@python3 tools/coremark_score.py build/bench/coremark.out
 
