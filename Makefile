@@ -169,7 +169,7 @@ test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(U
 	 python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; \
 	 python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
-	 if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; fi
+	 if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
 
 ui: $(UI_BINS) $(UI_HEXES) build/vlt/run_hex | need_rvtests build/ui build/ui/logs
 	@bad=0; \
@@ -179,7 +179,7 @@ ui: $(UI_BINS) $(UI_HEXES) build/vlt/run_hex | need_rvtests build/ui build/ui/lo
     python3 iss/iss.py --quiet --pass --log build/ui/logs/$$n.iss.log build/ui/$$n.bin > /dev/null || bad=$$((bad+1)); \
     python3 tools/cmp.py build/ui/logs/$$n.rtl.log build/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
-  if [ $$bad -eq 0 ]; then echo ALL UI PASS; else echo "UI TEST FAILED: $$bad errors"; fi
+  if [ $$bad -eq 0 ]; then echo ALL UI PASS; else echo "UI TEST FAILED: $$bad errors"; exit 1; fi
 
 build/vlt/run_hex_lat$(CACHE_LAT): $(RTL) $(TB) | build build/vlt
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_hex_lat$(CACHE_LAT) $(RTL) $(TB)
@@ -195,7 +195,7 @@ um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | need_rvtests build/um build/um/lo
     python3 iss/iss.py --quiet --pass --log build/um/logs/$$n.iss.log build/um/$$n.bin > /dev/null || bad=$$((bad+1)); \
     python3 tools/cmp.py build/um/logs/$$n.rtl.log build/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
-  if [ $$bad -eq 0 ]; then echo ALL UM PASS; else echo "UM TEST FAILED: $$bad errors"; fi
+  if [ $$bad -eq 0 ]; then echo ALL UM PASS; else echo "UM TEST FAILED: $$bad errors"; exit 1; fi
 
 mi: $(MI_BINS) $(MI_HEXES) build/vlt/run_hex | need_rvtests build/mi build/mi/logs
 	@bad=0; \
@@ -205,10 +205,10 @@ mi: $(MI_BINS) $(MI_HEXES) build/vlt/run_hex | need_rvtests build/mi build/mi/lo
     python3 iss/iss.py --quiet --pass --log build/mi/logs/$$n.iss.log build/mi/$$n.bin > /dev/null || bad=$$((bad+1)); \
     python3 tools/cmp.py build/mi/logs/$$n.rtl.log build/mi/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
-  if [ $$bad -eq 0 ]; then echo ALL MI PASS; else echo "MI TEST FAILED: $$bad errors"; fi
+  if [ $$bad -eq 0 ]; then echo ALL MI PASS; else echo "MI TEST FAILED: $$bad errors"; exit 1; fi
 
 regress: build/vlt/run_hex
-	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; fi
+	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
 
 TB_MMIO := tb/run_mmio.sv
 M7_NAMES := hello fib sort matmul bench
@@ -240,7 +240,7 @@ build/vlt/run_mmio: build/vlt/run_mmio_lat$(CACHE_LAT)
 	@cp -f $< $@
 
 m7: build/vlt/run_mmio $(M7_HEXS)
-	@bad=0; mkdir -p build/m7/logs; for n in $(M7_NAMES); do cp build/m7/$$n.hex build/m7/p.hex; ./build/vlt/run_mmio > build/m7/logs/$$n.out; grep -q PASS build/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; fi
+	@bad=0; mkdir -p build/m7/logs; for n in $(M7_NAMES); do cp build/m7/$$n.hex build/m7/p.hex; ./build/vlt/run_mmio > build/m7/logs/$$n.out; grep -q PASS build/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; exit 1; fi
 
 # --- CoreMark (EEMBC) on the Doom-configuration CPU (16+16 KB caches, CACHE_LAT=5) ---
 # COREMARK_DIR: an upstream checkout of https://github.com/eembc/coremark (port files in bench/coremark).

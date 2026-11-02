@@ -1,0 +1,72 @@
+# Runs the whole CPU verification on a clean GitHub machine (Ubuntu 24.04, same tool versions as the
+# original run), plus the FPGA build and a clean install of the agent harness. Doom is not run here
+# because the WAD is not redistributed in this repo.
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cpu:
+    name: CPU tests, CoreMark, FPGA
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q verilator yosys nextpnr-ice40 fpga-icestorm \
+            gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf libsdl2-dev python3 make
+          verilator --version; yosys -V; riscv64-unknown-elf-gcc --version | head -n 1
+
+      - name: Fetch riscv-tests and CoreMark (make deps)
+        run: make deps
+
+      - name: Directed + official + random tests (memory latency 1)
+        run: make test
+
+      - name: Same with memory latency 5
+        run: make test CACHE_LAT=5
+
+      - name: Official riscv-tests rv32ui / rv32um / rv32mi
+        run: make ui um mi
+
+      - name: 500 random programs vs the Python reference model
+        run: make regress N=500
+
+      - name: C programs over the UART
+        run: make m7
+
+      - name: CoreMark
+        run: make coremark
+
+      - name: FPGA build for iCE40 UP5K (must meet 13 MHz)
+        run: |
+          make fpga_full FPGA_FREQ=13 FPGA_SEED=7
+          grep -q "PASS at 13.00 MHz" build/cpu_full_route.log
+
+  agent:
+    name: Agent harness installs cleanly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax checks
+        run: |
+          for f in agent/install.sh agent/bin/cpu-agent agent/bin/cpu-agent-serve agent/bin/hdl \
+                   agent/bin/model-up agent/bin/review-at-commit; do sh -n "$f"; done
+          python3 -c "import ast,sys; ast.parse(open('agent/bin/agent-watchdog').read())"
+          cp agent/opencode/plugin/cpu-loop.js "$RUNNER_TEMP/cpu-loop.mjs" && node --check "$RUNNER_TEMP/cpu-loop.mjs"
+
+      - name: Install into a clean home folder
+        run: |
+          export HOME="$RUNNER_TEMP/home"; mkdir -p "$HOME"
+          sh agent/install.sh --workspace "$GITHUB_WORKSPACE/.." --no-systemd --model-id test-model
+          if grep -rn "@[A-Z_]*@" "$HOME/.config" "$HOME/.local/bin"; then echo "unfilled placeholders" >&2; exit 1; fi
+          python3 -c "import json,os; json.load(open(os.path.expanduser('~/.config/opencode/opencode.json')))"
+          grep -q '^PROJECT="' "$HOME/.config/cpu-agent/config"

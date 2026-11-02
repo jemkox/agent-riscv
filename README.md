@@ -1,5 +1,7 @@
 # rv32cpu: a RISC-V CPU that runs DOOM, built by a local AI agent
 
+[![CI](https://github.com/jemkox/agent-riscv-doom/actions/workflows/ci.yml/badge.svg)](https://github.com/jemkox/agent-riscv-doom/actions/workflows/ci.yml)
+
 <p align="center">
   <img src="docs/doom/gameplay.gif" width="640" alt="DOOM E1M1 running on the rv32cpu pipeline in Verilator">
 </p>
@@ -63,7 +65,7 @@ For context, published numbers of well-known open-source RV32 cores
 | VexRiscv, full (4 KB caches) | 2.30 |
 
 This is a self-run result in cycle-accurate simulation, not an EEMBC-certified
-score. Run it with `make coremark`.
+score. Run it with `make coremark`; CI runs it on every push.
 
 ## Two real CPU bugs that only DOOM found
 
