@@ -279,6 +279,21 @@ build/vlt_doom/run_doom: $(RTL) $(DOOM_TB) $(DOOM_MAIN) | build/doom
 doom: build/vlt_doom/run_doom build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
 	@mkdir -p build/doom/frames build/doom/logs; ./build/vlt_doom/run_doom 400000000; grep "#frame\|#RUN" build/doom/logs/run.out | tail -n 40
 
+# M10f: playable Doom (SDL2 window + key FIFO MMIO). WINDOW mode: run with
+# `hdl make play`; `play_test` = scripted headless verification w/ frame diff.
+SDL2_LIBS := -lSDL2
+
+build/vlt_play/run_play: $(RTL) $(DOOM_TB) tb/play_main.cpp | build
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_play -o run_play $(RTL) $(DOOM_TB) $(CURDIR)/tb/play_main.cpp
+	$(MAKE) -C build/vlt_play -f Vrun_doom.mk OPT_FAST="-O3" LIBS="$(SDL2_LIBS)" run_play -j 4
+
+play: build/vlt_play/run_play build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
+	@rm -f build/play/frames/frame_*.ppm; mkdir -p build/play/frames build/play/logs; ./build/vlt_play/run_play 3000000000
+
+PLAY_SCRIPT ?= @3000000,enter:2000000,@30000000,enter:2000000,@30000000,enter:2000000,@60000000,up:400000000
+play_test: build/vlt_play/run_play build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
+	@rm -f build/play/frames/frame_*.ppm; mkdir -p build/play/frames build/play/logs; PLAY_SCRIPT="$(PLAY_SCRIPT)" ./build/vlt_play/run_play 1600000000 | tail -n 2; python3 tools/play_verify.py; python3 tools/ppm2png.py build/play/frames/frame_342.ppm=docs/doom/play_menu.png build/play/frames/frame_500.ppm=docs/doom/play_move_a.png build/play/frames/frame_560.ppm=docs/doom/play_move_b.png
+
 doom_mem: build/vlt_doom/run_doom | build
 	./build/vlt_doom/run_doom
 

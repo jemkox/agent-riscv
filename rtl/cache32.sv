@@ -27,6 +27,12 @@ module cache32 (
   input  logic [31:0] sd_raw,
   input  logic [1:0]  ssz,
   output logic [31:0] ld_raw,
+`ifdef DOOM_BIG
+  // M10f keyboard FIFO byte feed for DG_GetKey (C++ testbench writes it each
+  // cycle; key_hit pulses when a load at KEY_ADDR consumed the head).
+  input  logic [31:0] key_in,
+  output logic        key_hit,
+`endif
   output logic        mem_ready
 );
 `ifdef CACHE_LAT
@@ -90,7 +96,11 @@ module cache32 (
   logic ic_hit, dc_hit, ic_p_ready, dc_p_ready, dreq, uart_store, uart_load;
   logic dc_ready_now, ic_ready_now, dc_cross_ready;
 `ifdef DOOM_BIG
+  logic key_load, key_store;
+`endif
+`ifdef DOOM_BIG
   localparam logic [31:0] UART_ADDR = 32'h1FF0_0000; /* above the WAD blob */
+  localparam logic [31:0] KEY_ADDR  = 32'h1FF0_0008; /* M10f key-FIFO load */
 `else
   localparam logic [31:0] UART_ADDR = 32'h1000_0000;
 `endif
@@ -137,6 +147,10 @@ module cache32 (
     dreq = idex_valid && (idex_ld || idex_st) && !reset && !halt && !lwe;
     uart_store = dreq && idex_st && (ea == UART_ADDR);
     uart_load  = dreq && idex_ld && (ea == UART_ADDR);
+`ifdef DOOM_BIG
+    key_load   = dreq && idex_ld && (ea == KEY_ADDR);
+    key_store  = dreq && idex_st && (ea == KEY_ADDR);
+`endif
     dc_cross_ready = dreq && (d_off > 12);
 
     ic_p_ready = ic_pending && (ic_ptag == i_tag) && (ic_count >= READY_AT);
@@ -144,16 +158,30 @@ module cache32 (
 
     ic_ready_now = ic_hit || ic_p_ready || (LAT == 1);
     dc_ready_now = dc_hit || dc_p_ready || dc_cross_ready ||
-                   uart_store || uart_load || (LAT == 1);
+                   uart_store || uart_load ||
+`ifdef DOOM_BIG
+                   key_load || key_store ||
+`endif
+                   (LAT == 1);
 
     fetch_ready = (reset || halt) ? 1'b1 : ic_ready_now;
     fetch_insn  = ic_ready_now ? (ic_hit ? rb_ic(pc_if) : rbwb(pc_if)) : 32'h0;
     mem_ready   = (reset || halt) ? 1'b1 : (!dreq || dc_ready_now);
     ld_raw = dc_ready_now ?
              (uart_load ? 32'h0 :
-              ((dc_hit && (d_off <= 12)) ? rb_dc(ea) : rbwb(ea))) :
+`ifdef DOOM_BIG
+              (key_load ? key_in :
+`endif
+               ((dc_hit && (d_off <= 12)) ? rb_dc(ea) : rbwb(ea))
+`ifdef DOOM_BIG
+              )
+`endif
+             ) :
              32'h0;
   end
+`ifdef DOOM_BIG
+  assign key_hit = key_load && dc_ready_now;
+`endif
 
   always_ff @(posedge clk) begin
     if (lwe) begin
@@ -202,7 +230,11 @@ module cache32 (
 
       if (dreq) begin
         if (dc_ready_now) begin
-          if (!(uart_store || uart_load)) begin
+          if (!(uart_store || uart_load
+`ifdef DOOM_BIG
+               || key_store
+`endif
+              )) begin
             if (!dc_hit) begin
               for (int w = 0; w < LINE_BYTES/4; w++)
                 dcw[d_idx*4+w] =

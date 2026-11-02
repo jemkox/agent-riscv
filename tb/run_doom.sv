@@ -11,6 +11,8 @@ module run_doom (
   input  logic [31:0] dbg_ra,
   output logic        halt,
   output logic [31:0] dbg_rd,
+  input  logic [31:0] key_in,
+  output logic        key_hit,
   output logic [31:0] ex_pc,
   output logic [31:0] ex_insn,
   output logic        ex_wben,
@@ -27,6 +29,7 @@ module run_doom (
 );
   top_pipe T(.clk(clk), .reset(reset), .lwe(lwe), .lwa(lwa), .lwd(lwd),
              .dbg_re(dbg_re), .dbg_ra(dbg_ra), .dbg_rd(dbg_rd),
+             .key_in(key_in), .key_hit(key_hit),
              .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
              .ex_wben(ex_wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
              .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_sbe(ex_sbe),

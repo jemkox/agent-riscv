@@ -8,6 +8,22 @@
 
 #define UART_ADDR   0x1FF00000u
 #define FRAME_ADDR  0x1FF00004u
+#define KEY_ADDR    0x1FF00008u   // MMIO key FIFO (cache32 KEY_ADDR)
+
+// M10f key events: the Verilated play testbench pushes (pressed<<16)|keycode
+// words into a FIFO and feeds the head via the model's key_in input; the
+// cache32 pulses key_hit when the consuming load happens (C++ pops).
+// A load here returns 0 when the FIFO is empty.
+int DG_GetKey(int *pressed, unsigned char *doomKey)
+{
+    volatile uint32_t *keyreg = (volatile uint32_t *)KEY_ADDR;
+    uint32_t v = *keyreg;
+    if (!v)
+        return 0;
+    *doomKey = (unsigned char)(v & 0xFFu);
+    *pressed = (int)((v >> 16) & 1u);
+    return 1;
+}
 
 static volatile uint32_t ms_now;
 
@@ -33,11 +49,6 @@ uint32_t DG_GetTicksMs(void)
     return ms_now;
 }
 
-int DG_GetKey(int *pressed, unsigned char *doomKey)
-{
-    (void)pressed; (void)doomKey;
-    return 0; // attract-mode demo needs no input
-}
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;

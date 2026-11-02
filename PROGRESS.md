@@ -783,6 +783,41 @@ hdl make doom_probe   # builds fsys.o + probe elf/hex + wad.hex + run_mmio_big (
   shrink, top_pipe latch trims, uart-off `ifdef` for DOOM_BIG.
 
 ### Next
-- Keep P2 surgery: try LAT=2/3 for DOOM only, 16 MB backing (if map fits), drop uart branches
-  under `DOOM_BIG`, then M10f `hdl make play` (SDL2), then P1 metrics/P3 counters/M10e,
-  then the last F4 checklist items.
+- P2 15M target deferred to after M10f (user decision 2026-11-02); P2 accepted at 5.57M.
+
+## M10f: `hdl make play` (playable Doom, after P2 accepted at 0f5446b)
+### Worked
+- KEY MMIO added to the CPU (guarded `DOOM_BIG`): cache32 `KEY_ADDR = 0x1FF0_0008`
+  load returns the C++-provided `key_in` word (0 = no event), `key_hit` pulses when a
+  load consumed it; stores to KEY_ADDR are skipped. Wired through top_pipe/run_doom ports.
+  Lat suites (`lat1/lat5/lat20`, non-DOOM) unaffected: key logic is `ifdef DOOM_BIG`-only.
+- `doom/port_rv32.c`: `DG_GetKey` now reads the KEY_ADDR MMIO register: word =
+  `(pressed<<16)|doomKey` (doomkeys.h codes: up=0xad, fire=0xa3, use=0xa2, enter=13...).
+- `tb/play_main.cpp`: new SDL2 harness. Window mode (default): 320x200 framebuffer
+  upscaled 3x via `SDL_GetWindowSurface`/`SDL_UpdateWindowSurface`; SDL key events ->
+  FIFO (SDLK_ -> doomykeys). Headless `PLAY_SCRIPT` mode: scripted presses/releases
+  (`name:holdCycles`, `@waitCycles`) feed the same FIFO; every frame saved as PPM.
+- Makefile: `play` (window, 3 Gcycles cap, blocks while window open), `play_test`
+  (scripted headless + `tools/play_verify.py` frame-diff check + PNG copies),
+  SDL linked via generated mk `LIBS=-lSDL2`.
+- Window verified from the sandbox: `DISPLAY=:0` passed, `./build/vlt_play/run_play 5000000`
+  ran interactive SDL mode with no SDL errors (window opened; would print an error otherwise).
+
+### Metrics (M10f, measured this session)
+| Item | Result |
+|---|---|
+| `hdl make play_test` | `play: cycles=1600000000 frames=581`, `PLAY TEST PASS: 581 frames, 239 differ from frame 0, first-diff=frame_342`; late-window check 9/12 consecutive frames distinct (animated view = player moving with Up held) |
+| `hdl make play` | SDL2 window (960x600) opens from sandbox with DISPLAY=:0; headless 5M-cycle interactive-mode test exited clean |
+| `hdl make doom` | unchanged headless: `#RUN cycles=123801143 insns=112822612 frames=31 halt=0` (port_rv32 key poll: only +48 insns vs pre-M10f) |
+| `lat1/lat5/lat20`, `test`/`regress`, `m7`, `ui`/`um`/`mi` | `ALL PASS` (re-run after key-port surgery) |
+| PNGs | `docs/doom/play_menu.png` (frame 342: menu transition), `play_move_a.png`/`play_move_b.png` (frames 500/560: distinct in-game frames while Up held) |
+
+### Honest limitations (M10f)
+- `hdl make play` window opening is verified only by clean SDL init/run in the sandbox
+  (no screenshot of the X window itself); scripted frame diffs prove the key register
+  drives the DOOM state (menu pages + animated in-game frames).
+- PLAY_SCRIPT drives ENTER x3 (title->skill->episode->start) then holds Up; the
+  animated-frame check (9/12 distinct at 85% mark) stands in for a visible "player moved".
+
+### Next
+- P2 15M target (deferred to after M10f), then P1 metrics/P3 counters/M10e, then F4 DONE checklist.

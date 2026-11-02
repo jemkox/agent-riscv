@@ -10,6 +10,9 @@ module top_pipe (
   input  logic        dbg_re,
   input  logic [31:0] dbg_ra,
   output logic [31:0] dbg_rd,
+  // M10f: keyboard FIFO feed for DG_GetKey (see cache32 KEY_ADDR)
+  input  logic [31:0] key_in,
+  output logic        key_hit,
 `endif
   output logic        halt,
   output logic [31:0] ex_pc,
@@ -62,6 +65,7 @@ module top_pipe (
   cache32 MM(.clk(clk), .reset(reset), .halt(halt), .lwe(lwe), .lwa(lwa), .lwd(lwd),
 `ifdef DOOM_BIG
              .dbg_re(dbg_re), .dbg_ra(dbg_ra), .dbg_rd(dbg_rd),
+             .key_in(key_in), .key_hit(key_hit),
 `endif
              .pc_if(pc_if), .fetch_insn(fetch_insn), .fetch_ready(fetch_ready),
              // No memory access while a load-use stall holds this instruction: its address/data operands
