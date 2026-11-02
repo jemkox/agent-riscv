@@ -919,3 +919,29 @@ M10 DOOM: MET
   Full run output: `ALL PASS` x2, `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, regress `ALL PASS` (N=500),
   `ALL M7 PASS`, doom `#RUN cycles=123801143 insns=112822612 frames=31 halt=0`, then `ALL TESTS DONE`,
   no `Error` lines.
+
+## D2 P2 speed round (2026-11-02, DOOM_BIG Verilator runner)
+Profiling first (`gprof` on a `-pg -O3` build, 100M cycles): 53.8% `nba_sequent__TOP__0`, 27.2%
+`ico_sequent__TOP__0`, 7.0% `eval`, 5.3% `main`, ~3.6% Verilator msgqueue/mutex machinery. The
+model itself dominates; the harness was already minimal (2 `eval()` per cycle: clk=1 edge + clk=0).
+Measured attempts (canonical run = 123,801,143 cycles, 31 frames, halt=0 each time):
+| attempt | wall | cycles/s |
+|---|---|---|
+| -O3 (accepted baseline) | 22.09-22.23 s | 5.57-5.60M |
+| -O2 rebuild | 22.99-23.04 s | 5.38-5.40M (no worse material) |
+| `-march=native` | ~22.2 s | no measured effect (x86-64) |
+| `-flto` only | ~22.1 s | no measured effect |
+| gprof -pg build (100M) | 16.3 s | 6.1M but profiling overhead, not usable |
+| Verilator `--threads 2` | **178.4 s** | **0.69M - 8x WORSE** (msgqueue sync on a single-cone model; REJECTED) |
+| gcc PGO (`-fprofile-arcs` run + `-fprofile-use` rebuild, all objects incl. `Vrun_doom__ALL` TU) | 21.78 s | 5.69M |
+| PGO + `-flto` | **21.33 s** | **5.80M = new best** |
+- `--gft`, `--unrollfactor`, `--unroll-factor`: invalid options in Verilator 5.020 (`%Error: Invalid option`).
+- `clang` still not installable in the sandbox (`sudo -A apt install -y clang-14` -> `sudo: a password is required`).
+- Verdict: P2 15M cycles/s NOT reached; honest best **5.80M cycles/s** (PGO+LTO build). The remaining ~2.6x
+  gap is the Verilator per-cycle cost of this pipeline model itself (~175 ns/cycle in nba+ico over a
+  4-stage pipeline with full CSR/branch-predictor state and a 32 MB backing array); the only structural
+  lever Verilator offers (--threads) measures 8x WORSE on this single-clock single-cone model. Further
+  speed would need a simpler CPU/cache model, which would change Doom cycle counts and break the P1
+  numbers recorded on this build - not allowed under "keep ALL existing tests passing".
+- Makefile knobs (all default OFF/no-op, experiments above were `hdl make ... THREADS="--threads 2"` style):
+  `GFT`, `OPT_FAST`, `THREADS` (=--threads 1), `VROPT` on the DOOM_BIG verilator lines.

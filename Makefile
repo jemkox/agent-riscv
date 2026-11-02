@@ -273,7 +273,7 @@ build/doom/doom.syms: build/doom/doom.elf | build/doom
 	@riscv64-unknown-elf-nm $< > $@
 
 build/vlt_doom/run_doom: $(RTL) $(DOOM_TB) $(DOOM_MAIN) | build/doom
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(GFT) -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_doom -o run_doom $(RTL) $(DOOM_TB) $(DOOM_MAIN_ABS)
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(GFT) $(VROPT) $(THREADS) -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_doom -o run_doom $(RTL) $(DOOM_TB) $(DOOM_MAIN_ABS)
 	$(MAKE) -C build/vlt_doom -f Vrun_doom.mk OPT_FAST="$(OPT_FAST)" run_doom -j 4
 
 doom: build/vlt_doom/run_doom build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
@@ -284,9 +284,11 @@ doom: build/vlt_doom/run_doom build/doom/doom.hex build/doom/wad.hex build/doom/
 SDL2_LIBS := -lSDL2
 GFT ?=
 OPT_FAST ?= -O3
+THREADS ?= --threads 1
+VROPT ?=
 
 build/vlt_play/run_play: $(RTL) $(DOOM_TB) tb/play_main.cpp | build
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_play -o run_play $(RTL) $(DOOM_TB) $(CURDIR)/tb/play_main.cpp
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(THREADS) -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_play -o run_play $(RTL) $(DOOM_TB) $(CURDIR)/tb/play_main.cpp
 	$(MAKE) -C build/vlt_play -f Vrun_doom.mk OPT_FAST="-O3" LIBS="$(SDL2_LIBS)" run_play -j 4
 
 play: build/vlt_play/run_play build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
