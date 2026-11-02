@@ -945,3 +945,17 @@ Measured attempts (canonical run = 123,801,143 cycles, 31 frames, halt=0 each ti
   numbers recorded on this build - not allowed under "keep ALL existing tests passing".
 - Makefile knobs (all default OFF/no-op, experiments above were `hdl make ... THREADS="--threads 2"` style):
   `GFT`, `OPT_FAST`, `THREADS` (=--threads 1), `VROPT` on the DOOM_BIG verilator lines.
+
+## D5 final self-check (2026-11-02, run on the committed D1-D4 tree)
+- `hdl make all_tests` (one batch, fresh): `ALL PASS` (test, CACHE_LAT=1), `ALL PASS` (test CACHE_LAT=5),
+  `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, regress N=500 `ALL PASS`, `ALL M7 PASS` (grep -c = 1),
+  doom `#RUN cycles=123801143 insns=112822612 frames=31 halt=0`, ended with `ALL TESTS DONE`, no `Error` lines.
+- `hdl make doom` (run_doom = PGO+LTO binary from D2): `#RUN cycles=123801143 insns=112822612 frames=31 halt=0`,
+  frame deltas ~2.33M cycles, ~21.3 s wall (5.80M cycles/s best build).
+- `hdl make play_test`: baseline 581 frames (no keys), scripted 568 frames,
+  `PLAY TEST PASS: 568 frames, 564/568 differ after first key @cycle 5000000, first-diff=frame_004 (rendered at cycle 63330558)`.
+- `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=7`: `Info ... 13.49 MHz (PASS at 13.00 MHz)` + final
+  `Info ... 13.16 MHz (PASS at 13.00 MHz)`, `build/cpu_full.bin` present, 4859/5280 LC, 8 `SB_RAM40_4K`, 1 `SB_MAC16`.
+- D1-D4 steps all committed (830d7a7 D2, c81d1b8 D3, 7e22f9e D4; D1 in 605e?? "D1: play_verify ..." commit).
+
+DOOM CPU: DONE
