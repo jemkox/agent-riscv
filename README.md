@@ -129,3 +129,46 @@ hdl make synth CACHE_LAT=1
 - Branch prediction accuracy is measured from the M7 benchmark log, not a
   general SPEC-style workload.
 - The FPGA proof binary is a small fixed program; it is not a full RV32 program.
+
+## DOOM in simulation (M10)
+
+DOOM (the shareware `doom1` WAD, port_rv32.c + the public Doom source port
+compiled with `riscv64-unknown-elf-gcc -march=rv32im -mabi=rv32 -Os` against
+picolibc) runs natively on the full 5-stage CPU in Verilator.
+
+Build and run:
+
+```sh
+hdl make doom        # headless: renders 31 frames to build/doom/frames, UART log
+hdl make play        # LIVE window (SDL2, DISPLAY passed into the sandbox), keyboard attached
+hdl make play_test   # scripted headless play, verified vs a NO-KEY baseline run
+```
+
+`make play` controls: arrow keys = move/turn, Ctrl = fire, Space = use/open,
+Enter, Esc, Y/N confirmations, 1-7 = weapon select. Keys are pushed to a FIFO
+in the testbench and consumed by DOOM through an MMIO load at `0x1FF0_0008`
+(`key_in/key_hit` on the cache MMIO port); the harness polls SDL events every
+65536 cycles (~80 polls/s at 13 MHz).
+
+Measured numbers (DOOM_BIG build, 16 KB I + 16 KB D direct-mapped caches, 16 B
+lines, CACHE_LAT=5):
+
+```text
+31 frames in            123,801,143 cycles (halt=0)
+cycles/frame            3.99M average incl. boot (render-frame deltas ~2.33M)
+fps at 50 MHz           12.5        fps at FPGA Fmax 13.16 MHz: 3.3
+simulation speed        5.57M cycles/s baseline (22.2 s), best measured 5.80M (PGO+LTO, 21.33 s)
+I-cache miss rate       0.047%      D-cache miss rate 1.50%
+M/mem-pending stalls    5.90% of cycles  load-use stalls 1.66%  mispreds 188,656/22.53M branches (0.84%)
+```
+
+Sample frames (also animated GIF `docs/doom/play_demo.gif`):
+`docs/doom/title.png`, `mid.png`, `last.png` (headless doom run), and
+`play_menu.png`, `play_move_a.png`, `play_move_b.png` (scripted keyboard
+session: Esc opens the menu, Enter x3 + hold Up starts E1M1 and walks - verified
+against the no-key baseline, first frame divergence 564/568 after first key).
+
+Honest limits: shareware WAD only, 320x200 software-render frames, keyboard
+poll granularity means very fast taps can be missed, `play` needs an X display,
+simulation runs at ~1.4 real fps (P2 15M cycles/s target not reached; best 5.80M),
+and the Doom cycles measured here are on the full sim CPU, not the FPGA build.
