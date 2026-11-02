@@ -132,38 +132,23 @@ before or after the Doom steps, but all must be done and recorded in PROGRESS.md
   [ ] Final FPGA numbers (LC, BRAM, DSP, Fmax) and all regressions passing, measured after the three items above.
 When F1-F4 (including the F4 DONE CHECKLIST) are done, M10d and M10e are proven with real frame images, the P1-P3 numbers are measured and M10f `make play` works, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
 
-## AFTER DOOM: M11-M20 (current goal; M10 DOOM: MET is done - do not redo it)
-Same rules as before: every step keeps ALL existing tests passing (test, CACHE_LAT=5, ui, um, mi, regress N=500,
-m7, doom 31 frames), adds its own tests, is committed, and is recorded in PROGRESS.md with measured numbers only.
-Download sources you need into ~/agent-workspace/downloads/ (git clone --depth 1 or release tarballs), never into
-the project. Keep RAM use within about 4-5 GB (e.g. make -j2). Simulation speed matters for M18-M20: improving it
-(P2) is allowed at any time if a step is too slow to test.
-M11 Wrap-up of Doom: README.md section for Doom (how to build/run `hdl make play`, measured numbers, sample frames,
-    honest limitations); fix tools/play_verify.py so `make play_test` compares against a no-key baseline run (the
-    old check passed with a broken keyboard); `hdl make all_tests` target that runs every suite above.
-M12 Benchmarks: CoreMark (EEMBC, unmodified core files, own core_portme for this CPU) and Dhrystone 2.1. Rules:
-    timing from mcycle, cross-checked against the testbench cycle count; CoreMark runs >= 10 s of simulated time
-    at the FPGA Fmax; report CoreMark/MHz and DMIPS/MHz at CACHE_LAT 1 and 5, with the exact compiler flags; also
-    the FPGA configuration if it can be simulated. CoreMark must print its own "Correct operation validated".
-M13 FreeRTOS: the official RISC-V port (machine mode, mtime/mtimecmp timer) running a demo with >= 3 tasks, a
-    queue, a mutex and a timer-driven tick; prove preemption with UART output. `hdl make rtos`.
-M14 A extension (atomics): LR/SC and AMO*; official rv32ua tests pass (`hdl make ua`); add AMO/LR/SC to the
-    Python ISS and the random differential generator.
-M15 Privilege modes: S-mode and U-mode, medeleg/mideleg, sstatus/sie/sip/stvec/sepc/scause/stval/satp, SRET,
-    WFI, counteren. Official rv32si tests pass (`hdl make si`), rv32mi still passes. Extend the ISS.
-M16 Sv32 MMU: page-table walker, small TLB, SFENCE.VMA, A/D bits (hardware update or page fault, document which),
-    MXR/SUM, instruction/load/store page faults. Directed MMU tests + rv32si; differential tests with paging on.
-M17 Platform: CLINT (mtime, mtimecmp, msip) at the standard address, a 16550-compatible UART with RX input from
-    the testbench, a device tree (.dts -> .dtb) describing the memory map. `hdl make linux_sim` testbench with
-    >= 64 MB RAM.
-M18 OpenSBI (generic platform, FW_JUMP or FW_PAYLOAD) boots on the CPU in simulation and prints its banner.
-M19 Linux: a small rv32 Linux kernel (defconfig trimmed for this machine, initramfs with BusyBox) boots in
-    simulation to the BusyBox shell prompt. Record cycles to prompt and wall-clock time.
-M20 Shell: scripted UART input runs `uname -a`, `cat /proc/cpuinfo`, `ls /` and prints correct output; README
-    section with the boot log excerpt, numbers and honest limitations. Then write the line `M20 LINUX: MET` in
-    PROGRESS.md (on its own line) and stop.
-If a step is truly impossible on this machine (e.g. no network for downloads), record exactly why in PROGRESS.md,
-do the parts that are possible, and continue with the next step instead of stopping.
+## FINISH THE DOOM CPU (current goal; M10 DOOM: MET is done - do not redo it. NOT Linux: Linux comes later)
+Same rules as before: keep ALL existing tests passing (test, CACHE_LAT=5, ui, um, mi, regress N=500, m7, doom 31
+frames), commit each step, record measured numbers only in PROGRESS.md.
+D1 Play test: fix tools/play_verify.py so `make play_test` compares against a no-key baseline run (the old check
+   passed with a broken keyboard); it must FAIL if keys have no effect. Add `hdl make all_tests` running every suite.
+D2 P2 simulation speed (deferred earlier): work toward >= 15M cycles/s for the Doom testbench (profile first; e.g.
+   simpler cache model in DOOM_BIG builds, fewer per-cycle C++ checks, Verilator --threads if it helps). If 15M is
+   truly out of reach, stop after real measured attempts and record the best number and why. `make play` must
+   keep working (window + keyboard).
+D3 Doom results (M10e): README.md Doom section - how to build and run `hdl make play`, controls, measured cycles
+   per frame, fps at 50 MHz and at the FPGA Fmax, simulation fps, sample frames from docs/doom/, honest limits.
+D4 Final README for the whole CPU: block diagram, microarchitecture, ISA, IPC, cache/branch stats, FPGA numbers
+   (say which nextpnr seed), verification approach, the two Doom-found pipeline bugs (load-use store gate,
+   stall-forwarded operands) with their directed tests, known limitations.
+D5 Final self-check: run `hdl make all_tests`, `hdl make doom`, `hdl make play_test`, `hdl make fpga_full` and
+   paste the key output lines into PROGRESS.md. Then write the line `DOOM CPU: DONE` in PROGRESS.md (on its own
+   line) and stop.
 
 ## FINAL ACCEPTANCE (only then may you stop)
 - `hdl make test` runs the whole regression from scratch (directed, random differential, official rv32ui + rv32um tests) and prints ALL PASS. Show that output.
