@@ -1,0 +1,15 @@
+#!/bin/sh
+# Make sure the model server answers on MODEL_URL (run by the cpu-agent-model systemd user unit).
+# If MODEL_CMD is set in ~/.config/cpu-agent/config it is started here; it may stay in the foreground of
+# its own process or detach. Without MODEL_CMD this only waits for a server you start yourself.
+. "$HOME/.config/cpu-agent/config" || exit 1
+health() { curl -fs -m 3 "$MODEL_URL/health" >/dev/null; }
+health && exit 0
+if [ -n "$MODEL_CMD" ]; then
+  mkdir -p "$WORKSPACE/.agent-logs"
+  sh -c "$MODEL_CMD" </dev/null >>"$WORKSPACE/.agent-logs/model.log" 2>&1 &
+fi
+i=0; until health; do
+  i=$((i+1)); [ $i -gt 120 ] && { echo "no model server at $MODEL_URL after 10 minutes" >&2; exit 1; }
+  sleep 5
+done

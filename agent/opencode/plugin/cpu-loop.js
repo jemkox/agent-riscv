@@ -2,20 +2,36 @@
 //  - Active session: the session that most recently started working. Only that one is ever nudged.
 //  - Instant continue: when the active session goes idle, it is nudged after a few seconds with its own
 //    agent, unless its last reply ends with TASK COMPLETE or NEED USER, the user aborted it (Esc), the CPU
-//    project's PROGRESS.md says FINAL ACCEPTANCE: MET, or MAX_NO_PROGRESS nudges in a row changed no file.
+//    project's PROGRESS.md has the DONE_MARK line, or MAX_NO_PROGRESS nudges in a row changed no file.
 //    (The external agent-watchdog follows the same rules as a slower safety net.)
-//  - Activity feed: every finished tool call becomes one line in ~/agent-workspace/.agent-logs/activity.log
+//  - Activity feed: every finished tool call becomes one line in WORKSPACE/.agent-logs/activity.log
 //    (time, session, tool, file/command, test result); the latest state goes to activity.json for the app.
 //  - Compaction: asks the summary to keep the task state and end with the exact next action.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const CPU_SESSION = "ses_BUILDER_SESSION_ID";
 const HOME = os.homedir();
-const CPU_PROJECT = path.join(HOME, "agent-workspace/hdl/rv32cpu");
-const CPU_DONE_MARK = "DOOM CPU: DONE"; // the current goal's finish line in PROGRESS.md
-const LOGDIR = path.join(HOME, "agent-workspace/.agent-logs");
+
+// KEY="value" lines of ~/.config/cpu-agent/config (written by install.sh), $HOME and earlier keys expanded.
+function loadConfig() {
+  const cfg = { HOME };
+  try {
+    for (const line of fs.readFileSync(path.join(HOME, ".config/cpu-agent/config"), "utf8").split("\n")) {
+      const m = line.match(/^\s*([A-Z_]+)=(?:"([^"]*)"|'([^']*)'|(\S*))/);
+      if (m) cfg[m[1]] = (m[2] ?? m[3] ?? m[4] ?? "").replace(/\$\{?([A-Z_]+)\}?/g, (_, k) => cfg[k] ?? "");
+    }
+  } catch {}
+  return cfg;
+}
+
+const CFG = loadConfig();
+const WORKSPACE = CFG.WORKSPACE || path.join(HOME, "agent-workspace");
+// Read the session id on every check: `cpu-agent start` writes it after creating the builder session.
+const cpuSession = () => loadConfig().SESSION || "";
+const CPU_PROJECT = CFG.PROJECT || path.join(WORKSPACE, "hdl/rv32cpu");
+const CPU_DONE_MARK = CFG.DONE_MARK || "DOOM CPU: DONE"; // the goal's finish line in PROGRESS.md
+const LOGDIR = path.join(WORKSPACE, ".agent-logs");
 const ACTIVITY = path.join(LOGDIR, "activity.log");
 const STATE = path.join(LOGDIR, "activity.json");
 const NUDGE_DELAY_MS = 8000;
@@ -33,7 +49,7 @@ const stopLogged = new Map();
 let timer = null;
 
 const stamp = () => new Date().toTimeString().slice(0, 8);
-const tag = (sid) => (sid === CPU_SESSION ? "cpu" : String(sid).slice(-5));
+const tag = (sid) => (sid === cpuSession() ? "cpu" : String(sid).slice(-5));
 
 function log(sid, line) {
   try {
@@ -80,7 +96,7 @@ export const CpuLoop = async ({ serverUrl }) => {
 
   // Why the session should not be nudged, or null if it should.
   async function stopReason(sid) {
-    if (sid === CPU_SESSION && cpuFinished()) return `${CPU_DONE_MARK} in PROGRESS.md`;
+    if (sid === cpuSession() && cpuFinished()) return `${CPU_DONE_MARK} in PROGRESS.md`;
     if ((noProgress.get(sid) || 0) >= MAX_NO_PROGRESS) return `${MAX_NO_PROGRESS} nudges without a file edit or commit (needs a look)`;
     const msgs = await (await api(`/session/${sid}/message?limit=1`)).json();
     const last = msgs[msgs.length - 1];
@@ -153,8 +169,8 @@ export const CpuLoop = async ({ serverUrl }) => {
     },
     "experimental.session.compacting": async (input, output) => {
       const extra =
-        input.sessionID === CPU_SESSION
-          ? " This is the autonomous RISC-V CPU project in ~/agent-workspace/hdl/rv32cpu: keep the current milestone, what passes and fails, uncommitted work and the RULES section of PROGRESS.md."
+        input.sessionID === cpuSession()
+          ? " This is the autonomous RISC-V CPU project in " + CPU_PROJECT + ": keep the current milestone, what passes and fails, uncommitted work and the RULES section of PROGRESS.md."
           : "";
       output.context.push(
         "Keep the user's task, what is done, what is left and any open errors." + extra +

@@ -1,0 +1,9 @@
+# cpu-agent configuration, installed to ~/.config/cpu-agent/config by install.sh.
+# Plain KEY="value" lines; $HOME and earlier keys are expanded. Read by every script and the plugin.
+WORKSPACE="$HOME/agent-workspace"        # the only folder the hdl sandbox can write
+PROJECT="$WORKSPACE/hdl/rv32cpu"         # the builder's project (contains PROMPT.md and PROGRESS.md)
+SESSION=""                               # builder session id; `cpu-agent start` creates one when empty
+DONE_MARK="DOOM CPU: DONE"               # a line of its own in PROGRESS.md that ends the run
+MODEL_URL="http://127.0.0.1:8080"        # OpenAI-compatible model server (GET /health, /v1/...)
+MODEL_CMD=""                             # optional: command that starts the model server (cpu-agent-model.service)
+SERVER_PORT="4096"                       # opencode server port (127.0.0.1 only)

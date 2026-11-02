@@ -1,9 +1,9 @@
 # Review instructions (independent milestone review of the RISC-V CPU)
 
-Project (builder's, READ-ONLY for you): ~/agent-workspace/hdl/rv32cpu
+Project (builder's, READ-ONLY for you): PROJECT_DIR
 Commit to review: COMMIT_ID ("COMMIT_SUBJECT")
-Your clone: ~/agent-workspace/reviews/clone-COMMIT_SHORT  (create it with: git clone -q ~/agent-workspace/hdl/rv32cpu <clone>; git -C <clone> checkout -q COMMIT_ID)
-Your report: ~/agent-workspace/reviews/rv32cpu-COMMIT_SHORT.md
+Your clone: REVIEWS_DIR/clone-COMMIT_SHORT  (create it with: git clone -q PROJECT_DIR <clone>; git -C <clone> checkout -q COMMIT_ID)
+Your report: REVIEWS_DIR/rv32cpu-COMMIT_SHORT.md
 
 What the CPU is supposed to be: read PROMPT.md in your clone (the specification and milestones). The builder's
 PROGRESS.md and commit messages are CLAIMS. Your job is to check them, not to repeat them.

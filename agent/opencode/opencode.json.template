@@ -1,7 +1,7 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "strata/qwen3.8-flash-next-coder-iq1_m",
-  "small_model": "strata/qwen3.8-flash-next-coder-iq1_m",
+  "model": "local/@MODEL_ID@",
+  "small_model": "local/@MODEL_ID@",
   "autoupdate": false,
   "share": "disabled",
   "compaction": {
@@ -9,21 +9,21 @@
     "buffer": 40224
   },
   "provider": {
-    "strata": {
+    "local": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Strata (local)",
+      "name": "Local model",
       "options": {
-        "baseURL": "http://127.0.0.1:8080/v1",
-        "apiKey": "{env:STRATA_API_KEY}"
+        "baseURL": "@MODEL_URL@/v1",
+        "apiKey": "{env:MODEL_API_KEY}"
       },
       "models": {
-        "qwen3.8-flash-next-coder-iq1_m": {
-          "name": "Qwen3.8-Flash-Next Coder (local)",
+        "@MODEL_ID@": {
+          "name": "@MODEL_ID@ (local)",
           "tool_call": true,
           "reasoning": true,
           "limit": {
-            "context": 196608,
-            "input": 180224,
+            "context": @CONTEXT@,
+            "input": @INPUT@,
             "output": 16384
           }
         }
@@ -51,8 +51,7 @@
     "external_directory": {
       "*": "allow",
       "~/agent-workspace/**": "allow",
-      "~/.local/share/strata/**": "allow",
-      "/etc/**": "allow",
+            "/etc/**": "allow",
       "/media/**": "allow",
       "/mnt/**": "allow",
       "/etc": "allow",
@@ -61,12 +60,14 @@
       "~/.ssh/**": "deny",
       "~/.gnupg/**": "deny",
       "~/.config/opencode/**": "deny",
+      "~/.config/cpu-agent/**": "deny",
       "~/.claude/**": "deny",
       "/boot/**": "deny",
       "/dev/**": "deny",
       "~/.ssh": "deny",
       "~/.gnupg": "deny",
       "~/.config/opencode": "deny",
+      "~/.config/cpu-agent": "deny",
       "~/.claude": "deny",
       "/boot": "deny",
       "/dev": "deny",
@@ -220,7 +221,7 @@
       "*grub*": "deny",
       "*/dev/sd*": "deny",
       "*/dev/nvme*": "deny",
-      "*strata.env*": "deny",
+      "*.config/cpu-agent*": "deny",
       "*.config/opencode*": "deny",
       "* dd if=*": "deny",
       "* dd of=*": "deny",

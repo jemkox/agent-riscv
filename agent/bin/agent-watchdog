@@ -1,17 +1,17 @@
 #!/usr/bin/python3 -I
 """agent-watchdog: keep the session that is currently running working (safety net for the cpu-loop plugin).
 
-Polls the OpenCode server (127.0.0.1:4096) and follows the most recently active session only. When it has
+Polls the OpenCode server (127.0.0.1:SERVER_PORT) and follows the most recently active session only. When it has
 been idle for IDLE_SEC and no permission request is waiting, it sends a "continue" message with that
 session's agent -- unless its last reply ends with TASK COMPLETE or NEED USER, the user aborted it, the CPU
-project's PROGRESS.md says FINAL ACCEPTANCE: MET, or MAX_NO_PROGRESS nudges in a row produced no file edit
+project's PROGRESS.md has the DONE_MARK line, or MAX_NO_PROGRESS nudges in a row produced no file edit
 or commit (then it pauses with a desktop notification until that session changes files again).
 It also sends notifications for: every commit (milestones marked); TASK COMPLETE / NEED USER / FINAL ACCEPTANCE;
 tests turning red or green again; the model or agent server going down and coming back; no actions for
 QUIET_MIN minutes while a session is busy; low disk space; context compactions (desktop only); and an hourly
 progress digest. If ~/.config/cpu-agent/ntfy-topic
 exists, the same notifications also go to that ntfy.sh topic (phone app "ntfy").
-Log: ~/agent-workspace/.agent-logs/watchdog.log
+Settings: ~/.config/cpu-agent/config. Log: WORKSPACE/.agent-logs/watchdog.log
 """
 import re
 import json
@@ -22,16 +22,33 @@ import sys
 import time
 import urllib.request
 
-CPU_SESSION = "ses_BUILDER_SESSION_ID"
-ACTIVITY = os.path.expanduser("~/agent-workspace/.agent-logs/activity.log")
+def load_config(path=os.path.expanduser("~/.config/cpu-agent/config")):
+    """KEY="value" lines of the cpu-agent config, with $HOME and earlier keys expanded."""
+    cfg = {"HOME": os.path.expanduser("~")}
+    try:
+        for line in open(path):
+            m = re.match(r'\s*([A-Z_]+)=("([^"]*)"|\'([^\']*)\'|(\S*))', line)
+            if m:
+                raw = next(g for g in m.groups()[2:] if g is not None)
+                cfg[m.group(1)] = re.sub(r"\$\{?([A-Z_]+)\}?", lambda v: cfg.get(v.group(1), ""), raw)
+    except OSError:
+        pass
+    return cfg
+
+
+CFG = load_config()
+WORKSPACE = CFG.get("WORKSPACE") or os.path.expanduser("~/agent-workspace")
+CPU_SESSION = CFG.get("SESSION", "")
+ACTIVITY = os.path.join(WORKSPACE, ".agent-logs/activity.log")
 STOP_RE = re.compile(r"^\s*(TASK COMPLETE|NEED USER:.*)\s*$", re.I | re.M)
-SERVER = os.environ.get("CPU_AGENT_SERVER", "http://127.0.0.1:4096")
-PROJECT = os.path.expanduser("~/agent-workspace/hdl/rv32cpu")
-LOG = os.path.expanduser("~/agent-workspace/.agent-logs/watchdog.log")
+SERVER = os.environ.get("CPU_AGENT_SERVER", f"http://127.0.0.1:{CFG.get('SERVER_PORT') or 4096}")
+MODEL_URL = (CFG.get("MODEL_URL") or "http://127.0.0.1:8080").rstrip("/")
+PROJECT = CFG.get("PROJECT") or os.path.join(WORKSPACE, "hdl/rv32cpu")
+LOG = os.path.join(WORKSPACE, ".agent-logs/watchdog.log")
 POLL_SEC = 30
 IDLE_SEC = 60
 MAX_NO_PROGRESS = 6
-DONE_MARK = "DOOM CPU: DONE"   # the current goal's finish line in PROGRESS.md
+DONE_MARK = CFG.get("DONE_MARK") or "DOOM CPU: DONE"   # the goal's finish line in PROGRESS.md
 DIGEST_SEC = 3600          # hourly progress digest
 DOWN_SEC = 90              # model/server unreachable this long -> alert
 QUIET_MIN = 30             # busy but no logged action for this long -> alert
@@ -264,11 +281,11 @@ class HealthWatcher:
         if now - first >= DOWN_SEC and name not in self.alerted:
             self.alerted.add(name)
             notify(f"{name} has not answered for {int(now - first)} s. The agent cannot work until it is back "
-                   "(it restarts automatically; otherwise use Start in Strata Coder).", f"🔴 {name} is down",
+                   "(check `cpu-agent status`).", f"🔴 {name} is down",
                    urgent=True)
 
     def poll(self, feed, session_busy):
-        self.check_up("Strata model", "http://127.0.0.1:8080/health")
+        self.check_up("Model server", MODEL_URL + "/health")
         self.check_up("Agent server", SERVER + "/session/status")
         try:
             silent_min = (time.time() - os.path.getmtime(ACTIVITY)) / 60

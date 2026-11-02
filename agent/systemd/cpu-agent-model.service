@@ -1,0 +1,11 @@
+[Unit]
+Description=Model server for the CPU agent (starts MODEL_CMD from ~/.config/cpu-agent/config, or waits for MODEL_URL)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/model-up
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=default.target

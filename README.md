@@ -63,7 +63,7 @@ For context, published numbers of well-known open-source RV32 cores
 | VexRiscv, full (4 KB caches) | 2.30 |
 
 This is a self-run result in cycle-accurate simulation, not an EEMBC-certified
-score. Run it with `make coremark COREMARK_DIR=path/to/coremark`.
+score. Run it with `make coremark`.
 
 ## Two real CPU bugs that only DOOM found
 
@@ -96,25 +96,32 @@ Versions used: Verilator 5.020, Yosys 0.33, nextpnr 0.6, riscv64-unknown-elf-gcc
 13.2, picolibc 1.8.6, SDL 2.30. SymbiYosys + z3 are only needed for the formal
 check.
 
-External files (not in this repo), passed in as Make variables:
+### Get the test suites and Doom
 
 ```sh
-git clone https://github.com/riscv-software-src/riscv-tests   # official tests
-git clone https://github.com/eembc/coremark                     # CoreMark benchmark
-# DOOM shareware WAD v1.9 (doom1.wad, sha1 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d)
+git clone https://github.com/jemkox/agent-riscv-doom.git && cd agent-riscv-doom
+make deps    # clones riscv-tests and CoreMark at pinned versions into deps/
 ```
+
+For Doom, copy the shareware `doom1.wad` (v1.9, sha1
+`5b2e249b9c5133ec987b3ea77596381dc0d6bc1d`) to `deps/doom1.wad`. It is not
+included here; the build checks its checksum.
 
 ### Run
 
 ```sh
-make test   RVTEST_DIR=path/to/riscv-tests/isa   # directed + official + random, prints ALL PASS
-make all_tests RVTEST_DIR=... WAD_SRC=path/to/doom1.wad  # every suite incl. Doom
-make coremark COREMARK_DIR=path/to/coremark  # CoreMark score
-make doom   WAD_SRC=path/to/doom1.wad   # headless Doom, frames in build/doom/frames
-make play   WAD_SRC=path/to/doom1.wad   # live SDL window with keyboard
-make play_test WAD_SRC=...              # scripted play, must differ from a no-key run
-make fpga_full FPGA_FREQ=13 FPGA_SEED=7 # synth + place & route for iCE40 UP5K
+make test        # directed + official + random tests, prints ALL PASS
+make all_tests   # every suite, including Doom
+make coremark    # CoreMark score
+make doom        # headless Doom, frames in build/doom/frames
+make play        # live SDL window with keyboard
+make play_test   # scripted play, must differ from a no-key run
+make fpga_full FPGA_FREQ=13 FPGA_SEED=7   # synth + place & route for iCE40 UP5K
 ```
+
+Any input can also be given directly: `RVTEST_DIR=.../riscv-tests/isa`,
+`COREMARK_DIR=...`, `WAD_SRC=.../doom1.wad`. A missing one stops the build
+with a message saying what to do.
 
 Controls in `make play`: arrows move, Ctrl fires, Space opens doors, Enter/Esc
 for menus, 1–7 select weapons, `-` shrinks the view (faster).
@@ -132,7 +139,7 @@ programs/   small C benchmarks (fib, sort, matmul, ...)
 bench/      CoreMark port (timer = mcycle, UART output)
 doom/       Doom port: crt0, linker script, file layer, MMIO glue; doom/src = doomgeneric (vendored, upstream e257a09)
 docs/       DESIGN.md (detailed design notes and numbers), Doom screenshots
-agent/      the agent harness: sandbox, loop plugin, watchdog, reviewer, and 3 real review reports
+agent/      the agent harness (installable): sandbox, loop plugin, watchdog, reviewer, 3 real review reports
 PROMPT.md   the task specification the AI agent worked from
 PROGRESS.md the agent's lab notebook: every milestone, bug, root cause and measurement
 ```

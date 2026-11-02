@@ -2,14 +2,16 @@
 # Independent milestone reviewer for the CPU builder. After a builder commit: pause the builder, run a reviewer
 # session (agent "review", fresh context, own clone) on the newest commit, check the builder's project was not
 # touched, notify the user with the verdict, then resume the builder - with the review's fix list when the verdict
-# is not a clean PASS. Report: ~/agent-workspace/reviews/rv32cpu-<commit>.md
+# is not a clean PASS. Report: WORKSPACE/reviews/rv32cpu-<commit>.md (settings: ~/.config/cpu-agent/config)
 #   review-at-commit          one review at the next commit (trial mode)
 #   review-at-commit --loop   keep reviewing (at most one review per MIN_GAP seconds; runs as cpu-agent-reviewer)
-PROJECT="$HOME/agent-workspace/hdl/rv32cpu"
-REVIEWS="$HOME/agent-workspace/reviews"
-LOG="$HOME/agent-workspace/.agent-logs/watchdog.log"
-URL="http://127.0.0.1:4096"
-BUILDER="ses_BUILDER_SESSION_ID"
+. "$HOME/.config/cpu-agent/config" || { echo "no ~/.config/cpu-agent/config (run agent/install.sh)" >&2; exit 1; }
+PROJECT="$PROJECT"
+REVIEWS="$WORKSPACE/reviews"
+LOG="$WORKSPACE/.agent-logs/watchdog.log"
+URL="http://127.0.0.1:${SERVER_PORT:-4096}"
+BUILDER="$SESSION"
+[ -n "$BUILDER" ] || { echo "no builder SESSION in ~/.config/cpu-agent/config (run cpu-agent start first)" >&2; exit 1; }
 log() { echo "$(date '+%F %T') review: $*" >> "$LOG"; }
 say() { notify-send -a "CPU agent" "$1" "$2"; [ -f "$HOME/.config/cpu-agent/ntfy-topic" ] && \
   python3 -c 'import json,sys,urllib.request; t=open(sys.argv[1]).read().strip(); urllib.request.urlopen(urllib.request.Request("https://ntfy.sh/", data=json.dumps({"topic":t,"title":sys.argv[2],"message":sys.argv[3]}).encode(), headers={"Content-Type":"application/json"}), timeout=10)' \
@@ -45,7 +47,7 @@ i=0; until curl -fs -m 1 "$URL/session/status" >/dev/null; do i=$((i+1)); [ $i -
 rid=$(api -X POST "$URL/session" -d "{\"title\":\"Review $short\",\"parentID\":\"$BUILDER\"}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [ -n "$rid" ] || { log "could not create the review session"; say "⚠️ Review failed to start" "Builder will be resumed."; rid=""; }
 if [ -n "$rid" ]; then
-  prompt=$(sed -e "s/COMMIT_ID/$commit/g" -e "s/COMMIT_SHORT/$short/g" -e "s|COMMIT_SUBJECT|$(echo "$subject" | sed 's/[|&]/ /g')|g" "$REVIEWS/REVIEW_PROMPT.md")
+  prompt=$(sed -e "s|PROJECT_DIR|$PROJECT|g" -e "s|REVIEWS_DIR|$REVIEWS|g" -e "s/COMMIT_ID/$commit/g" -e "s/COMMIT_SHORT/$short/g" -e "s|COMMIT_SUBJECT|$(echo "$subject" | sed 's/[|&]/ /g')|g" "$REVIEWS/REVIEW_PROMPT.md")
   python3 - "$URL" "$rid" "$prompt" <<'EOF'
 import json, sys, urllib.request
 url, rid, text = sys.argv[1:4]

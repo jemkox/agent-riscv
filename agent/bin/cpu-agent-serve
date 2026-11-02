@@ -1,10 +1,13 @@
 #!/bin/sh
-# Headless OpenCode server for the CPU agent on 127.0.0.1:4096 (same environment as ~/.local/bin/agent).
-# Started by `cpu-agent` as the systemd user unit cpu-agent-server; the TUI and the watchdog attach to it.
-set -a; . "$HOME/.config/opencode/strata.env"; set +a
+# Headless OpenCode server for the CPU agent on 127.0.0.1:SERVER_PORT, run by the systemd user unit
+# cpu-agent-server; the TUI, the watchdog and the reviewer attach to it.
+. "$HOME/.config/cpu-agent/config" || exit 1
+# Secrets for the model provider (MODEL_API_KEY=...), kept out of the repo; install.sh creates it.
+[ -f "$HOME/.config/cpu-agent/env" ] && { set -a; . "$HOME/.config/cpu-agent/env"; set +a; }
 export OPENCODE_DISABLE_AUTOUPDATE=1 OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_DISABLE_LSP_DOWNLOAD=1
 export OPENCODE_ENABLE_EXA=1
-export SUDO_ASKPASS="$HOME/.local/bin/agent-sudo-askpass"
+# `sudo -A` shows a password box only if you provide an askpass helper; without one it fails and the agent goes on.
+[ -x "$HOME/.local/bin/agent-sudo-askpass" ] && export SUDO_ASKPASS="$HOME/.local/bin/agent-sudo-askpass"
 export OPENCODE_DISABLE_PROJECT_CONFIG=1 OPENCODE_DISABLE_CLAUDE_CODE=1 OPENCODE_DISABLE_EXTERNAL_SKILLS=1
-cd "$HOME/agent-workspace" || exit 1
-exec "$HOME/.local/bin/opencode" serve --hostname 127.0.0.1 --port 4096
+cd "$WORKSPACE" || exit 1
+exec opencode serve --hostname 127.0.0.1 --port "${SERVER_PORT:-4096}"
