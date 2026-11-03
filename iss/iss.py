@@ -153,12 +153,23 @@ def main(argv):
         elif opc == 0x2F: # LR/SC/AMO* (A ext; aligned words; aq/rl ignored)
             ea = a0
             f5 = (ins >> 27) & 0x1F
-            if ea & 3 or f3 != 2:
+            rs2f = (ins >> 20) & 0x1F
+            if f5 == 0x02:
+                amo_valid = (f3 == 2) and (rs2f == 0)
+            elif f5 == 0x03:
+                amo_valid = (f3 == 2)
+            else:
+                amo_valid = (f3 == 2) and (f5 in (0x00,0x01,0x04,0x08,0x0C,0x10,0x14,0x18,0x1C))
+            if not amo_valid:
+                illegal = True
+            elif ea & 3:
                 cause = 4; illegal = True
-            elif f5 == 0x02 and ((ins >> 20) & 0x1F) == 0:  # LR.W (funct5 00010, rs2 field 0)
+            elif (ea & 0xFFFFF000) in (0x02000000, 0x10000000):
+                illegal = True
+            elif f5 == 0x02 and rs2f == 0:  # LR.W
                 wv = rw(ea)
                 res_v = True; res_a = ea
-            elif f5 == 0x03:               # SC.W (funct5 00011)
+            elif f5 == 0x03:               # SC.W
                 ok = res_v and res_a == ea
                 if ok:
                     w32(ea, a1)

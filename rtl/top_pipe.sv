@@ -53,6 +53,9 @@ module top_pipe (
   logic exmem_is_amo, exmem_is_lr, exmem_is_sc, amo_log_wr;
   logic ceif_amo;
 `ifdef FPGA
+  logic idex_m_go;
+`endif
+`ifdef FPGA
   localparam ATOMIC = 0;   // atomics are Linux-only hardware; fold them out of the card
 `else
   localparam ATOMIC = 1;
@@ -68,6 +71,7 @@ module top_pipe (
   logic        read_a, read_b, ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr, ce_lui, ce_auipc, ce_opi, ce_op;
   logic        ce_sys, ce_fence, ce_ill, ce_m, ceif_ill, ceif_m, ce_csr, exmem_csr_en, exmem_csr_wen;
   logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out, mret_flush, ce_mret;
+  logic        amo_mmio_bad, ce_ex_ill;
   logic [31:0] mret_pc;
   logic        ceif_ld, ceif_st, ceif_br, ceif_jalr, ceif_opi, ceif_op, ceif_csr;
   logic [31:0] ifid_r1_fwd, ifid_r2_fwd, idex_r1_cs;
@@ -94,8 +98,9 @@ module top_pipe (
              .idex_valid(idex_valid && !stall), .idex_ld(idex_ld), .idex_st(idex_st),
              .ea(idex_ea), .sd_raw(idex_sd_raw), .ssz(idex_ssz),
 `ifndef FPGA
-             .amo_v(idex_valid && ce_amo && !stall), .amo_lr(ce_lr && idex_valid && !stall),
-             .amo_sc(ce_sc && idex_valid && !stall), .amo5(ce_amo5),
+             .amo_v(idex_valid && ce_amo && !ce_ex_ill && !stall),
+             .amo_lr(ce_lr && idex_valid && !ce_ex_ill && !stall),
+             .amo_sc(ce_sc && idex_valid && !ce_ex_ill && !stall), .amo5(ce_amo5),
              .amo_new(amo_new), .amo_sc_ok(amo_sc_ok),
 `endif
              .ld_raw(ldx_raw), .mem_ready(mem_ready),
@@ -109,7 +114,7 @@ module top_pipe (
              .is_csr(ce_csr), .csr_num(), .is_wfi(ce_wfi),
              .is_amo(ce_amo), .is_lr(ce_lr), .is_sc(ce_sc), .amo5(ce_amo5), .i(idex_insn));
 `ifdef FPGA
-  mdiu_fpga MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
+  mdiu_fpga MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(idex_m_go), .is_ill(1'b0),
            .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
            /* verilator lint_off PINCONNECTEMPTY */
            .md_active(), .md_done_now(m_done_now), .result(md_result));
@@ -176,6 +181,20 @@ module top_pipe (
   assign idex_ea = ce_amo ? a_ex : alu_res;   // atomics have no offset (i[24:20] = rs2), rs1 forwarded
 `endif
 `ifdef FPGA
+  assign amo_mmio_bad = 1'b0;
+  assign ce_ex_ill = ce_ill;
+`else
+`ifdef DOOM_BIG
+  localparam logic [31:0] UART_MMIO_PAGE = 32'h1FF0_0000;
+`else
+  localparam logic [31:0] UART_MMIO_PAGE = 32'h1000_0000;
+`endif
+  assign amo_mmio_bad = ce_amo &&
+      (((a_ex & 32'hFFFF_F000) == 32'h0200_0000) ||
+       ((a_ex & 32'hFFFF_F000) == UART_MMIO_PAGE));
+  assign ce_ex_ill = ce_ill | amo_mmio_bad;
+`endif
+`ifdef FPGA
   assign amo_new = 32'h0;   // atomics are Linux-only; FPGA card keeps this dead
 `else
   always_comb begin // AMO result ALU (MEM-side store of op(old,src); sim CPU only)
@@ -212,8 +231,8 @@ module top_pipe (
 
   always_comb begin
     idex_wben = idex_valid && ((ce_rd != 5'd0) || ce_csr) &&
-                ((ld_ok) || ce_lui || ce_auipc || ce_jal || (ce_jalr && !ce_ill) ||
-                 (ce_opi && !ce_ill) || (ce_op && !ce_ill) || ce_csr) && !ce_fence &&
+                ((ld_ok) || ce_lui || ce_auipc || ce_jal || (ce_jalr && !ce_ex_ill) ||
+                 (ce_opi && !ce_ex_ill) || (ce_op && !ce_ex_ill) || ce_csr) && !ce_fence &&
                  !idex_stop && !idex_trap;
     idex_wbval = alu_res;
     if (ce_m && !ce_ill) idex_wbval = md_result;
@@ -238,7 +257,11 @@ module top_pipe (
 `endif
     mem_pend = idex_valid && (idex_ld || idex_st) && !mem_ready;
     // WFI retires as a nop; a pending IRQ traps before it (mepc = WFI pc).
+`ifdef FPGA
+    m_stall = (idex_m_go && !idex_m_done) || mem_pend;
+`else
     m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend;
+`endif
   end
 
   always_comb begin
@@ -269,7 +292,7 @@ module top_pipe (
 
   csrs_pipe CSR1(.clk(clk), .reset(reset), .halt(halt),
             .idex_valid(idex_valid), .idex_insn(idex_insn), .idex_pc(idex_pc),
-            .ce_sys(ce_sys), .ce_ill(ce_ill), .ce_fetch_bad(idex_fetch_bad), .ce_mret(ce_mret), .ce_csr(ce_csr), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
+            .ce_sys(ce_sys), .ce_ill(ce_ex_ill), .ce_fetch_bad(idex_fetch_bad), .ce_mret(ce_mret), .ce_csr(ce_csr), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
             .ld_ok(ld_ok), .st_ok(st_ok), .stall(stall), .m_stall(m_stall),
             .exmem_valid(exmem_valid), .exmem_csr_en(exmem_csr_en), .exmem_csr_wen(exmem_csr_wen),
             .exmem_insn(exmem_insn), .exmem_f3(exmem_f3), .exmem_r1(exmem_r1),
@@ -302,6 +325,9 @@ module top_pipe (
       halt <= 1'b0;
       ifid_valid <= 1'b0; idex_valid <= 1'b0; exmem_valid <= 1'b0; mwb_valid <= 1'b0;
       idex_m_done <= 1'b1;
+`ifdef FPGA
+      idex_m_go <= 1'b0;
+`endif
 `ifdef DOOM_BIG
       mst_cnt <= 32'd0;
       st_cnt <= 32'd0;
@@ -332,6 +358,9 @@ module top_pipe (
 
       if (mem_pend) begin
         exmem_valid <= 1'b0; idex_valid <= idex_valid; idex_m_done <= idex_m_done;
+`ifdef FPGA
+        idex_m_go <= idex_m_go;
+`endif
         idex_pc <= idex_pc; idex_insn <= idex_insn; idex_r1 <= a_ex; idex_r2 <= b_ex;
         ifid_valid <= conflict ? 1'b0 : ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
         ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
@@ -339,6 +368,9 @@ module top_pipe (
         // Keep the forwarded operands: a value forwarded from MEM/WB this cycle is gone next cycle
         // (e.g. lw s6; lw a5; blt a5,s6 - s6 leaves WB during the load-use stall on a5).
         exmem_valid <= 1'b0; idex_valid <= idex_valid; idex_m_done <= idex_m_done;
+`ifdef FPGA
+        idex_m_go <= idex_m_go;
+`endif
         idex_pc <= idex_pc; idex_insn <= idex_insn; idex_r1 <= a_ex; idex_r2 <= b_ex;
         ifid_valid <= ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
         ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
@@ -350,6 +382,9 @@ module top_pipe (
         exmem_wbval <= 32'h0; exmem_result <= 32'h0;
         exmem_csr_en <= 1'b0; exmem_csr_wen <= 1'b0; exmem_r1 <= 32'h0;
         idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
+`ifdef FPGA
+        idex_m_go <= 1'b0;
+`endif
         pc_if <= mret_flush ? mret_pc : cs_mtvec;
       end else if (flush) begin
         exmem_valid <= idex_valid;
@@ -361,6 +396,9 @@ module top_pipe (
         exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
         exmem_r1 <= a_ex;   // CSR write data: the forwarded rs1 (lw t0,..; csrw mepc,t0 needs the load)
         idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
+`ifdef FPGA
+        idex_m_go <= 1'b0;
+`endif
         pc_if <= br_tgt_ex & 32'hFFFFFFFE;
       end else begin
         exmem_valid <= idex_valid;
@@ -376,6 +414,9 @@ module top_pipe (
         idex_pc <= ifid_pc; idex_insn <= ifid_insn; idex_r1 <= idex_r1_cs; idex_r2 <= ifid_r2_fwd;
         idex_pred_taken <= ifid_pred_taken; idex_pred_tgt <= ifid_pred_tgt;
         idex_m_done <= ifid_valid ? !(ceif_m && !ceif_ill) : 1'b1;
+`ifdef FPGA
+        idex_m_go   <= ifid_valid && ceif_m && !ceif_ill;
+`endif
         if (conflict || !fetch_ready) begin
           ifid_valid <= 1'b0;
           ifid_pred_taken <= 1'b0; ifid_pred_tgt <= 32'h0;

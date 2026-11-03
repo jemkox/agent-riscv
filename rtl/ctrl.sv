@@ -54,13 +54,25 @@ module ctrl (
   assign is_wfi   = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h100);
 `endif
 `ifndef FPGA
-  assign is_amo = (opc == 7'b0101111);   // A extension (sim CPU; not on the card)
-  assign is_lr  = is_amo && (i[31:27] == 5'b00010) && (i[24:20] == 5'd0) && (i[14:12] == 3'b010);
-  assign is_sc  = is_amo && (i[31:27] == 5'b00011) && (i[14:12] == 3'b010);
+  logic amo5_ok;
+  always_comb begin
+    case (i[31:27])
+      5'b00000, 5'b00001, 5'b00011, 5'b00100, 5'b01000,
+      5'b01100, 5'b10000, 5'b10100, 5'b11000, 5'b11100:
+        amo5_ok = 1'b1;
+      5'b00010:
+        amo5_ok = (i[24:20] == 5'd0);   // LR.W requires rs2=0
+      default:
+        amo5_ok = 1'b0;
+    endcase
+  end
+  assign is_amo = (opc == 7'b0101111) && (i[14:12] == 3'b010) && amo5_ok;
+  assign is_lr  = is_amo && (i[31:27] == 5'b00010);
+  assign is_sc  = is_amo && (i[31:27] == 5'b00011);
+  assign amo5   = i[31:27];
 `ifdef DBGCTRL
   always_comb if (is_amo) $display("CTRLD i=%08x f5=%05b f3=%03b is_amo=%b is_sc=%b is_lr=%b", i, i[31:27], i[14:12], is_amo, is_sc, is_lr);
 `endif
-  assign amo5   = i[31:27];
 `else
   assign is_amo = 1'b0; assign is_lr = 1'b0; assign is_sc = 1'b0; assign amo5 = 5'd0;
 `endif
@@ -130,8 +142,7 @@ module ctrl (
         end
       end
 `ifndef FPGA
-      7'b0101111: begin
-      end
+      7'b0101111: if (!is_amo) is_ill = 1;
 `endif
       7'b0001111: begin end                                             // FENCE
       7'b1110011: begin                                                  // SYSTEM / CSR

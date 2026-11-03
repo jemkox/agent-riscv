@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -118,6 +118,12 @@ build/t19_amo.o: tests/t19_amo.S | build
 	$(CC) $(T19_CCFLAGS) -c $< -o build/t19_amo.rvo
 	$(OC) -O elf32-littleriscv build/t19_amo.rvo $@
 
+# t20: reserved atomics and MMIO atomic traps need the A extension too
+T20_CCFLAGS := -march=rv32ima_zicsr -mabi=ilp32
+build/t20_amo_illegal.o: tests/t20_amo_illegal.S | build
+	$(CC) $(T20_CCFLAGS) -c $< -o build/t20_amo_illegal.rvo
+	$(OC) -O elf32-littleriscv build/t20_amo_illegal.rvo $@
+
 build/%.elf: build/%.o tests/link.ld | build
 	$(CC) $(CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
 
@@ -193,6 +199,7 @@ test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(U
 	 python3 iss/iss.py --quiet --pass build/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass build/t18_wfi.bin > /dev/null || { echo "t18_wfi: self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass build/t19_amo.bin > /dev/null || { echo "t19_amo: atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
+	 python3 iss/iss.py --quiet --pass build/t20_amo_illegal.bin > /dev/null || { echo "t20_amo_illegal: illegal/reserved/MMIO atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
 	 for n in $(UI_NAMES); do \
 	 cp build/ui/$$n.hex build/p.hex; ./build/vlt/run_hex > build/ui/logs/$$n.rtl.log; \
 	 python3 iss/iss.py --quiet --pass --log build/ui/logs/$$n.iss.log build/ui/$$n.bin > /dev/null; \

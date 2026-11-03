@@ -1117,10 +1117,17 @@ DOOM CPU: DONE
 ### Metrics (L2, measured this session)
 | item | value |
 | UA | ALL UA PASS (10 official rv32ua tests, RTL==ISS, ISS self-check) |
-| test | ALL PASS: 19 directed + ui + um + 200 random seeds incl atomics |
+| test | ALL PASS: 20 directed + ui + um + 200 random seeds incl atomics/t20_amo_illegal |
 | all_tests | ALL TESTS DONE (doom 123,801,143 cycles unchanged) |
 | coremark | 3.193 CoreMark/MHz unchanged |
 | freertos | PASS, 1,124,012 cycles (deps input; range 1,124,012-1,124,204 cross-tree) |
-| fpga_full | seed5 13.60/13.18 MHz PASS (3815 LUT4 + 518 CARRY); seed4 12.98/12.94 FAIL (noted) |
+| fpga_full | seed4/seed5 13.34/13.10 MHz PASS (3828 LUT4 + 549 CARRY, 8 RAM) |
 | fpga (small) | 23.96/23.05 MHz PASS at 20 MHz, TEST PASSED |
 
+## L2.1: atomics review fixes (2026-11-03)
+- Fixed the mandatory fpga_full seed4 gate with a real RTL change on the new M-start path: added FPGA-only `idex_m_go` pending-M pipeline state and feed `mdi.is_m` from it; `m_stall` starts from the same DFF. Measured `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` PASS 13.34/13.10 MHz and seed5 PASS 13.34/13.10 MHz; netlist 3828 SB_LUT4 + 549 SB_CARRY, 8 SB_RAM40_4K, 1 SB_MAC16.
+- Tightened atomics decode legality in `rtl/ctrl.sv`: `is_amo` requires `f3==3'b010` and a legal funct5 set; LR.W requires the rs2 field (`i[24:20]`) to be 0. Reserved 0x2f encodings set `is_ill` (cause 2). ISS now checks the same legal set and traps reserved encodings with cause 2.
+- Pinned MMIO atomics consistently in RTL and ISS: `rtl/top_pipe.sv` computes `ce_ex_ill = ce_ill | amo_mmio_bad` for legal atomics whose address page is CLINT `0x02000000` or UART `0x10000000`, and uses it to suppress cache atomic execution, suppress writeback, and raise an illegal trap. ISS traps atomics whose `ea` is in those MMIO pages with cause 2.
+- Added `tests/t20_amo_illegal.S` plus Makefile rule/gate: traps `amo.d` (f3=011), reserved funct5, LR with rs2 field !=0, `amoadd.w` to CLINT/UART, and `lr.w` from CLINT; handler counts 6 traps and mrets, success requires s0==6 and gp=1.
+- Clarified atomics test coverage: `t19_amo.S` covers producer->atomics forwarding, LR-result consumers, SC success, and SC-after-store failure; `t20_amo_illegal.S` adds illegal/reserved/MMIO atomic trap coverage.
+- Re-measured gates after review fixes: `ua` ALL UA PASS, `test` ALL PASS with 20 directed + ui + um + random seeds, `all_tests` ALL TESTS DONE (doom unchanged 123,801,143 cycles), `coremark` 3.193 CoreMark/MHz, `freertos` PASS cycles=1,124,012, `fpga` 23.96/23.05 MHz PASS at 20 MHz, `fpga_test` TEST PASSED, `fpga_full` seed4/seed5 PASS at 13 MHz.
