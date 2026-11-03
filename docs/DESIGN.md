@@ -3,7 +3,7 @@
 Milestone tags such as (M10c) refer to sections of [`PROGRESS.md`](../PROGRESS.md), the build log.
 
 A 5-stage in-order RV32IM CPU, Verilator-tested against official riscv-tests
-(riscv-tests rv32ui/rv32um/selected rv32mi), a Python ISS, 15 directed tests,
+(riscv-tests rv32ui/rv32um/selected rv32mi), a Python ISS, 17 directed tests,
 N=500/5000 random differential programs, a k-induction formal model, and DOOM
 running natively at 123.8M cycles / 31 rendered frames. The full CPU fits and
 routes on iCE40 UP5K (4836 LC, 8 BRAM, 1 DSP, 13.22 MHz at nextpnr seed 4). It also boots FreeRTOS
@@ -65,6 +65,7 @@ program subset (addi/lui/sw/lw/add) still exists as a small artifact.
 - Official riscv-tests (an upstream riscv-tests checkout, `RVTEST_DIR`): `ui`, `um`, `mi`.
 - m7 UART C programs print correct results (`ALL M7 PASS`, score 4274980064).
 - Doom play test verified against a NO-KEY baseline run (key effect proven).
+- CoreMark (`make coremark`, CRCs validated) and FreeRTOS (`make freertos`, self-checking demo).
 - FPGA: `fpga_test` simulates the full FPGA top program vs reference; `fpga_full`
   builds `build/cpu_full.bin` via yosys `synth_ice40 -dsp` + nextpnr + icepack.
 - Formal: `formal/pipeline.sby` k-induction proves model-level pipeline invariants
@@ -83,6 +84,17 @@ program subset (addi/lui/sw/lw/add) still exists as a small artifact.
    frames). Fix: latch forwarded operands; directed test `tests/t15_ld_ld_br`
    (failed on the old RTL, passes now). Also fixed: `minstret` rollover carry in
    `rtl/csrs.sv` (rv32mi `instret_overflow`).
+
+## The three bugs FreeRTOS found (with directed tests)
+
+3. **mret decode**: `rtl/ctrl.sv` matched imm `0x300`, so the real `mret` (`0x30200073`) was illegal;
+   the ISS had no mret and `env/mi/riscv_test.h` replaces `mret` with `csrr mepc; jalr`, so no test
+   ran one. Fixed in RTL and ISS; test `tests/t16_mret` (self-checking: `make test` runs the ISS with
+   `--pass`, so the RTL and ISS cannot agree on a wrong result).
+4. **mret stale mepc**: `mret` read `st_mepc`, missing a `csrw mepc` in MEM right before it; now uses
+   the forwarded `mepc_next`.
+5. **CSR write not forwarded**: CSR write data came from the decode-stage register (`idex_r1`), so
+   `lw t0, ...; csrw mepc, t0` wrote the old `t0`; now the forwarded `a_ex`. Test `tests/t17_csr_fwd`.
 
 ## Measured metrics
 
@@ -141,10 +153,12 @@ make regress N=500      # random differential vs ISS
 make ui / um / mi       # official riscv-tests subsets
 make m7                 # UART C programs (correct results)
 make lat1 / lat5 / lat20
+make coremark           # EEMBC CoreMark, prints CoreMark/MHz
+make freertos           # boot FreeRTOS, self-checking multitasking demo
 make doom               # headless DOOM: 31 frames + #RUN log
 make play               # live SDL2 window DOOM with keyboard
 make play_test          # scripted DOOM vs no-key baseline (fails if keys do nothing)
-make fpga_full          # full CPU FPGA: build/cpu_full.bin + LC/Fmax (FPGA_FREQ/FPGA_SEED vars)
+make fpga_full FPGA_FREQ=13 FPGA_SEED=4   # full CPU FPGA: build/cpu_full.bin + LC/Fmax (FPGA_FREQ/FPGA_SEED vars)
 make fpga               # small FPGA proof top: build/cpu.bin
 make fpga_test / mdiu_tb
 ```

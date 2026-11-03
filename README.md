@@ -16,7 +16,7 @@ The design (about 2,700 lines of RTL), its tests and the Doom port were written
 autonomously by a **local LLM coding agent** running on a consumer PC. I designed
 the agent setup, the task, and the verification rules it had to obey, and
 reviewed the milestones. Claude (Anthropic) assisted with setup and review,
-including the fixes for the two bugs Doom found; every commit it touched is
+including the fixes for the bugs Doom and FreeRTOS found; every commit it touched is
 marked `Co-Authored-By: Claude`. See [How it was built](#how-it-was-built).
 
 ## Why I built this
@@ -206,7 +206,7 @@ for menus, 1–7 select weapons, `-` shrinks the view (faster).
 ```text
 rtl/        CPU in SystemVerilog (top_pipe.sv is the pipeline; *_fpga.sv are FPGA variants)
 tb/         Verilator testbenches (C++ and SV), including the Doom play harness
-tests/      15 directed assembly tests
+tests/      17 directed assembly tests
 iss/        Python reference instruction-set simulator
 tools/      random program generator, trace compare, play-test verifier, helpers
 formal/     SymbiYosys pipeline proof
@@ -235,11 +235,11 @@ optimization history are in [`docs/DESIGN.md`](docs/DESIGN.md).
   "single-cycle RV32I" to "Doom runs".
 - **Supervision:** a watchdog restarted the agent when it stalled, and a
   second, read-only reviewer agent audited each milestone. Claude (Anthropic)
-  was used for setup, reviews and debugging: it diagnosed and fixed both Doom
-  bugs above (about 15 lines in `rtl/top_pipe.sv`, with the builder's and its
-  own directed tests), fixed the Doom linker script and the keyboard timing in
-  the play harness, caught a play test that passed even with a dead keyboard,
-  and wrote this README and the CoreMark port.
+  was used for setup, reviews and debugging: it diagnosed and fixed the two
+  bugs Doom found and the three FreeRTOS found (about 35 lines of RTL, each
+  with a directed test), fixed the Doom linker script and the keyboard timing
+  in the play harness, caught a play test that passed even with a dead
+  keyboard, and wrote this README, the CoreMark port and the FreeRTOS port.
 
 ```mermaid
 flowchart LR
