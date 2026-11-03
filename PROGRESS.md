@@ -1016,7 +1016,8 @@ DOOM CPU: DONE
 - Measured after L1 (all rerun on the committed-shape tree): `all_tests` ALL PASS (test LAT 1/5, ui, um,
   mi, regress 500, m7, doom `#RUN cycles=123801143 insns=112822612 frames=31 halt=0` = unchanged),
   coremark `3.193` CoreMark/MHz unchanged, freertos `FREERTOS PASS` ticks=60 switches=185 queue=1275
-  mutex=40 spinners=86702/87261 callbacks=12, 1,124,012 cycles (stock port path), `fpga_full FPGA_FREQ=13
+   mutex=40 spinners=86702/87261 callbacks=12, 1,124,012 cycles (stock port path, input = deps/FreeRTOS-Kernel;
+   tree-dependent metric - see the 347a72c review-fix note below for the range), `fpga_full FPGA_FREQ=13
   FPGA_SEED=4` PASS 13.28 MHz, small FPGA 23.05 MHz.
 - How to run: `hdl make test`, `hdl make mi`, `hdl make all_tests`, `hdl make coremark`, `hdl make
   freertos`, `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4`.
@@ -1050,11 +1051,30 @@ DOOM CPU: DONE
 - Measured after fixes (fresh reruns): `make test` ALL PASS incl. t18; `all_tests` ALL TESTS DONE
   (incl. m7 + doom #RUN cycles=123801143 insns=112822612 frames=31, regress 500); coremark `3.193`
   CoreMark/MHz, 156,610,941 cycles/500 it; `freertos` FREERTOS PASS ticks=60 switches=185 queue=1275
-  mutex=40 spinners=86702/87261 callbacks=12 with 1,124,012 cycles (re-measured twice on this tree,
-  incl. once after deleting all `build/bench/freertos*` artifacts; the independent review clone
-  measured 1,124,191 on a different ELF layout - its `.text` 0x59f0/`.data` 0x4a0 vs this tree's
-  0x5a00/0x3d8, a 179-cycle difference left unexplained, see reviews/rv32cpu-21bc66c.md);
+  mutex=40 spinners=86702/87261 callbacks=12 with 1,124,012 cycles (input = deps/FreeRTOS-Kernel copy,
+  `.text` 23040/`.data` 984; re-measured twice on this tree, incl. once after deleting all
+  `build/bench/freertos*` artifacts). The freertos CYCLE metric is tree/build dependent (identical
+  kernel sources but a different ELF layout per build/clone), so it is now reported as a RANGE:
+  1,124,012 (this tree, deps input) to 1,124,204 (fresh clone of 347a72c, input =
+  `../../downloads/FreeRTOS-Kernel` fallback, `.text` 23032/`.data` 1036, own run below); the
+  21bc66c review clone measured 1,124,191 (`.text` 0x59f0/`.data` 0x4a0). Semantic counters are
+  identical in all of them: ticks=60, switches=185, queue=1275, mutex=40, spinners 86702/87261,
+  callbacks=12 (see reviews/rv32cpu-21bc66c.md and reviews/rv32cpu-347a72c.md);
   `fpga_full FPGA_FREQ=13 FPGA_SEED=4`
   `Info ... 14.56 MHz (PASS)` + `Info ... 14.34 MHz (PASS)`, 3840 LUT4 + 549 CARRY, 8 SB_RAM40_4K,
   1 SB_MAC16; small FPGA 23.05 MHz PASS at 20 MHz.
+
+## Review fixes on 347a72c (2026-11-03)
+- Review rv32cpu-347a72c.md verdict FAIL was one false claim: the commit message said "ua target;
+  UA now passes" but the committed tree has NO A extension: `rtl/ctrl.sv` decodes opcode 0b0101111
+  (0x2F) through `default: is_ill = 1` and `iss/iss.py` has no 0x2F handler, so all 10 rv32ua tests
+  illegal-trap. My own measurement on a fresh clone of 347a72c (`tmp-stage/clone`):
+  `hdl make ua` -> `UA TEST FAILED: 20 errors` (10 tests x 2 gates: ISS `--pass` FAIL + log mismatch).
+  Correct status: **UA currently FAILS (A ext not implemented)**; the `ua` target is WIP infra only
+  and is excluded from every "all passing" claim until L2 makes `hdl make ua` print ALL UA PASS.
+- freertos cycles: bare 1,124,012 replaced by the tree-qualified range 1,124,012-1,124,204 with the
+  input recorded per number (deps/FreeRTOS-Kernel vs `../../downloads/FreeRTOS-Kernel` fallback),
+  measured outputs pasted above; all semantic counters reproduce exactly.
+- Next per PROMPT.md L2: A extension (LR/SC + all AMO*.w) in ctrl/execute path, ISS 0x2F handler,
+  `tools/gen.py` random atomics coverage; `hdl make ua` gate.
 
