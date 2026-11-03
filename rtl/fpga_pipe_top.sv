@@ -22,7 +22,9 @@ module fpga_pipe_top (
   logic        dummy_wben, dummy_rv;
   logic [31:0] dummy_pc, dummy_insn, dummy_wv;
   logic [4:0]  dummy_rd;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [31:0] dummy_branches, dummy_taken, dummy_misps;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   assign pipe_reset = reset;
   assign lwe = 1'b0;

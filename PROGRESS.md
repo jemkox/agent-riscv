@@ -1132,3 +1132,18 @@ DOOM CPU: DONE
 - Clarified atomics test coverage: `t19_amo.S` covers producer->atomics forwarding, LR-result consumers, SC success, and SC-after-store failure; `t20_amo_illegal.S` adds illegal/reserved/MMIO atomic trap coverage.
 - Re-measured gates after review fixes: `ua` ALL UA PASS, `test` ALL PASS with 20 directed + ui + um + random seeds, `all_tests` ALL TESTS DONE (doom unchanged 123,801,143 cycles), `coremark` 3.193 CoreMark/MHz, `freertos` PASS cycles=1,124,012, `fpga` 23.96/23.05 MHz PASS at 20 MHz, `fpga_test` TEST PASSED, `fpga_full` seed4/seed5 PASS at 13 MHz.
 - Optional FreeRTOS reproducibility pin: the measured `freertos` gate used the vendored input at `deps/FreeRTOS-Kernel`, tag/describe `V11.2.0`, commit `0adc196d4bd52a2d91102b525b0aafc1e14a2386`; with the current CPU tree it measured cycles=1124012.
+
+## L2.2: full FPGA M behavioral gate `hdl make fpga_mgate` (2026-11-03)
+- Added the full FPGA behavioral gate `hdl make fpga_mgate`: `-DFPGA -DFPGA_MPROG` build of `rtl/fpga_pipe_top.sv` runs `build/t07_m.hex` through the FPGA `SB_RAM40_4K` register file, FPGA cache, and `SB_MAC16` MDU path; its retire log is compared with the ISS log by `tools/cmp.py`. Measured: `TEST PASSED (31 instrs)` and `cmp.py` reports no mismatch.
+- Fixes found by this gate:
+  - `tb/sb_prims_sim.sv`: FPGA simulation `SB_RAM40_4K` read now returns the current cell immediately (`assign RDATA = mem[RADDR];`) because the FPGA `regs32` read value feeds the same-cycle EX operands in the behavioral Verilator gate.
+  - `rtl/regs32.sv`: FPGA write-enable `wmask` was fixed from an invalid declaration-plus-assignment form to a declared wire assigned from `wena && (wsel != 5'd0)`; RADDR concatenations use one zero bit (`{1'b0, rsel}`), not an unused six-bit padding.
+  - `rtl/fwd.sv` + `rtl/top_pipe.sv`: forwarding/read gates now include M instructions (`ce_m`, `ceif_m`) so the M operand can get a just-retired/M-in-flight producer value.
+  - `rtl/top_pipe.sv`: FPGA-only M stall holds while pending M is not done OR while fetch is not ready:
+    `m_stall = (idex_m_go && (!idex_m_done || !fetch_ready)) || mem_pend;`.
+  - `rtl/cache32_fpga.sv`: FPGA store byte-enable updates now combine the old 16-bit cache cell with changed bytes instead of issuing several assignments to the same cell; store data extraction shifted from `{sd_raw, 32'h0}` to `{32'h0, sd_raw}`.
+  - `tb/fpga_pipe_tb.sv`: the FPGA runner prints a retire line before testing `halt`, matching `tb/run_hex.sv`, so the final `xhalt` instruction is counted like the ISS.
+- Fresh clone check after committing this work: `mkdir ../rv32cpu-check3 && git clone -q . ../rv32cpu-check3 && hdl make -C ../rv32cpu-check3 test` printed `ALL PASS`.
+- Re-measured suites on the fixed tree: `hdl make all_tests` ended `ALL TESTS DONE` with Doom unchanged (`cycles=123801143 insns=112822612 frames=31 halt=0`); `hdl make coremark` unchanged `CoreMark 1.0 : 41.504125`, `156610941` ticks / 500 iterations, `3.193 CoreMark/MHz`; `hdl make freertos` printed `FREERTOS PASS` with `cycles=1124012`; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` printed `ICESTORM_LC: 4541/5280` and `Max frequency ... 13.31 MHz (PASS at 13.00 MHz)` / `13.10 MHz (PASS at 13.00 MHz)`; `hdl make lint` and `hdl make mdiu_tb` passed (`TEST PASSED (46 cases)`).
+- Honest limitation: the FPGA behavioral gate uses a simulation stub for `SB_RAM40_4K` with immediate read output; this models the FPGA source's behavioral retire values. The real iCE40 netlist is still checked by `fpga_full` synthesis/route and `fpga_test`.
+- Next: L3 Linux platform runner `hdl make linux_sim` with >= 64 MB RAM, CLINT, 16550 UART, DTS/DTB for this machine.

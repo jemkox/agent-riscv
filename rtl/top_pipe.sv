@@ -19,6 +19,16 @@ module top_pipe (
   output logic [31:0] mst_cnt,
   output logic [31:0] st_cnt,
 `endif
+`ifdef LINUX
+  // Linux platform UART/initial a1. C++ runner drives RX and reads TX each cycle.
+  input  logic [31:0] linux_dtb_addr,
+  input  logic        uart_rx_ready,
+  input  logic [7:0]  uart_rx_in,
+  output logic        uart_tx_valid,
+  output logic [7:0]  uart_tx_out,
+  output logic        uart_rx_pending,
+  output logic        uart_tx_ready,
+`endif
   output logic        halt,
   output logic [31:0] ex_pc,
   output logic [31:0] ex_insn,
@@ -71,7 +81,9 @@ module top_pipe (
   logic        read_a, read_b, ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr, ce_lui, ce_auipc, ce_opi, ce_op;
   logic        ce_sys, ce_fence, ce_ill, ce_m, ceif_ill, ceif_m, ce_csr, exmem_csr_en, exmem_csr_wen;
   logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out, mret_flush, ce_mret;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic        amo_mmio_bad, ce_ex_ill;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic [31:0] mret_pc;
   logic        ceif_ld, ceif_st, ceif_br, ceif_jalr, ceif_opi, ceif_op, ceif_csr;
   logic [31:0] ifid_r1_fwd, ifid_r2_fwd, idex_r1_cs;
@@ -85,6 +97,9 @@ module top_pipe (
 
   regs32 RF(.clk(clk), .reset(reset), .rsel1(ifid_insn[19:15]), .rsel2(ifid_insn[24:20]),
             .rs1(rf_r1), .rs2(rf_r2),
+`ifdef LINUX
+            .linux_init_valid(1'b1), .linux_init_addr(linux_dtb_addr),
+`endif
             .wena(mwb_valid && mwb_wben && (mwb_rd != 5'd0) && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
   cache32 MM(.clk(clk), .reset(reset), .halt(halt), .lwe(lwe), .lwa(lwa), .lwd(lwd),
 `ifdef DOOM_BIG
@@ -138,7 +153,7 @@ module top_pipe (
   /* verilator lint_on PINCONNECTEMPTY */
   ldst  LDST(.is_ld(ce_ld), .is_st(ce_st), .is_amo(ce_amo), .is_ill(ce_ill), .ld_ok(ld_ok), .st_ok(st_ok));
   fwd   FWDD(.idex_valid(idex_valid), .ce_br(ce_br), .ce_jalr(ce_jalr), .ce_opi(ce_opi),
-             .ce_op(ce_op), .ce_csr(ce_csr), .ld_ok(ld_ok), .st_ok(st_ok),
+             .ce_op(ce_op), .ce_m(ce_m), .ce_csr(ce_csr), .ld_ok(ld_ok), .st_ok(st_ok),
 `ifdef FPGA
              .ce_rs1(ce_rs1), .ce_rs2(ce_rs2),
 `else
@@ -155,7 +170,7 @@ module top_pipe (
 `else
              .ceif_amo(ceif_amo),
 `endif
-             .ceif_opi(ceif_opi), .ceif_op(ceif_op), .ceif_csr(ceif_csr), .ceif_rs1(ceif_rs1), .ceif_rs2(ceif_rs2),
+              .ceif_opi(ceif_opi), .ceif_op(ceif_op), .ceif_m(ceif_m), .ceif_csr(ceif_csr), .ceif_rs1(ceif_rs1), .ceif_rs2(ceif_rs2),
              .a_ex(a_ex), .b_ex(b_ex), .read_a(read_a), .read_b(read_b),
              .ifid_r1_fwd(ifid_r1_fwd), .ifid_r2_fwd(ifid_r2_fwd));
   imm32  IM(.i(idex_insn), .iimm(iimm), .simm(simm), .bimm(bimm), .uimm(uimm), .jimm(jimm));
@@ -258,7 +273,7 @@ module top_pipe (
     mem_pend = idex_valid && (idex_ld || idex_st) && !mem_ready;
     // WFI retires as a nop; a pending IRQ traps before it (mepc = WFI pc).
 `ifdef FPGA
-    m_stall = (idex_m_go && !idex_m_done) || mem_pend;
+    m_stall = (idex_m_go && (!idex_m_done || !fetch_ready)) || mem_pend;
 `else
     m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend;
 `endif

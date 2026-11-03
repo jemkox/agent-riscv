@@ -54,7 +54,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),build/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),build/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full ua build/vlt/run_hex build/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate all_tests play play_test doom_mem doom_probe doom_elf fpga_full ua build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -514,6 +514,25 @@ build/cpu_full.bin: build/cpu_full.asc
 fpga_full: build/cpu_full.bin | build
 	@echo "build/cpu_full.bin"
 	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' build/cpu_full_syn.log build/cpu_full_route.log
+
+# Behavioral gate for the full pipelined FPGA top (review round, 2026-11-03):
+# -DFPGA Verilator build of fpga_pipe_top running the M-heavy t07_m.hex baked
+# into the cache ROM INIT (fpga_m_prog_init.sv), retire log cmp.py-compared
+# against ISS -> verifies the MUL/DIV rd/val values through the idex_m_go +
+# SB_MAC16 MDU path (the fpga_full gate only places/routes; this one runs it).
+build/fpga_m:
+	@mkdir -p build/fpga_m
+
+build/fpga_m/fpga_m_prog_init.sv: build/t07_m.hex | build/fpga_m
+	@python3 tools/gen_fpga_rom.py $< $@
+
+build/vlt_fpga_m/fpga_mtop: $(FPGA_PIPE_RTL) build/fpga_m/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | build/fpga_m
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -Ibuild/fpga_m --Mdir build/vlt_fpga_m -o fpga_mtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+
+fpga_mgate: build/vlt_fpga_m/fpga_mtop build/t07_m.bin | build/fpga_m
+	@./build/vlt_fpga_m/fpga_mtop > build/fpga_m/t07_m.rtl.log; grep -q "TEST PASSED" build/fpga_m/t07_m.rtl.log
+	@python3 iss/iss.py --quiet --log build/fpga_m/t07_m.iss.log build/t07_m.bin > /dev/null
+	@python3 tools/cmp.py build/fpga_m/t07_m.rtl.log build/fpga_m/t07_m.iss.log
 
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)

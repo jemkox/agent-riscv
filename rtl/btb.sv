@@ -1,5 +1,7 @@
 // Branch target buffer with 2-bit saturating counters.
 // Direct-mapped by pc[7:2]; tag is pc[31:8]. Query during fetch, update at EX.
+/* verilator lint_off WIDTHEXPAND */
+/* verilator lint_off WIDTHTRUNC */
 module btb (
   input  logic        clk,
   input  logic        reset,

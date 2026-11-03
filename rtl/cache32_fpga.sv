@@ -37,7 +37,13 @@ module cache32 (
   (* BRAM = 1 *) logic [15:0] dc_hi [0:127];
 
 `ifdef FPGA
+`ifdef FPGA_MPROG
+  // Simulation gate only (hdl make fpga_mgate): ROM = t07_m.hex (M-heavy), so the
+  // FPGA MDU/idex_m_go path is behaviorally exercised, not just placed/routed.
+  `include "fpga_m_prog_init.sv"
+`else
 `include "fpga_prog_init.sv"
+`endif
 `endif
 
   logic [15:0] ic_rd_lo, ic_rd_hi, dc_rd_lo, dc_rd_hi, dc_rd0_lo, dc_rd0_hi;
@@ -79,7 +85,7 @@ module cache32 (
       2'b10: sbe_all = 4'b1111;
       default: sbe_all = 4'b0000;
     endcase
-    sd_shift = { sd_raw, 32'h0 } << { off2, 3'b000 };
+    sd_shift = { 32'h0, sd_raw } << { off2, 3'b000 };
 
     if_ready    = if_pend && (if_padr == pc_idx);
     if_issue    = if_ready ? (pc_idx + 7'h1) : pc_idx;
@@ -154,10 +160,20 @@ module cache32 (
       ic_lo[lw_idx] <= lwd[15:0];
       ic_hi[lw_idx] <= lwd[31:16];
     end
-    if (dbe[0]) dc_lo[wad] <= dwd[7:0];
-    if (dbe[1]) dc_lo[wad] <= dwd[15:8];
-    if (dbe[2]) dc_hi[wad] <= dwd[23:16];
-    if (dbe[3]) dc_hi[wad] <= dwd[31:24];
+    if (dbe[0] || dbe[1]) begin
+      logic [15:0] lo;
+      lo = dc_lo[wad];
+      if (dbe[0]) lo[7:0] = dwd[7:0];
+      if (dbe[1]) lo[15:8] = dwd[15:8];
+      dc_lo[wad] <= lo;
+    end
+    if (dbe[2] || dbe[3]) begin
+      logic [15:0] hi;
+      hi = dc_hi[wad];
+      if (dbe[2]) hi[7:0] = dwd[23:16];
+      if (dbe[3]) hi[15:8] = dwd[31:24];
+      dc_hi[wad] <= hi;
+    end
   end
 endmodule
 `default_nettype wire

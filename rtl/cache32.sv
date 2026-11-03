@@ -48,6 +48,14 @@ module cache32 (
   output logic        mem_ready,
   output logic        clint_commit,
   input  logic [31:0] clint_ld_in
+`ifdef LINUX
+ ,input  logic        uart_rx_ready,
+  input  logic [7:0]  uart_rx_in,
+  output logic        uart_tx_valid,
+  output logic [7:0]  uart_tx_out,
+  output logic        uart_rx_pending,
+  output logic        uart_tx_ready,
+`endif
 );
 `ifdef CACHE_LAT
   localparam int LAT = `CACHE_LAT;
