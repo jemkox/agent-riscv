@@ -29,6 +29,8 @@ keeps its own license:
               modified to use this project's file layer.
 - bench/coremark/  CoreMark port files from EEMBC's barebones template,
               Apache 2.0, see bench/coremark/LICENSE.md.
+- FreeRTOS kernel (MIT) is not in this repo; `make deps` fetches it. The port
+              in os/freertos/ is this project's own code.
 - env/        Test harness headers following the riscv-tests conventions,
               see env/LICENSE.riscv-tests (BSD).
 

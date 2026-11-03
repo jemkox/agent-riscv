@@ -90,7 +90,8 @@ def main(argv):
         wv = None; wv_ok = False; npc = (pc+4) & 0xFFFFFFFF
         neg = (ins>>30)&1
         trap_mode = ((cs_get(0x300) >> 12) & 1) == 1
-        if trap_mode and cs_get(0xb00) >= cs_get(0x705) and pc != cs_get(0x305):
+        # the RTL lets an mret in EX finish before a due timer interrupt (mret_active blocks timer_flush)
+        if trap_mode and cs_get(0xb00) >= cs_get(0x705) and pc != cs_get(0x305) and ins != 0x30200073:
             cs[0x341] = pc & mask; cs[0x342] = 0x80000007
             cs[0x300] = (cs[0x300] | 0x1800) & mask
             pc = cs_get(0x305) & mask
@@ -180,7 +181,9 @@ def main(argv):
         elif opc == 0x73:
             csr_num = (ins >> 20) & 0xFFF
             zimm = (ins >> 15) & 0x1F
-            if f3 == 0:
+            if f3 == 0 and csr_num == 0x302:   # MRET: back to mepc (this CPU leaves mstatus as it is)
+                npc = cs_get(0x341) & mask
+            elif f3 == 0:
                 if csr_num == 0: cause = 8
                 elif csr_num == 1: cause = 3
                 else: cause = 2; illegal = True

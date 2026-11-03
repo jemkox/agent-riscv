@@ -41,7 +41,7 @@ module ctrl (
   assign is_opi   = (opc == 7'b0010011);
   assign is_op    = (opc == 7'b0110011);
   assign is_fence = (opc == 7'b0001111);
-  assign is_mret  = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h300);
+  assign is_mret  = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h302);
   assign f3  = i[14:12];
   assign op7 = i[31:25];
   assign rs1 = i[19:15];
@@ -113,7 +113,7 @@ module ctrl (
           3'b000: begin
             if (i[31:20] == 12'h000) is_sys = 1;                         // ECALL
             else if (i[31:20] == 12'h001) is_sys = 1;                    // EBREAK
-            else if (i[31:20] == 12'h300) begin end                      // MRET
+            else if (i[31:20] == 12'h302) begin end                      // MRET
             else is_ill = 1;
           end
           3'b001: is_csr = 1;

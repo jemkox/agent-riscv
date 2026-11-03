@@ -270,7 +270,7 @@ module top_pipe (
         exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
         exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
         exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
-        exmem_r1 <= idex_r1;
+        exmem_r1 <= a_ex;   // CSR write data: the forwarded rs1 (lw t0,..; csrw mepc,t0 needs the load)
         idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
         pc_if <= br_tgt_ex & 32'hFFFFFFFE;
       end else begin
@@ -281,7 +281,7 @@ module top_pipe (
         exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
         exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
         exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
-        exmem_r1 <= idex_r1;
+        exmem_r1 <= a_ex;   // CSR write data: the forwarded rs1 (lw t0,..; csrw mepc,t0 needs the load)
 
         idex_valid <= ifid_valid;
         idex_pc <= ifid_pc; idex_insn <= ifid_insn; idex_r1 <= idex_r1_cs; idex_r2 <= ifid_r2_fwd;

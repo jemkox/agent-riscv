@@ -42,7 +42,7 @@ module csrs_pipe (
   logic [31:0] trap_pc, trap_cause;
   logic        mret_active;
   /* verilator lint_off UNUSED */
-  logic [31:0] mc_next, mtcmp_next, mstatus_next;
+  logic [31:0] mc_next, mtcmp_next, mstatus_next, mepc_next;
   logic [31:0] cs_mstatus, cs_mepc, cs_mcause, cs_mcycle, cs_minstret, cs_mtimecmp;
   /* verilator lint_on UNUSED */
 
@@ -54,7 +54,7 @@ module csrs_pipe (
             .cs_wsel(exmem_insn[31:20]), .cs_winsn(exmem_insn), .cs_wop(exmem_f3),
             .cs_wrs1(exmem_r1), .retire_en(exmem_valid && !halt && !reset),
             .idex_read_en(idex_valid && ce_csr), .idex_rsel(idex_insn[31:20]), .cs_old_idex(idex_cs_old),
-            .mc_next(mc_next), .mtcmp_next(mtcmp_next), .mstatus_next(mstatus_next),
+            .mc_next(mc_next), .mtcmp_next(mtcmp_next), .mstatus_next(mstatus_next), .mepc_next(mepc_next),
             .halt_out(halt_out),
             .mstatus(cs_mstatus), .mtvec(cs_mtvec), .mepc(cs_mepc),
             .mcause(cs_mcause), .mcycle(cs_mcycle), .minstret(cs_minstret), .mtimecmp(cs_mtimecmp));
@@ -89,6 +89,6 @@ module csrs_pipe (
     timer_flush = timer_due && !stall && !m_stall && !trap_flush && !mret_active;
     trap_en = trap_flush || timer_flush;
     mret_flush = mret_active && !trap_flush && !timer_flush;
-    mret_pc = cs_mepc;
+    mret_pc = mepc_next;   // a csrw mepc right before the mret must count
   end
 endmodule

@@ -969,3 +969,24 @@ DOOM CPU: DONE
 - Result (`-O2`, GCC 13.2): `Correct operation validated`, `CoreMark 1.0 : 41.504125 / GCC13.2.0 -O2 / STACK`,
   156,610,941 ticks / 500 iterations = 313,222 cycles/iteration = **3.193 CoreMark/MHz**;
   `#BENCH cycles=180692117 insns=156649049 IPC=0.867`, mispredicts 4,444,349 / 32,391,569 branches (13.7%).
+
+## FreeRTOS (2026-11-03, Claude)
+- FreeRTOS-Kernel V11.2.0 (fetched by `make deps`, unmodified) with an own port in `os/freertos/port/` for this
+  CPU's trap model (mstatus bit 12 = traps+timer on; mtime/mtimecmp = CSR 0x704/0x705; ecall halts with traps
+  off, so portYIELD makes the timer due instead of using ecall). Demo `os/freertos/main.c`, `make freertos`.
+- The port found three CPU bugs (none visible to the official tests, 5000 random programs or Doom):
+  1. `rtl/ctrl.sv` decoded MRET as imm 0x300 (real mret 0x30200073 was illegal); `iss/iss.py` had no mret either,
+     and `env/mi/riscv_test.h` defines `mret` as csrr+jalr, so no test ran one. Fixed both; ISS also lets an
+     mret in EX finish before a due timer, like the RTL. New `tests/t16_mret.S` (self-checking, `make test`
+     runs it with `--pass`; failed on the old RTL+ISS with gp=0).
+  2. mret took `st_mepc`, missing a `csrw mepc` in MEM right before it: `csrs.sv` now exports `mepc_next`
+     (after_mepc) and `csrs_pipe.sv` uses it for `mret_pc`.
+  3. CSR write data was `exmem_r1 <= idex_r1` (decode-stage register, not forwarded): `lw t0; csrw mepc,t0`
+     wrote the old t0. Now `exmem_r1 <= a_ex`. New `tests/t17_csr_fwd.S` (RTL 0x55 vs ISS 0x12345678 before).
+- After the fixes: `make all_tests` ALL PASS (test LAT 1/5, ui, um, mi, regress 500, m7, doom
+  `#RUN cycles=123801143 insns=112822612 frames=31` = unchanged), `regress N=5000` ALL PASS, CoreMark 3.193
+  CoreMark/MHz unchanged, `make freertos` FREERTOS PASS (ticks=60, 185 context switches, queue 1275, mutex 40,
+  spinners 86097/86710, timer callbacks 12; 1,129,671 cycles).
+- FPGA: seed 7 dropped to 12.35 MHz (FAIL at 13); 12-seed sweep 12.12-13.22 MHz, 5/12 PASS at 13 MHz; seed 4
+  13.22 MHz PASS, 4836/5280 LC, 8 BRAM, 1 DSP. Critical path is still forwarding -> ALU/MDU carry chain.
+  Documented seed and CI changed to 4.

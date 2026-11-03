@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -16,9 +16,12 @@ RISCV_TESTS_URL ?= https://github.com/riscv-software-src/riscv-tests.git
 RISCV_TESTS_REV ?= 3df703cd52d5f0d8224e3c50bf03c6cb70efff98
 COREMARK_URL ?= https://github.com/eembc/coremark.git
 COREMARK_REV ?= 1f483d5b8316753a742cbf5590caf5bd0a4e4777
+FREERTOS_URL ?= https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+FREERTOS_TAG ?= V11.2.0
 WAD_SHA1 := 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d
 RVTEST_DIR ?= $(firstword $(wildcard deps/riscv-tests/isa ../../downloads/riscv-tests/isa) deps/riscv-tests/isa)
 COREMARK_DIR ?= $(firstword $(wildcard deps/coremark ../../downloads/coremark) deps/coremark)
+FREERTOS_DIR ?= deps/FreeRTOS-Kernel
 WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.wad) deps/doom1.wad)
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
@@ -45,7 +48,7 @@ MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
 
-.PHONY: deps need_rvtests need_coremark need_wad coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -57,7 +60,8 @@ deps:
 	@mkdir -p deps
 	@if [ ! -d deps/riscv-tests ]; then git clone -q $(RISCV_TESTS_URL) deps/riscv-tests && git -C deps/riscv-tests checkout -q $(RISCV_TESTS_REV) && git -C deps/riscv-tests submodule -q update --init env; fi
 	@if [ ! -d deps/coremark ]; then git clone -q $(COREMARK_URL) deps/coremark && git -C deps/coremark checkout -q $(COREMARK_REV); fi
-	@echo "deps: riscv-tests $$(git -C deps/riscv-tests rev-parse --short HEAD), coremark $$(git -C deps/coremark rev-parse --short HEAD)"
+	@if [ ! -d deps/FreeRTOS-Kernel ]; then git -c advice.detachedHead=false clone -q --depth 1 --branch $(FREERTOS_TAG) $(FREERTOS_URL) deps/FreeRTOS-Kernel; fi
+	@echo "deps: riscv-tests $$(git -C deps/riscv-tests rev-parse --short HEAD), coremark $$(git -C deps/coremark rev-parse --short HEAD), FreeRTOS $$(git -C deps/FreeRTOS-Kernel describe --tags)"
 	@[ -f deps/doom1.wad ] && echo "deps: doom1.wad present" || echo "deps: for Doom, copy the shareware doom1.wad (v1.9, sha1 $(WAD_SHA1)) to deps/doom1.wad"
 
 need_rvtests:
@@ -154,6 +158,7 @@ test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(U
 	 python3 iss/iss.py --quiet --log build/$$t.iss.log build/$$t.bin > /dev/null; \
 	 python3 tools/cmp.py build/$$t.rtl.log build/$$t.iss.log || bad=$$((bad+1)); \
 	 done; \
+	 python3 iss/iss.py --quiet --pass build/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
 	 for n in $(UI_NAMES); do \
 	 cp build/ui/$$n.hex build/p.hex; ./build/vlt/run_hex > build/ui/logs/$$n.rtl.log; \
 	 python3 iss/iss.py --quiet --pass --log build/ui/logs/$$n.iss.log build/ui/$$n.bin > /dev/null; \
@@ -270,6 +275,27 @@ build/vlt_bench/run_bench: $(RTL) tb/run_doom.sv tb/bench_main.cpp | build
 coremark: need_coremark build/vlt_bench/run_bench build/bench/coremark.hex
 	@./build/vlt_bench/run_bench build/bench/coremark.hex | tee build/bench/coremark.out
 	@python3 tools/coremark_score.py build/bench/coremark.out
+
+# --- FreeRTOS demo on the same CPU configuration as Doom and CoreMark (os/freertos: own port) ---
+RTOS_SRCS := $(addprefix $(FREERTOS_DIR)/,tasks.c queue.c list.c timers.c portable/MemMang/heap_4.c) \
+             os/freertos/port/port.c os/freertos/main.c
+RTOS_FLAGS := $(CCFLAGS) -O2 -I os/freertos -I os/freertos/port -I $(FREERTOS_DIR)/include
+
+need_freertos:
+	@[ -f $(FREERTOS_DIR)/tasks.c ] || { echo "FreeRTOS not found at $(FREERTOS_DIR): run 'make deps' or pass FREERTOS_DIR=path/to/FreeRTOS-Kernel" >&2; exit 1; }
+
+build/bench/freertos.elf: $(RTOS_SRCS) os/freertos/port/portasm.S os/freertos/port/portmacro.h os/freertos/FreeRTOSConfig.h doom/crt0_rv32.S doom/exit_rv.S doom/ld.ld | build/bench
+	$(CC) $(RTOS_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ doom/crt0_rv32.S doom/exit_rv.S os/freertos/port/portasm.S $(RTOS_SRCS)
+
+build/bench/freertos.bin: build/bench/freertos.elf
+	$(OC) -O binary $< $@
+
+build/bench/freertos.hex: build/bench/freertos.bin
+	python3 tools/bin2hex.py $< $@
+
+freertos: need_freertos build/vlt_bench/run_bench build/bench/freertos.hex
+	@./build/vlt_bench/run_bench build/bench/freertos.hex 400000000 | tee build/bench/freertos.out
+	@grep -q "^FREERTOS PASS" build/bench/freertos.out || { echo "FREERTOS TEST FAILED" >&2; exit 1; }
 
 # --- M10b Doom probe: crt0 + picolibc stdio over the fd-table fsys layer ---
 build/doom:

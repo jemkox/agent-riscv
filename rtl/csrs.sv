@@ -24,6 +24,7 @@ module csrs (
   output logic [31:0] mc_next,
   output logic [31:0] mtcmp_next,
   output logic [31:0] mstatus_next,
+  output logic [31:0] mepc_next,      // mepc including a CSR write now in MEM (for mret in EX)
   output logic        halt_out,
   output logic [31:0] mstatus,
   output logic [31:0] mtvec,
@@ -186,6 +187,7 @@ module csrs (
     assign mc_next = after_mcycle;
     assign mtcmp_next = after_mtimecmp;
     assign mstatus_next = mstatus_wr;
+    assign mepc_next = after_mepc;
     assign halt_out = halt_wr;
 
 

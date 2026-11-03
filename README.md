@@ -9,7 +9,8 @@
 A 5-stage pipelined **RV32IM** CPU written in SystemVerilog. It passes the
 official RISC-V test suites, routes on a **Lattice iCE40 UP5K** FPGA, and runs
 **DOOM** (shareware, unmodified game logic) cycle-accurately in Verilator, with
-a live window and keyboard.
+a live window and keyboard. It also boots the **FreeRTOS** real-time operating
+system and passes a self-checking multitasking demo.
 
 The design (about 2,700 lines of RTL), its tests and the Doom port were written
 autonomously by a **local LLM coding agent** running on a consumer PC. I designed
@@ -56,8 +57,9 @@ hardware.
 | Random testing | 500–5000 random programs per run, compared instruction-by-instruction with a Python reference model: 0 mismatches |
 | Formal | k-induction proof of pipeline invariants (SymbiYosys) |
 | CoreMark | **3.19 CoreMark/MHz** (EEMBC CoreMark 1.0, CRCs validated, GCC 13.2 `-O2`) |
+| Operating system | **FreeRTOS** V11.2.0 (own port): tasks, queue, mutex, preemption, software timers, 185 context switches in the demo |
 | DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
-| FPGA (iCE40 UP5K) | 4859 / 5280 logic cells, 8 BRAM, 1 DSP, **13.16 MHz** (nextpnr seed 7) |
+| FPGA (iCE40 UP5K) | 4836 / 5280 logic cells, 8 BRAM, 1 DSP, **13.22 MHz** (nextpnr seed 4; 5 of 12 seeds meet 13 MHz) |
 
 What that means in frames per second:
 
@@ -94,6 +96,49 @@ For context, published numbers of well-known open-source RV32 cores
 This is a self-run result in cycle-accurate simulation, not an EEMBC-certified
 score. Run it with `make coremark`; CI runs it on every push.
 
+## Booting an operating system: FreeRTOS
+
+[FreeRTOS](https://github.com/FreeRTOS/FreeRTOS-Kernel) V11.2.0, the kernel
+unmodified, runs on the same CPU configuration as Doom. This CPU's trap model is
+simplified (one `mstatus` bit enables traps and the timer, the timer lives in
+CSRs, `ecall` halts when traps are off), so the stock RISC-V port does not fit;
+[`os/freertos/port/`](os/freertos/port/) is a small port written for it, which
+yields by making the timer interrupt due, like PendSV on ARM Cortex-M. The demo
+checks itself:
+
+```text
+FreeRTOS V11.2.0 on rv32cpu
+ticks=60
+context switches=185
+queue sum=1275            (50 numbers through a queue, in order)
+queue order errors=0
+mutex count=40            (2 tasks x 20, switched out while holding the mutex)
+spinner A=86097           (two tasks that never block both progress:
+spinner B=86710            the tick preempts them)
+timer callbacks=12
+FREERTOS PASS
+```
+
+Run it with `make freertos`; CI runs it on every push.
+
+### Three more CPU bugs that FreeRTOS found
+
+The official tests, 5,000 random programs and Doom all passed, and an operating
+system still found three bugs. Each now has a directed test:
+
+1. **`mret` was decoded with the wrong encoding** (`0x300` instead of `0x302`),
+   so every real `mret` was an illegal instruction. The reference model had no
+   `mret` either, and the official-test environment replaces `mret` with a
+   macro, so nothing ever executed one. Test: `tests/t16_mret.S`.
+2. **`mret` read a stale `mepc`** when the instruction right before it wrote
+   `mepc`. Fix: use the forwarded CSR value.
+3. **CSR writes used the un-forwarded register value**: `lw t0, ...` followed by
+   `csrw mepc, t0` wrote the *old* `t0`. Fix: take the forwarded operand, like
+   the ALU does. Test: `tests/t17_csr_fwd.S`.
+
+After the fixes every suite passes again, Doom runs with the exact same cycle
+count, and CoreMark is unchanged.
+
 ## Two real CPU bugs that only DOOM found
 
 All the official tests and thousands of random programs passed, and the CPU was
@@ -129,7 +174,7 @@ check.
 
 ```sh
 git clone https://github.com/jemkox/agent-riscv-doom.git && cd agent-riscv-doom
-make deps    # clones riscv-tests and CoreMark at pinned versions into deps/
+make deps    # clones riscv-tests, CoreMark and FreeRTOS at pinned versions into deps/
 ```
 
 For Doom, copy the shareware `doom1.wad` (v1.9, sha1
@@ -142,10 +187,11 @@ included here; the build checks its checksum.
 make test        # directed + official + random tests, prints ALL PASS
 make all_tests   # every suite, including Doom
 make coremark    # CoreMark score
+make freertos    # boot FreeRTOS, self-checking demo
 make doom        # headless Doom, frames in build/doom/frames
 make play        # live SDL window with keyboard
 make play_test   # scripted play, must differ from a no-key run
-make fpga_full FPGA_FREQ=13 FPGA_SEED=7   # synth + place & route for iCE40 UP5K
+make fpga_full FPGA_FREQ=13 FPGA_SEED=4   # synth + place & route for iCE40 UP5K
 ```
 
 Any input can also be given directly: `RVTEST_DIR=.../riscv-tests/isa`,
@@ -165,6 +211,7 @@ iss/        Python reference instruction-set simulator
 tools/      random program generator, trace compare, play-test verifier, helpers
 formal/     SymbiYosys pipeline proof
 programs/   small C benchmarks (fib, sort, matmul, ...)
+os/         FreeRTOS port for this CPU and the self-checking demo
 bench/      CoreMark port (timer = mcycle, UART output)
 doom/       Doom port: crt0, linker script, file layer, MMIO glue; doom/src = doomgeneric (vendored, upstream e257a09)
 docs/       DESIGN.md (detailed design notes and numbers), Doom screenshots
@@ -216,17 +263,17 @@ failed attempts.
 
 ## Who did what
 
-GitHub lists Claude as a contributor because 15 commits carry a
+GitHub lists Claude as a contributor because its commits carry a
 `Co-Authored-By: Claude` line. Here is what those lines are, next to everyone
 else's part:
 
 | Who | What |
 |---|---|
 | **Me (jemkox)** | The idea and the goals (verified CPU, then Doom, then benchmarks); running the model locally; the agent setup and its rules (built together with Claude); supervising the build, deciding priorities and when to step in. |
-| **Builder agent** (local Qwen 3.8 Flash Next Coder) | The CPU: all RTL except 26 lines (`rtl/`, about 2,700 lines today), the Python reference model, the random test generator, directed tests t01–t14, the testbenches, the FPGA flow, the Doom port's file layer and runner, and the `PROGRESS.md` log. 36 commits on its own, about 11,000 lines added over the build (excluding the vendored Doom source). |
+| **Builder agent** (local Qwen 3.8 Flash Next Coder) | The CPU: all RTL except about 35 lines (`rtl/`, about 2,700 lines today), the Python reference model, the random test generator, directed tests t01–t14, the testbenches, the FPGA flow, the Doom port's file layer and runner, and the `PROGRESS.md` log. 36 commits on its own, about 11,000 lines added over the build (excluding the vendored Doom source). |
 | **Reviewer agent** (same local model) | The three reports in [`agent/reviews/`](agent/reviews/). |
-| **Claude** (Anthropic), the 15 co-authored commits | 26 lines of RTL: the two Doom bug fixes, plus test t15. Debugging fixes outside the CPU (Doom linker script, file layer, play-window keyboard timing). The agent harness scripts in `agent/`, written with me during setup (~1,600 lines). The CoreMark port (~1,300 lines, mostly EEMBC's own template files), the CI workflow, the installer, and this README and `docs/`. Some of these commits also carried the builder's own work. |
-| **Third-party code** | [doomgeneric](https://github.com/ozkl/doomgeneric) (`doom/src`), EEMBC CoreMark, riscv-tests conventions (`env/`). |
+| **Claude** (Anthropic), the co-authored commits | About 35 lines of RTL: the fixes for the two bugs Doom found and the three FreeRTOS found, plus tests t15–t17 and `mret` in the reference model. The FreeRTOS port and demo (`os/`, ~400 lines). Debugging fixes outside the CPU (Doom linker script, file layer, play-window keyboard timing). The agent harness scripts in `agent/`, written with me during setup (~1,600 lines). The CoreMark port (~1,300 lines, mostly EEMBC's own template files), the CI workflow, the installer, and this README and `docs/`. Some of these commits also carried the builder's own work. |
+| **Third-party code** | [doomgeneric](https://github.com/ozkl/doomgeneric) (`doom/src`), EEMBC CoreMark, FreeRTOS kernel (fetched by `make deps`, not in the repo), riscv-tests conventions (`env/`). |
 
 ## What's next
 
@@ -242,7 +289,9 @@ else's part:
   built-in program. A board with SDRAM is needed to play it on real hardware.
 - Simulation speed peaked at 5.8M cycles/s; a 15M target was attempted and missed
   (attempts recorded in `PROGRESS.md`).
-- No atomics (A), no supervisor/user mode, no MMU, so no Linux yet.
+- No atomics (A), no supervisor/user mode, no MMU, so no Linux yet. The
+  interrupt model is simplified (no standard `MIE`/`mie`/`mip`, timer in CSRs);
+  it is enough for FreeRTOS with its own port, but Linux will need the standard one.
 - The formal proof covers pipeline invariants, not full ISA equivalence.
 - The FPGA build truncates the 64-bit counters to 32 bits.
 

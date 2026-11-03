@@ -6,7 +6,8 @@ A 5-stage in-order RV32IM CPU, Verilator-tested against official riscv-tests
 (riscv-tests rv32ui/rv32um/selected rv32mi), a Python ISS, 15 directed tests,
 N=500/5000 random differential programs, a k-induction formal model, and DOOM
 running natively at 123.8M cycles / 31 rendered frames. The full CPU fits and
-routes on iCE40 UP5K (4859 LC, 8 BRAM, 1 DSP, 13.16 MHz).
+routes on iCE40 UP5K (4836 LC, 8 BRAM, 1 DSP, 13.22 MHz at nextpnr seed 4). It also boots FreeRTOS
+(`os/freertos`, see the README).
 
 ## ASCII diagram
 
@@ -58,7 +59,7 @@ program subset (addi/lui/sw/lw/add) still exists as a small artifact.
 
 ## Verification approach
 
-- Directed tests `tests/t01..t15` (self-checking, print `TEST PASSED (n instrs)`).
+- Directed tests `tests/t01..t17` (self-checking, print `TEST PASSED (n instrs)`).
 - Random differential vs the Python ISS (`iss/iss.py` + `tools/gen.py`):
   `regress N=500`/`N=5000` -> 0 mismatches, `ALL PASS`.
 - Official riscv-tests (an upstream riscv-tests checkout, `RVTEST_DIR`): `ui`, `um`, `mi`.
@@ -94,7 +95,7 @@ DOOM run (DOOM_BIG, CACHE_LAT=5, 32 MB RAM, WAD shareware):
 ```text
 31 frames in            123,801,143 cycles (halt=0, frames all valid)
 cycles/frame            3.99M incl. boot; render-frame deltas ~2.33M
-fps at 50 MHz           12.5      fps at FPGA Fmax 13.16 MHz: 3.3
+fps at 50 MHz           12.5      fps at FPGA Fmax 13.22 MHz: 3.3
 simulation speed        5.57M cycles/s (-O3 baseline), best measured 5.80M (PGO+LTO)
 I/D miss rates          0.047% / 1.50%        mst 5.90% st 1.66% mispred 0.84% of branches
 ```
@@ -103,9 +104,11 @@ FPGA full CPU top (`fpga_pipe_top`, yosys `synth_ice40 -dsp`, nextpnr `--up5k --
 
 ```text
 build/cpu_full.bin                produced (icepack)
-LC (seed 7, PASS run)             4859/5280 (3500 LUT4 + 554 LUT+DFF + 670 DFF + 135 CARRY)
+LC (seed 4, PASS run)             4836/5280 (after the FreeRTOS fixes; was 4859 at seed 7 before them)
 SB_RAM40_4K (BRAM)                8          SB_MAC16 DSP: 1
-Fmax                                13.16 MHz routed, PASS at 13.00 MHz budget, nextpnr --seed 7
+Fmax                                13.22 MHz routed, PASS at 13.00 MHz budget, nextpnr --seed 4
+                                  (12-seed sweep after the FreeRTOS fixes: 12.12-13.22 MHz, 5 of 12 meet 13 MHz;
+                                  before them: 13.16 MHz at seed 7)
                                   (seed 2 also PASS at 13.07; seed 6 gives 12.76 - seeds shown because they matter)
 Fmax history                      13.67 MHz (CSR-counter stubs), 13.20 MHz (round-5 DSP MDU base, 4710 LC)
 ```
@@ -172,7 +175,7 @@ lines, CACHE_LAT=5):
 ```text
 31 frames in            123,801,143 cycles (halt=0)
 cycles/frame            3.99M average incl. boot (render-frame deltas ~2.33M)
-fps at 50 MHz           12.5        fps at FPGA Fmax 13.16 MHz: 3.3
+fps at 50 MHz           12.5        fps at FPGA Fmax 13.22 MHz: 3.3
 simulation speed        5.57M cycles/s baseline (22.2 s), best measured 5.80M (PGO+LTO, 21.33 s)
 I-cache miss rate       0.047%      D-cache miss rate 1.50%
 M/mem-pending stalls    5.90% of cycles  load-use stalls 1.66%  mispreds 188,656/22.53M branches (0.84%)
@@ -191,7 +194,7 @@ and the Doom cycles measured here are on the full sim CPU, not the FPGA build.
 
 ## Honest known limitations
 
-- The full CPU FITS in UP5K (4859/5280 LC) but leaves no headroom for a second
+- The full CPU FITS in UP5K (4836/5280 LC) but leaves no headroom for a second
   16 KB cache; the FPGA build is the same CPU, just 32 MB backing RAM is not
   on-FPGA (FPGA runs its small built-in program, `fpga_test` proves it).
 - FPGA counters are 32-bit truncated at rollover (carry guarded `ifdef FPGA`);

@@ -23,7 +23,7 @@ jobs:
             gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf libsdl2-dev python3 make
           verilator --version; yosys -V; riscv64-unknown-elf-gcc --version | head -n 1
 
-      - name: Fetch riscv-tests and CoreMark (make deps)
+      - name: Fetch riscv-tests, CoreMark and FreeRTOS (make deps)
         run: make deps
 
       - name: Directed + official + random tests (memory latency 1)
@@ -44,9 +44,12 @@ jobs:
       - name: CoreMark
         run: make coremark
 
+      - name: FreeRTOS (tasks, queue, mutex, preemption, software timer)
+        run: make freertos
+
       - name: FPGA build for iCE40 UP5K (must meet 13 MHz)
         run: |
-          make fpga_full FPGA_FREQ=13 FPGA_SEED=7
+          make fpga_full FPGA_FREQ=13 FPGA_SEED=4
           grep -q "PASS at 13.00 MHz" build/cpu_full_route.log
 
   agent:
