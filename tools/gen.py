@@ -27,6 +27,10 @@ def J(off, rd, opc):
 def U(imm, rd, opc):
     return ((imm & 0xFFFFF) << 12) | (rd << 7) | opc
 
+def AMO(f5, r2, r1, rd):
+    # word atomics: f3=010, aq/rl=0, no offset (addr = r1 + 0)
+    return (f5 << 27) | (r2 << 20) | (r1 << 15) | (0x2 << 12) | (rd << 7) | 0x2F
+
 def NOP():
     return I(0, 0, 0, 0, 0x13)
 
@@ -81,7 +85,9 @@ KINDS = (
     'lb', 'lh', 'lw', 'lbu', 'lhu', 'sb', 'sh', 'sw',
     'addi', 'slti', 'sltiu', 'xori', 'ori', 'andi', 'slli', 'srli', 'srai',
     'add', 'sub', 'sll', 'slt', 'sltu', 'xor', 'srl', 'sra', 'and', 'or', 'fence',
-    'mul', 'mulh', 'mulhsu', 'mulhu', 'div', 'divu', 'rem', 'remu')
+    'mul', 'mulh', 'mulhsu', 'mulhu', 'div', 'divu', 'rem', 'remu',
+    'amoadd', 'amoand', 'amoswap', 'amoor', 'amoxor', 'amomax', 'amomaxu',
+    'amomin', 'amominu', 'lr', 'sc')
 
 def emit(kind, idx):
     d = rdreg()
@@ -179,6 +185,12 @@ def emit(kind, idx):
         return R(1, b, a, 6, d, 0x33)
     if kind == 'remu':
         return R(1, b, a, 7, d, 0x33)
+    if kind in ('lr', 'sc'):
+        return AMO(0x02 if kind == 'lr' else 0x03, a if kind == 'sc' else 0, 28, d)
+    if kind.startswith('amo'):
+        f5 = {'amoadd': 0, 'amoand': 0xC, 'amoswap': 1, 'amoor': 8, 'amoxor': 4,
+              'amomin': 0x10, 'amomax': 0x14, 'amominu': 0x18, 'amomaxu': 0x1C}[kind]
+        return AMO(f5, a, 28, d)
     return I(0, 0, 0, 0, 0x0f)
 
 for i in range(Bn):

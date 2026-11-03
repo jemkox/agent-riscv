@@ -26,6 +26,15 @@ module cache32 (
   input  logic [31:0] ea,
   input  logic [31:0] sd_raw,
   input  logic [1:0]  ssz,
+`ifndef FPGA
+  // Atomics (LR/SC/AMO*.w): processed with the load; the op(old,src) store is
+  // performed at the load-completion cycle inside this device (sim CPU only;
+  // reservation tracked here: LR sets, SC consumes, matching store clears).
+  input  logic        amo_v, amo_lr, amo_sc,
+  input  logic [4:0]  amo5,
+  input  logic [31:0] amo_new,
+  output logic        amo_sc_ok,
+`endif
   output logic [31:0] ld_raw,
 `ifdef DOOM_BIG
   // M10f keyboard FIFO feed for DG_GetKey (C++ testbench writes it each
@@ -94,6 +103,11 @@ module cache32 (
   logic [31:0] dc_ptag = 32'h0;
   int ic_count = 0;
   int dc_count = 0;
+`ifndef FPGA
+  logic res_v = 1'b0;
+  logic [31:0] res_a = 32'h0;
+  logic amo_done_now, amo_sc_done, amo_ok_now;
+`endif
   int i_idx, i_tag, i_mbase;
   int d_idx, d_tag, d_off, d_cache_base, sb;
   int w0, sft, msk, nby;
@@ -173,6 +187,12 @@ module cache32 (
                    key_load || key_store ||
 `endif
                    (LAT == 1);
+`ifndef FPGA
+    amo_done_now = dreq && amo_v && dc_ready_now && !clint_match;
+    amo_sc_done  = amo_done_now && amo_sc;
+    amo_ok_now   = amo_sc_done && res_v && (res_a == ea);
+    amo_sc_ok    = amo_ok_now;
+`endif
 
     fetch_ready = (reset || halt) ? 1'b1 : ic_ready_now;
     fetch_insn  = ic_ready_now ? (ic_hit ? rb_ic(pc_if) : rbwb(pc_if)) : 32'h0;
@@ -186,9 +206,13 @@ module cache32 (
               )
 `endif
              );
+`ifdef FPGA
     ld_raw = dc_ready_now ? (clint_load ? clint_ld_in : ld_norm) : 32'h0;
-    clint_commit = clint_store && dc_ready_now;
-  end
+`else
+    ld_raw = dc_ready_now ? (clint_load ? clint_ld_in :
+                   amo_sc_done ? (amo_ok_now ? 32'h0 : 32'h1) : ld_norm) : 32'h0;
+`endif
+    clint_commit = clint_store && dc_ready_now;  end
 `ifdef DOOM_BIG
   assign key_hit = key_load && dc_ready_now;
 `endif
@@ -292,6 +316,40 @@ module cache32 (
                 dc_tag[d_idx] = d_tag;
               end
             end
+`ifndef FPGA
+            if (idex_st) begin
+              if (ea == res_a) res_v <= 1'b0;   // matching store clears the LR reservation
+            end
+            if (amo_done_now) begin
+`ifdef SCDBG
+              $display("DBG AMO ea=%08x v=%0d lr=%0d sc=%0d ok=%0d", ea, amo_v, amo_lr, amo_sc, amo_ok_now);
+`endif
+              if (amo_lr) begin
+                res_v <= 1'b1; res_a <= ea;
+              end else if (amo_sc) begin
+`ifdef SCDBG
+                $display("DBG SC ea=%08x res_v=%0d res_a=%08x ok=%0d", ea, res_v, res_a, amo_ok_now);
+`endif
+                res_v <= 1'b0;                   // SC loses the reservation either way
+                if (amo_ok_now) begin
+                  w0 = (ea >> 2) & (BACK_WORDS - 1);
+                  rw[w0] <= amo_new;
+                  if (d_off <= 12) dcw[d_idx*4+(d_off>>2)] <= amo_new;
+                  i_s = (ea >> LINE_SHIFT) & IC_MASK;
+                  i_t = ea >> (LOGIC + LINE_SHIFT);
+                  if (ic_ep[i_s] == epoch && ic_tag[i_s] == i_t) ic_ep[i_s] = 32'd0;
+                end
+              end else begin
+                if (res_a == ea) res_v <= 1'b0;
+                w0 = (ea >> 2) & (BACK_WORDS - 1);
+                rw[w0] <= amo_new;
+                if (d_off <= 12) dcw[d_idx*4+(d_off>>2)] <= amo_new;
+                i_s = (ea >> LINE_SHIFT) & IC_MASK;
+                i_t = ea >> (LOGIC + LINE_SHIFT);
+                if (ic_ep[i_s] == epoch && ic_tag[i_s] == i_t) ic_ep[i_s] = 32'd0;
+              end
+            end
+`endif
           end
           dc_pending <= 1'b0;
         end else if (!dc_pending && LAT > 1) begin

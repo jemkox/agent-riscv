@@ -28,6 +28,10 @@ module ctrl (
   output logic         is_ill,
   output logic         is_csr,      // Zicsr CSRRW/S/C and immediate forms
   output logic         is_wfi,      // WFI (0x10000073): waits until an IRQ is pending
+  output logic         is_amo,      // A: LR/SC/AMO*.w (simulation CPU only; FPGA: 0)
+  output logic         is_lr,       // LR.W
+  output logic         is_sc,       // SC.W
+  output logic [4:0]   amo5,        // AMO funct5 selector (i[31:27])
   output logic [11:0]  csr_num      // i[31:20]
 );
   logic [6:0] opc;
@@ -48,6 +52,17 @@ module ctrl (
                                      // keeps SYSTEM f3=0 decode shape for Fmax seed4)
 `else
   assign is_wfi   = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h100);
+`endif
+`ifndef FPGA
+  assign is_amo = (opc == 7'b0101111);   // A extension (sim CPU; not on the card)
+  assign is_lr  = is_amo && (i[31:27] == 5'b00010) && (i[24:20] == 5'd0) && (i[14:12] == 3'b010);
+  assign is_sc  = is_amo && (i[31:27] == 5'b00011) && (i[14:12] == 3'b010);
+`ifdef DBGCTRL
+  always_comb if (is_amo) $display("CTRLD i=%08x f5=%05b f3=%03b is_amo=%b is_sc=%b is_lr=%b", i, i[31:27], i[14:12], is_amo, is_sc, is_lr);
+`endif
+  assign amo5   = i[31:27];
+`else
+  assign is_amo = 1'b0; assign is_lr = 1'b0; assign is_sc = 1'b0; assign amo5 = 5'd0;
 `endif
   assign f3  = i[14:12];
   assign op7 = i[31:25];
@@ -114,6 +129,10 @@ module ctrl (
               (op7 != 7'b0000000)) is_ill = 1;
         end
       end
+`ifndef FPGA
+      7'b0101111: begin
+      end
+`endif
       7'b0001111: begin end                                             // FENCE
       7'b1110011: begin                                                  // SYSTEM / CSR
         case (f3)

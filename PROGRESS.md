@@ -1076,5 +1076,51 @@ DOOM CPU: DONE
   input recorded per number (deps/FreeRTOS-Kernel vs `../../downloads/FreeRTOS-Kernel` fallback),
   measured outputs pasted above; all semantic counters reproduce exactly.
 - Next per PROMPT.md L2: A extension (LR/SC + all AMO*.w) in ctrl/execute path, ISS 0x2F handler,
-  `tools/gen.py` random atomics coverage; `hdl make ua` gate.
+  `tools/gen.py` random atomics coverage; `hdl make ua` gate. -> DONE, see L2 section below.
+
+## L2: A extension atomics (2026-11-03)
+- `rtl/ctrl.sv`: is_amo/is_lr/is_sc/amo5 decode (opcode 7'b010_1111, f3=010; LR funct5 00010 with
+  rs2-field 0; SC 00011); under `ifdef FPGA` atomics stay ILLEGAL and outputs are 0.
+- Execute path: atomics complete at the load-completion cycle inside `rtl/cache32.sv` (LR sets
+  res_v/res_a, SC consumes with rd=0/1 via ld_raw override, AMO*.w stores op(old,rs2)); top_pipe
+  AMO-ALU case (amo_new) feeds it; a store to the reserved address clears res_v in RTL and ISS.
+- Hazards found by random regress (gen.py seeds): (1) consumer of an atomics producer read STALE
+  register values (seed 156: amoswap stored 8 instead of 0) -> load-use stall extended to
+  `exmem_ld || exmem_is_amo`, fwd read_b gate `|| ce_amo`, IF/ID operand-read gates `|| ceif_amo`;
+  (2) first attempt used i[24:20] as an LR imm -> ea=0x100c wrong; ISA atomics have NO offset
+  (those bits are rs2) -> idex_ea = a_ex for atomics.
+- `tools/gen.py` KINDS += amoadd/amoand/amoswap/amoor/amoxor/amomin/amomax/amominu/amomaxu/lr/sc;
+  funct5 map corrected to ISA (amomin 0x10, amomax 0x14, amominu 0x18, amomaxu 0x1C, LR 0x02, SC
+  0x03). ISS opcode-0x2F branch added with the same reservation mirror.
+- Directed test `tests/t19_amo.S`: producer->atomics forwarding (LR result consumed by AMO/SC
+  store value) + SC success AND SC-after-intervening-store failure path; own Makefile rule with
+  -march=rv32ima_zicsr (generic CCFLAGS has no `a`); TESTS += t19_amo + ISS --pass gate in `test`.
+- Makefile: regress and test rules now count `tools/gen.py` non-zero exit as an error (a gen.py
+  crash previously reused stale .hex and printed a false ALL PASS).
+- Linux-only hardware kept out of the card: ATOMIC localparam + `ifdef FPGA` source branches in
+  top_pipe/fwd/cache32 (stall term, LDX f3 select, idex_ea/sbe, AMO case/latch, ld_raw override,
+  fwd read/id-read gates, ctrl 0x2F case item).
+- Measured after the final guarded source (fresh runs): `hdl make ua` -> ALL UA PASS; `hdl make test`
+  -> ALL PASS (19 directed tests incl. t19_amo TEST PASSED (27 instrs) + ISS --pass, ui, um, rand
+  200 seeds with atomics); `all_tests` ALL TESTS DONE (doom `#RUN cycles=123801143 insns=112822612
+  frames=31 halt=0` unchanged, lat 1/5/20, m7, mi); `hdl make mi` -> ALL MI PASS; coremark
+  `3.193` CoreMark/MHz (156,610,941 cycles/500 it) unchanged; `freertos` PASS cycles=1124012 (this
+  tree, deps/FreeRTOS-Kernel input, ELF unchanged) with ticks=60 switches=185 queue=1275 mutex=40
+  spinners=86702/87261 callbacks=12; small FPGA `fpga_test` 23.96/23.05 MHz (PASS at 20.00 MHz),
+  build/fpga.out `TEST PASSED`.
+- FPGA honesty (fpga_full): the pre-atomics netlist (3840 SB_LUT4 + 549 SB_CARRY) measured 14.56/14.34
+  at seed4; the atomics-guarded netlist is slightly smaller (SB_LUT4 3815 + SB_CARRY 518, 8 SB_RAM40_4K,
+  1 SB_MAC16) but routes WORSE at the old tuned seed: FPGA_SEED=4 -> 12.98/12.94 FAIL at 13. Seeds 1-8
+  measured on the new netlist: only SEED=5 PASSES: 13.60/13.18 MHz (PASS at 13.00). Recorded as
+  fpga_full FPGA_FREQ=13 FPGA_SEED=5 PASS 13.60/13.18 MHz; seed4 FAIL 12.98/12.94 (seed luck was
+  tuned to the old netlist).
+### Metrics (L2, measured this session)
+| item | value |
+| UA | ALL UA PASS (10 official rv32ua tests, RTL==ISS, ISS self-check) |
+| test | ALL PASS: 19 directed + ui + um + 200 random seeds incl atomics |
+| all_tests | ALL TESTS DONE (doom 123,801,143 cycles unchanged) |
+| coremark | 3.193 CoreMark/MHz unchanged |
+| freertos | PASS, 1,124,012 cycles (deps input; range 1,124,012-1,124,204 cross-tree) |
+| fpga_full | seed5 13.60/13.18 MHz PASS (3815 LUT4 + 518 CARRY); seed4 12.98/12.94 FAIL (noted) |
+| fpga (small) | 23.96/23.05 MHz PASS at 20 MHz, TEST PASSED |
 

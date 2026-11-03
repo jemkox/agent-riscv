@@ -47,8 +47,18 @@ module top_pipe (
   logic [31:0] cs_old, cs_mtvec, idex_cs_old;
   logic [31:0] clint_ld;
   logic clint_commit, irq_pend, ce_wfi;
+  logic ce_amo, ce_lr, ce_sc, amo_sc_ok, exmem_sc_ok;
+  logic [4:0] ce_amo5;
+  logic [31:0] amo_new, exmem_amo_new;
+  logic exmem_is_amo, exmem_is_lr, exmem_is_sc, amo_log_wr;
+  logic ceif_amo;
+`ifdef FPGA
+  localparam ATOMIC = 0;   // atomics are Linux-only hardware; fold them out of the card
+`else
+  localparam ATOMIC = 1;
+`endif
   /* verilator lint_on UNUSED */
-  logic [3:0]  ce_alu_op, idex_sbe, exmem_sbe = 0, mwb_sbe = 0;
+  logic [3:0]  ce_alu_op, idex_sbe, idex_sbe_st, exmem_sbe = 0, mwb_sbe = 0;
   logic [1:0]  idex_ssz;
   logic [2:0]  ce_f3, exmem_f3 = 0, ce_m_op;
   logic        alu_eq, alu_slt_r, alu_slt_u, ld_ok, st_ok, idex_stop, idex_wben, idex_ld, idex_st;
@@ -83,6 +93,11 @@ module top_pipe (
              // are not valid yet, and a store would write a wrong address (it is redone after the stall).
              .idex_valid(idex_valid && !stall), .idex_ld(idex_ld), .idex_st(idex_st),
              .ea(idex_ea), .sd_raw(idex_sd_raw), .ssz(idex_ssz),
+`ifndef FPGA
+             .amo_v(idex_valid && ce_amo && !stall), .amo_lr(ce_lr && idex_valid && !stall),
+             .amo_sc(ce_sc && idex_valid && !stall), .amo5(ce_amo5),
+             .amo_new(amo_new), .amo_sc_ok(amo_sc_ok),
+`endif
              .ld_raw(ldx_raw), .mem_ready(mem_ready),
              .clint_commit(clint_commit), .clint_ld_in(clint_ld));
   /* verilator lint_off PINCONNECTEMPTY */
@@ -91,7 +106,8 @@ module top_pipe (
             .is_jal(ce_jal), .is_jalr(ce_jalr), .is_lui(ce_lui), .is_auipc(ce_auipc),
             .is_opi(ce_opi), .is_op(ce_op),              .is_sys(ce_sys), .is_fence(ce_fence),
              .is_m(ce_m), .m_op(ce_m_op),              .is_mret(ce_mret), .is_ill(ce_ill),
-             .is_csr(ce_csr), .csr_num(), .is_wfi(ce_wfi), .i(idex_insn));
+             .is_csr(ce_csr), .csr_num(), .is_wfi(ce_wfi),
+             .is_amo(ce_amo), .is_lr(ce_lr), .is_sc(ce_sc), .amo5(ce_amo5), .i(idex_insn));
 `ifdef FPGA
   mdiu_fpga MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
            .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
@@ -112,11 +128,17 @@ module top_pipe (
               .is_br(ceif_br), .is_jal(), .is_jalr(ceif_jalr),
                .is_lui(), .is_auipc(), .is_opi(ceif_opi), .is_op(ceif_op),
                .is_sys(), .is_fence(), .is_m(ceif_m), .m_op(),
-                .is_mret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .is_wfi(), .csr_num(), .i(ifid_insn));
+                .is_mret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .is_wfi(),
+                .is_amo(ceif_amo), .is_lr(), .is_sc(), .amo5(), .csr_num(), .i(ifid_insn));
   /* verilator lint_on PINCONNECTEMPTY */
-  ldst  LDST(.is_ld(ce_ld), .is_st(ce_st), .is_ill(ce_ill), .ld_ok(ld_ok), .st_ok(st_ok));
+  ldst  LDST(.is_ld(ce_ld), .is_st(ce_st), .is_amo(ce_amo), .is_ill(ce_ill), .ld_ok(ld_ok), .st_ok(st_ok));
   fwd   FWDD(.idex_valid(idex_valid), .ce_br(ce_br), .ce_jalr(ce_jalr), .ce_opi(ce_opi),
-             .ce_op(ce_op), .ce_csr(ce_csr), .ld_ok(ld_ok), .st_ok(st_ok), .ce_rs1(ce_rs1), .ce_rs2(ce_rs2),
+             .ce_op(ce_op), .ce_csr(ce_csr), .ld_ok(ld_ok), .st_ok(st_ok),
+`ifdef FPGA
+             .ce_rs1(ce_rs1), .ce_rs2(ce_rs2),
+`else
+             .ce_amo(ce_amo), .ce_rs1(ce_rs1), .ce_rs2(ce_rs2),
+`endif
              .idex_r1(idex_r1), .idex_r2(idex_r2),
              .exmem_valid(exmem_valid), .exmem_rd(exmem_rd), .exmem_wben(exmem_wben),
               .exmem_ld(exmem_ld), .exmem_st(exmem_st), .exmem_stop(exmem_stop),
@@ -124,6 +146,10 @@ module top_pipe (
              .mwb_wben(mwb_wben), .mwb_wv(mwb_wv),
              .ifid_valid(ifid_valid), .ifid_r1(rf_r1), .ifid_r2(rf_r2),
              .ceif_br(ceif_br), .ceif_jalr(ceif_jalr), .ceif_ld(ceif_ld), .ceif_st(ceif_st),
+`ifdef FPGA
+`else
+             .ceif_amo(ceif_amo),
+`endif
              .ceif_opi(ceif_opi), .ceif_op(ceif_op), .ceif_csr(ceif_csr), .ceif_rs1(ceif_rs1), .ceif_rs2(ceif_rs2),
              .a_ex(a_ex), .b_ex(b_ex), .read_a(read_a), .read_b(read_b),
              .ifid_r1_fwd(ifid_r1_fwd), .ifid_r2_fwd(ifid_r2_fwd));
@@ -144,9 +170,37 @@ module top_pipe (
     else aluB_ex = b_ex;
   end
 
+`ifdef FPGA
   assign idex_ea = alu_res;
+`else
+  assign idex_ea = ce_amo ? a_ex : alu_res;   // atomics have no offset (i[24:20] = rs2), rs1 forwarded
+`endif
+`ifdef FPGA
+  assign amo_new = 32'h0;   // atomics are Linux-only; FPGA card keeps this dead
+`else
+  always_comb begin // AMO result ALU (MEM-side store of op(old,src); sim CPU only)
+    case (ce_amo5)
+      5'b00000: amo_new = ldx_raw + b_ex;   // AMOADD
+      5'b00001: amo_new = b_ex;             // AMOSWAP
+      5'b00100: amo_new = ldx_raw ^ b_ex;   // AMOXOR
+      5'b01000: amo_new = ldx_raw | b_ex;   // AMOOR
+      5'b01100: amo_new = ldx_raw & b_ex;   // AMOAND
+      5'b10000: amo_new = ($signed(ldx_raw) < $signed(b_ex)) ? ldx_raw : b_ex; // AMOMIN
+      5'b10100: amo_new = ($signed(ldx_raw) > $signed(b_ex)) ? ldx_raw : b_ex; // AMOMAX
+      5'b11000: amo_new = (ldx_raw < b_ex) ? ldx_raw : b_ex;  // AMOMINU
+      5'b11100: amo_new = (ldx_raw > b_ex) ? ldx_raw : b_ex;  // AMOMAXU
+      5'b00011: amo_new = b_ex;            // SC.W: store value = rs2 (flag itself is ld_raw)
+      default:  amo_new = ldx_raw;
+    endcase
+  end
+`endif
   store  ST(.st_ok(st_ok), .ce_f3(ce_f3), .ea(idex_ea), .b_ex(b_ex),
-            .ssz(idex_ssz), .sd_raw(idex_sd_raw), .sd_log(idex_sd_log), .sbe(idex_sbe));
+            .ssz(idex_ssz), .sd_raw(idex_sd_raw), .sd_log(idex_sd_log), .sbe(idex_sbe_st));
+`ifdef FPGA
+  assign idex_sbe = idex_sbe_st;
+`else
+  assign idex_sbe = ce_amo ? 4'hF : idex_sbe_st;  // atomics: full-word store enable
+`endif
   branch BR(.idex_valid(idex_valid), .idex_stop(idex_stop), .ce_br(ce_br), .ce_ill(ce_ill),
             .ce_jal(ce_jal), .ce_jalr(ce_jalr), .ce_f3(ce_f3), .idex_pc(idex_pc),
             .a_ex(a_ex), .iimm(iimm), .bimm(bimm), .jimm(jimm),
@@ -175,8 +229,13 @@ module top_pipe (
   end
 
   always_comb begin
+`ifdef FPGA
     stall = exmem_valid && exmem_ld && (exmem_rd != 5'd0) &&
             ((read_a && (ce_rs1 == exmem_rd)) || (read_b && (ce_rs2 == exmem_rd)));
+`else
+    stall = exmem_valid && (exmem_ld || exmem_is_amo) && (exmem_rd != 5'd0) &&
+            ((read_a && (ce_rs1 == exmem_rd)) || (read_b && (ce_rs2 == exmem_rd)));
+`endif
     mem_pend = idex_valid && (idex_ld || idex_st) && !mem_ready;
     // WFI retires as a nop; a pending IRQ traps before it (mepc = WFI pc).
     m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend;
@@ -220,7 +279,23 @@ module top_pipe (
             .clint_commit(clint_commit), .clint_ld_data(clint_ld), .irq_pending(irq_pend),
             .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .mret_pc(mret_pc),
             .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_mtvec(cs_mtvec), .halt_out(halt_out));
+`ifdef FPGA
+  assign exmem_is_amo = 1'b0; assign exmem_is_lr = 1'b0; assign exmem_is_sc = 1'b0;
+  assign amo_log_wr   = 1'b0;
   ldext LDX(.f3(exmem_f3), .raw(exmem_ld_raw), .ext(ldx_ex));
+`else
+  assign exmem_is_amo = ATOMIC && (exmem_insn[6:0] == 7'b010_1111);
+  assign exmem_is_lr  = exmem_is_amo && exmem_insn[31:27] == 5'b00010 && exmem_insn[24:20] == 5'd0
+                        && exmem_f3 == 3'b010;
+  assign exmem_is_sc  = exmem_is_amo && exmem_insn[31:27] == 5'b00011 && exmem_f3 == 3'b010;
+  assign amo_log_wr   = exmem_is_amo && !exmem_is_lr && (!exmem_is_sc || exmem_sc_ok);
+  ldext LDX(.f3(exmem_is_amo ? 3'b010 : exmem_f3), .raw(exmem_ld_raw), .ext(ldx_ex));
+`endif
+`ifdef SCDBG
+  always_comb if (idex_valid && ce_amo)
+    $display("DBGTOP idex=%08x valid=%0d stall=%0d ce_sc=%0d ce_lr=%0d idex_ld=%0d idex_st=%0d",
+             idex_insn, idex_valid, stall, ce_sc, ce_lr, idex_ld, idex_st);
+`endif
   always_ff @(posedge clk) begin
     if (reset) begin
       pc_if <= 32'h0;
@@ -241,11 +316,19 @@ module top_pipe (
       mwb_valid <= exmem_valid;
       mwb_pc <= exmem_pc; mwb_insn <= exmem_insn; mwb_rd <= exmem_rd;
       mwb_wben <= exmem_wben && !exmem_stop;
-      mwb_wv <= exmem_csr_en ? cs_old : (exmem_stop ? 32'h0 : (exmem_ld ? ldx_ex : exmem_wbval));
+      mwb_wv <= exmem_csr_en ? cs_old : (exmem_stop ? 32'h0
+               : ((exmem_ld || exmem_is_amo) ? ldx_ex : exmem_wbval));
       mwb_stop <= exmem_stop;
-      mwb_st <= exmem_st && !exmem_stop;
-      mwb_sa <= exmem_ea; mwb_sd <= exmem_sd_log; mwb_sbe <= exmem_sbe;
+      mwb_st <= (exmem_st || (exmem_is_amo && amo_log_wr)) && !exmem_stop;
+      mwb_sa <= exmem_ea;
+      mwb_sd <= exmem_is_amo ? exmem_amo_new : exmem_sd_log;
+      mwb_sbe <= exmem_sbe;
       exmem_ld_raw <= ldx_raw;
+`ifdef FPGA
+      exmem_amo_new <= 32'h0; exmem_sc_ok <= 1'b0;
+`else
+      exmem_amo_new <= ATOMIC ? amo_new : 32'h0; exmem_sc_ok <= ATOMIC ? amo_sc_ok : 1'b0;
+`endif
 
       if (mem_pend) begin
         exmem_valid <= 1'b0; idex_valid <= idex_valid; idex_m_done <= idex_m_done;

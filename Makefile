@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -112,6 +112,12 @@ build/%.o: tests/%.S | build
 	$(CC) $(CCFLAGS) -c $< -o build/$*.rvo
 	$(OC) -O elf32-littleriscv build/$*.rvo $@
 
+# t19: atomics need the A extension (rv32ima) in the assembler march
+T19_CCFLAGS := -march=rv32ima_zicsr -mabi=ilp32
+build/t19_amo.o: tests/t19_amo.S | build
+	$(CC) $(T19_CCFLAGS) -c $< -o build/t19_amo.rvo
+	$(OC) -O elf32-littleriscv build/t19_amo.rvo $@
+
 build/%.elf: build/%.o tests/link.ld | build
 	$(CC) $(CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
 
@@ -186,6 +192,7 @@ test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(U
 	 done; \
 	 python3 iss/iss.py --quiet --pass build/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass build/t18_wfi.bin > /dev/null || { echo "t18_wfi: self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
+	 python3 iss/iss.py --quiet --pass build/t19_amo.bin > /dev/null || { echo "t19_amo: atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
 	 for n in $(UI_NAMES); do \
 	 cp build/ui/$$n.hex build/p.hex; ./build/vlt/run_hex > build/ui/logs/$$n.rtl.log; \
 	 python3 iss/iss.py --quiet --pass --log build/ui/logs/$$n.iss.log build/ui/$$n.bin > /dev/null; \
@@ -197,7 +204,7 @@ test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(U
 	 python3 tools/cmp.py build/um/logs/$$n.rtl.log build/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
 	 for i in $(shell seq 1 $(N)); do \
-	 python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; \
+ 	 python3 tools/gen.py $$i build/rand/p$$i > /dev/null || bad=$$((bad+1)); cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; \
 	 python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; \
 	 python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
@@ -243,7 +250,7 @@ ua: $(UA_BINS) $(UA_HEXES) build/vlt/run_hex | need_rvtests build/ua build/ua/lo
 	@bad=0;   for n in $(UA_NAMES); do     cp build/ua/$$n.hex build/p.hex;     ./build/vlt/run_hex > build/ua/logs/$$n.rtl.log;     python3 iss/iss.py --quiet --pass --log build/ua/logs/$$n.iss.log build/ua/$$n.bin > /dev/null || bad=$$((bad+1));     python3 tools/cmp.py build/ua/logs/$$n.rtl.log build/ua/logs/$$n.iss.log > /dev/null || bad=$$((bad+1));   done;   if [ $$bad -eq 0 ]; then echo ALL UA PASS; else echo "UA TEST FAILED: $$bad errors"; exit 1; fi
 
 regress: build/vlt/run_hex
-	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
+	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null || bad=$$((bad+1)); cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
 
 TB_MMIO := tb/run_mmio.sv
 M7_NAMES := hello fib sort matmul bench

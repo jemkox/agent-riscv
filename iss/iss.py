@@ -99,6 +99,7 @@ def main(argv):
         r = abs(a) % abs(b)
         return -r if a < 0 else r
     stopped = 0
+    res_v = False; res_a = 0   # LR/SC reservation (rv32A, sim CPU)
     while steps < LIM:
         a = pc & 0x3FFFF
         ins = int.from_bytes(mem[a:a+4],'little')
@@ -149,6 +150,38 @@ def main(argv):
             elif f3 == 5: wv = (sx(a0,32) >> sh) if neg else ((a0&0xFFFFFFFF) >> sh)
             elif f3 == 6: wv = a0 | iimm
             else:         wv = a0 & iimm
+        elif opc == 0x2F: # LR/SC/AMO* (A ext; aligned words; aq/rl ignored)
+            ea = a0
+            f5 = (ins >> 27) & 0x1F
+            if ea & 3 or f3 != 2:
+                cause = 4; illegal = True
+            elif f5 == 0x02 and ((ins >> 20) & 0x1F) == 0:  # LR.W (funct5 00010, rs2 field 0)
+                wv = rw(ea)
+                res_v = True; res_a = ea
+            elif f5 == 0x03:               # SC.W (funct5 00011)
+                ok = res_v and res_a == ea
+                if ok:
+                    w32(ea, a1)
+                    slog = (1, ea, a1 & mask, 0xF)
+                res_v = False
+                wv = 0 if ok else 1
+            elif f5 in (0x00,0x01,0x04,0x08,0x0C,0x10,0x14,0x18,0x1C):  # AMO*.W
+                old_v = rw(ea)
+                if   f5 == 0x00: new = (old_v + a1) & mask
+                elif f5 == 0x01: new = a1 & mask
+                elif f5 == 0x04: new = (old_v ^ a1) & mask
+                elif f5 == 0x08: new = (old_v | a1) & mask
+                elif f5 == 0x0C: new = (old_v & a1) & mask
+                elif f5 == 0x10: new = old_v if sx(old_v,32) < sx(a1,32) else a1
+                elif f5 == 0x14: new = old_v if sx(old_v,32) > sx(a1,32) else a1
+                elif f5 == 0x18: new = old_v if old_v < a1 else a1
+                else:            new = old_v if old_v > a1 else a1
+                w32(ea, new)
+                if res_a == ea: res_v = False
+                slog = (1, ea, new & mask, 0xF)
+                wv = old_v
+            else:
+                illegal = True
         elif opc == 0x03: # LOAD
             ea = (a0 + iimm) & 0xFFFFFFFF
             clw = clint_off(ea)
@@ -273,6 +306,7 @@ def main(argv):
         if st:
             wid, ea, v = st
             off = clint_off(ea)
+            if off is None and ea == res_a: res_v = False   # matching store drops the reservation
             if off is not None:
                 if off == 0x0:     msip = v & 1
                 elif off == 0x800: mtpcmp = (mtpcmp & ~mask) | (v & mask)
