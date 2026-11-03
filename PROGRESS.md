@@ -1020,3 +1020,31 @@ DOOM CPU: DONE
   FPGA_SEED=4` PASS 13.28 MHz, small FPGA 23.05 MHz.
 - How to run: `hdl make test`, `hdl make mi`, `hdl make all_tests`, `hdl make coremark`, `hdl make
   freertos`, `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4`.
+
+## Review fixes on 68b4a28 (2026-11-03)
+- `env/mi/riscv_test.h` `RVTEST_FAIL` now encodes like upstream/ui: `slli gp,gp,1; ori gp,gp,1;
+  li t0,1; csrw 0x3ff,t0` (odd XHALT exit; MI test numbers keep parity of the test id).
+- `csrr mip` (0x308) implemented: `clint_dev.sv` exports `mip_out` (bit3 MSI, bit7 MTI; the
+  execute-point view `mt_next = st_mtime + retire_en`); `csrs.sv` reads it under CSR 0x308 in both
+  read views (cs/idex), writes to mip ignored; ISS mirrors with
+  `old = ((mtime+1) >= mtpcmp) << 7 | (msip&1) << 3` and drops mip writes. All mip wiring is
+  `ifndef FPGA`-guarded so the FPGA netlist is untouched (no CLINT/IRQ/mip on the card).
+- Directed test `tests/t18_wfi.S` (in `TESTS`): WFI = `.word 0x10000073` (SYSTEM f3=0 csr 0x100;
+  note 0x00100073 is EBREAK). With mtimecmp=0 + mie.MTIE + mstatus.MIE the wfi traps AT its own pc
+  (mepc = wfi pc, mcause = 0x8000_0007, logged in the handler), mip reads 0x80 in the handler,
+  handler pushes mtimecmp to 0xFFFFFFFF_FFFFFFFF and mrets; the same wfi re-executes with no IRQ
+  pending and retires as a NOP (mcycle pair proves counters tick across it, mip then reads 0).
+  ISS/RTL log equality passes (36 instrs); note gas quirk found: `csrr t7,0xb00`/`.word` wrong
+  constants cost two rounds; mcycle read via `csrr t3,mcycle` with t1/t3 (t7/t8 rejected by this
+  gas for read-only CSRs).
+- `ifdef FPGA` in `rtl/ctrl.sv` KEPT, with evidence: without it the same seed4 measures 13.10
+  (pass line 1) but final report 12.80 FAIL; with ifdef + mip-guarded netlist seed4 measures
+  14.56/14.34 MHz PASS (3840 LUT4 + 549 CARRY). The README "Honest limits" states CLINT/mip/WFI/
+  interrupts are simulation-CPU-only and the FPGA SYSTEM decoder treats csr 0x100 as illegal.
+- Measured after fixes (fresh reruns): `make test` ALL PASS incl. t18; `all_tests` ALL TESTS DONE
+  (incl. m7 + doom #RUN cycles=123801143 insns=112822612 frames=31, regress 500); coremark `3.193`
+  CoreMark/MHz, 156,610,941 cycles/500 it; `freertos` FREERTOS PASS ticks=60 switches=185 queue=1275
+  mutex=40 spinners=86702/87261 callbacks=12, 1,124,012 cycles; `fpga_full FPGA_FREQ=13 FPGA_SEED=4`
+  `Info ... 14.56 MHz (PASS)` + `Info ... 14.34 MHz (PASS)`, 3840 LUT4 + 549 CARRY, 8 SB_RAM40_4K,
+  1 SB_MAC16; small FPGA 23.05 MHz PASS at 20 MHz.
+

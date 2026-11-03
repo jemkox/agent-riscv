@@ -290,8 +290,10 @@ else's part:
 - Simulation speed peaked at 5.8M cycles/s; a 15M target was attempted and missed
   (attempts recorded in `PROGRESS.md`).
 - No atomics (A), no supervisor/user mode, no MMU, so no Linux yet. The
-  interrupt model is simplified (no standard `MIE`/`mie`/`mip`, timer in CSRs);
-  it is enough for FreeRTOS with its own port, but Linux will need the standard one.
+  CLINT device, `mip`/`WFI` and M-mode interrupts exist only in the simulation
+  CPU; the FPGA top (`fpga_pipe_top`) has no CLINT and no interrupts (under
+  `ifdef FPGA` WFI never executes and the FPGA SYSTEM decoder keeps its Fmax
+  shape where csr 0x100 is illegal).
 - The formal proof covers pipeline invariants, not full ISA equivalence.
 - The FPGA build truncates the 64-bit counters to 32 bits.
 

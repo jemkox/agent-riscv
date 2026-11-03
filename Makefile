@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32

@@ -231,7 +231,10 @@ def main(argv):
                 if irq_p:
                     pc = do_irq(); steps += 1
                     continue
-                old = cs_get(csr_num)
+                if csr_num == 0x308:   # mip: live bits, post-tick view like the RTL
+                    old = (((mtime + 1) >= mtpcmp) << 7) | ((msip & 1) << 3)
+                else:
+                    old = cs_get(csr_num)
                 if f3 == 1: newv = a0
                 elif f3 == 2: newv = a0 | old
                 elif f3 == 3: newv = old & ((~a0) & mask)
@@ -245,7 +248,7 @@ def main(argv):
                 retire_counters(xret_write)
                 if rd: reg[rd] = old
                 lines.append((pc,ins,rd, old & mask, 0,0,0,0))
-                if wena: cs_set(csr_num,newv)
+                if wena and csr_num != 0x308: cs_set(csr_num,newv)
                 if (csr_num == 0x3ff) and (newv & 1):
                     stopped = 1
                     break

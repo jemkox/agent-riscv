@@ -24,6 +24,9 @@ module csrs (
   input  logic        idex_read_en,
   input  logic [11:0] idex_rsel,
   output logic [31:0] cs_old_idex,
+`ifndef FPGA
+  input  logic [31:0] mip_in,       // live CLINT mip bits (MSI/MTI); writes are ignored
+`endif
   output logic [31:0] mstatus_next,
   output logic [31:0] mie_next,
   output logic [31:0] mtvec_next,
@@ -45,6 +48,9 @@ module csrs (
   localparam CSR_MSCRATCH  = 12'h340;
   localparam CSR_MISA      = 12'h301;
   localparam CSR_MIE       = 12'h304;
+`ifndef FPGA
+  localparam CSR_MIP       = 12'h308;   // read-only live mip (bit3 MSI, bit7 MTI)
+`endif
   localparam MSTATUS_MPP   = 32'h0000_1800;
 
   logic [31:0] st_mscratch = 0;
@@ -86,6 +92,9 @@ module csrs (
             | (cs_rsel == CSR_MSCRATCH ? st_mscratch : 32'h0)
             | (cs_rsel == CSR_MISA     ? st_misa : 32'h0)
             | (cs_rsel == CSR_MIE      ? st_mie : 32'h0)
+`ifndef FPGA
+            | (cs_rsel == CSR_MIP      ? mip_in : 32'h0)
+`endif
             | (cs_rsel == CSR_MCYCLE   ? mc_ref : 32'h0)
             | (cs_rsel == CSR_MINSTRT || cs_rsel == CSR_INSTRET ? min_ref : 32'h0)
             | (cs_rsel == CSR_MINSTRT_H || cs_rsel == CSR_INSTRET_H ? minh_ref : 32'h0)
@@ -154,6 +163,9 @@ module csrs (
             | (idex_rsel == CSR_MSCRATCH ? st_mscratch : 32'h0)
             | (idex_rsel == CSR_MISA     ? st_misa : 32'h0)
             | (idex_rsel == CSR_MIE      ? after_mie : 32'h0)
+`ifndef FPGA
+            | (idex_rsel == CSR_MIP      ? mip_in : 32'h0)
+`endif
             | (idex_rsel == CSR_MCYCLE   ? after_mcycle : 32'h0)
             | (idex_rsel == CSR_MINSTRT || idex_rsel == CSR_INSTRET ? after_minstret : 32'h0)
             | (idex_rsel == CSR_MINSTRT_H || idex_rsel == CSR_INSTRET_H ? after_minstret_hi : 32'h0)

@@ -44,7 +44,8 @@ module ctrl (
   assign is_fence = (opc == 7'b0001111);
   assign is_mret  = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h302);
 `ifdef FPGA
-  assign is_wfi   = 1'b0;           // FPGA never executes WFI (no OS on the card)
+  assign is_wfi   = 1'b0;           // FPGA never executes WFI (no OS on the card;
+                                     // keeps SYSTEM f3=0 decode shape for Fmax seed4)
 `else
   assign is_wfi   = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h100);
 `endif

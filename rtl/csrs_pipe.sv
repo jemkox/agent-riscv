@@ -47,6 +47,9 @@ module csrs_pipe (
   logic [31:0] trap_cause, irq_cause;
   logic [31:0] mstatus_next, mie_next, mtvec_next, mepc_next;
   logic [31:0] insn_cause;
+`ifndef FPGA
+  logic [31:0] clint_mip;
+`endif
 
   csrs CSRS(.clk(clk), .reset(reset), .halt_in(halt),
             .trap_en(trap_en), .trap_pc(idex_pc), .trap_cause(trap_cause),
@@ -57,6 +60,9 @@ module csrs_pipe (
             .cs_wsel(exmem_insn[31:20]), .cs_winsn(exmem_insn), .cs_wop(exmem_f3),
             .cs_wrs1(exmem_r1), .retire_en(exmem_valid && !halt && !reset),
             .idex_read_en(idex_valid && ce_csr), .idex_rsel(idex_insn[31:20]), .cs_old_idex(idex_cs_old),
+`ifndef FPGA
+            .mip_in(clint_mip),
+`endif
             .mstatus_next(mstatus_next), .mie_next(mie_next), .mtvec_next(mtvec_next),
             .mepc_next(mepc_next), .halt_out(halt_out));
 
@@ -64,7 +70,11 @@ module csrs_pipe (
             .retire_en(exmem_valid && !halt && !reset),
             .commit(clint_commit), .ea(idex_ea), .wdata(idex_sd_raw),
             .mstatus_in(mstatus_next), .mie_in(mie_next),
-            .ld_data(clint_ld_data), .pending(irq_pending), .cause(irq_cause));
+            .ld_data(clint_ld_data), .pending(irq_pending), .cause(irq_cause)
+`ifndef FPGA
+            ,.mip_out(clint_mip)
+`endif
+            );
 
   always_comb begin
     idex_ld = idex_valid && ld_ok;

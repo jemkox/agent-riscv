@@ -18,6 +18,9 @@ module clint_dev (
   output logic [31:0] ld_data,
   output logic        pending,
   output logic [31:0] cause
+`ifndef FPGA
+  ,output logic [31:0] mip_out
+`endif
 );
   localparam logic [31:0] CLINT_BASE = 32'h0200_0000;
 
@@ -37,6 +40,7 @@ module clint_dev (
   wire        msie    = st_msip[0];
   wire [31:0] mip     = ({mtie ? 32'd1 : 32'd0} << 7) |
                         ({msie ? 32'd1 : 32'd0} << 3);
+  assign mip_out = mip;
   wire [31:0] sel     = mie_in & mip;
   wire        match   = ((ea & 32'hFFFFF000) == CLINT_BASE);
 
