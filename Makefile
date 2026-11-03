@@ -21,7 +21,7 @@ FREERTOS_TAG ?= V11.2.0
 WAD_SHA1 := 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d
 RVTEST_DIR ?= $(firstword $(wildcard deps/riscv-tests/isa ../../downloads/riscv-tests/isa) deps/riscv-tests/isa)
 COREMARK_DIR ?= $(firstword $(wildcard deps/coremark ../../downloads/coremark) deps/coremark)
-FREERTOS_DIR ?= deps/FreeRTOS-Kernel
+FREERTOS_DIR ?= $(firstword $(wildcard deps/FreeRTOS-Kernel ../../downloads/FreeRTOS-Kernel) deps/FreeRTOS-Kernel)
 WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.wad) deps/doom1.wad)
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
@@ -47,8 +47,14 @@ MI_NAMES := breakpoint csr illegal instret_overflow lh-misaligned lw-misaligned 
 MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
+UA_DIR := $(RVTEST_DIR)/rv32ua
+UA_CCFLAGS := -march=rv32im_a_zicsr_zifencei -mabi=ilp32
+UA_MACROS := $(RVTEST_DIR)/macros/scalar
+UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amoswap_w amoxor_w lrsc
+UA_HEXES := $(foreach n,$(UA_NAMES),build/ua/$(n).hex)
+UA_BINS := $(foreach n,$(UA_NAMES),build/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full build/vlt/run_hex build/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test all_tests play play_test doom_mem doom_probe doom_elf fpga_full ua build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -95,6 +101,12 @@ build/mi:
 
 build/mi/logs:
 	@mkdir -p build/mi/logs
+
+build/ua:
+	@mkdir -p build/ua
+
+build/ua/logs:
+	@mkdir -p build/ua/logs
 
 build/%.o: tests/%.S | build
 	$(CC) $(CCFLAGS) -c $< -o build/$*.rvo
@@ -148,6 +160,20 @@ build/mi/%.bin: build/mi/%.elf | build/mi
 build/mi/%.hex: build/mi/%.bin | build/mi
 	python3 tools/bin2hex.py $< $@
 
+build/ua/%.o: $(UA_DIR)/%.S env/riscv_test.h | build/ua
+	$(CC) $(UA_CCFLAGS) -c $< -I env -I $(UA_MACROS) -o build/ua/$*.rvo
+	$(OC) -O elf32-littleriscv build/ua/$*.rvo $@
+
+build/ua/%.elf: build/ua/%.o tests/link.ld | build/ua
+	$(CC) $(UA_CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
+
+build/ua/%.bin: build/ua/%.elf | build/ua
+	$(OC) -O binary $< $@
+
+build/ua/%.hex: build/ua/%.bin | build/ua
+	python3 tools/bin2hex.py $< $@
+
+
 build/sim_%.vvp: $(RTL) $(TB) | build
 	iverilog -g2012 -Wall -DTBHEX='"build/$*.hex"' -DTOPPIPE -o build/sim_$*.vvp $(RTL) $(TB)
 
@@ -159,6 +185,7 @@ test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(U
 	 python3 tools/cmp.py build/$$t.rtl.log build/$$t.iss.log || bad=$$((bad+1)); \
 	 done; \
 	 python3 iss/iss.py --quiet --pass build/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
+	 python3 iss/iss.py --quiet --pass build/t18_wfi.bin > /dev/null || { echo "t18_wfi: self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
 	 for n in $(UI_NAMES); do \
 	 cp build/ui/$$n.hex build/p.hex; ./build/vlt/run_hex > build/ui/logs/$$n.rtl.log; \
 	 python3 iss/iss.py --quiet --pass --log build/ui/logs/$$n.iss.log build/ui/$$n.bin > /dev/null; \
@@ -211,6 +238,9 @@ mi: $(MI_BINS) $(MI_HEXES) build/vlt/run_hex | need_rvtests build/mi build/mi/lo
     python3 tools/cmp.py build/mi/logs/$$n.rtl.log build/mi/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
   if [ $$bad -eq 0 ]; then echo ALL MI PASS; else echo "MI TEST FAILED: $$bad errors"; exit 1; fi
+
+ua: $(UA_BINS) $(UA_HEXES) build/vlt/run_hex | need_rvtests build/ua build/ua/logs
+	@bad=0;   for n in $(UA_NAMES); do     cp build/ua/$$n.hex build/p.hex;     ./build/vlt/run_hex > build/ua/logs/$$n.rtl.log;     python3 iss/iss.py --quiet --pass --log build/ua/logs/$$n.iss.log build/ua/$$n.bin > /dev/null || bad=$$((bad+1));     python3 tools/cmp.py build/ua/logs/$$n.rtl.log build/ua/logs/$$n.iss.log > /dev/null || bad=$$((bad+1));   done;   if [ $$bad -eq 0 ]; then echo ALL UA PASS; else echo "UA TEST FAILED: $$bad errors"; exit 1; fi
 
 regress: build/vlt/run_hex
 	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null; cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi

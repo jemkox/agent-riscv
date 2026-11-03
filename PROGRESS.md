@@ -1020,6 +1020,11 @@ DOOM CPU: DONE
   FPGA_SEED=4` PASS 13.28 MHz, small FPGA 23.05 MHz.
 - How to run: `hdl make test`, `hdl make mi`, `hdl make all_tests`, `hdl make coremark`, `hdl make
   freertos`, `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4`.
+- Deps/external inputs: `deps/` (riscv-tests + coremark-doom + FreeRTOS-Kernel V11.2.0) is gitignored
+  and made by `make deps`, which needs network (absent in the sandbox); ui/um/mi/coremark/doom fall
+  back to `../../downloads/riscv-tests` (etc.), and `freertos` now falls back to
+  `../../downloads/FreeRTOS-Kernel` (pinned V11.2.0 fetched this session), so a fresh network-less
+  clone can build `freertos` (reviewer had to pass `FREERTOS_DIR=...` before this fallback existed).
 
 ## Review fixes on 68b4a28 (2026-11-03)
 - `env/mi/riscv_test.h` `RVTEST_FAIL` now encodes like upstream/ui: `slli gp,gp,1; ori gp,gp,1;
@@ -1037,14 +1042,19 @@ DOOM CPU: DONE
   ISS/RTL log equality passes (36 instrs); note gas quirk found: `csrr t7,0xb00`/`.word` wrong
   constants cost two rounds; mcycle read via `csrr t3,mcycle` with t1/t3 (t7/t8 rejected by this
   gas for read-only CSRs).
-- `ifdef FPGA` in `rtl/ctrl.sv` KEPT, with evidence: without it the same seed4 measures 13.10
-  (pass line 1) but final report 12.80 FAIL; with ifdef + mip-guarded netlist seed4 measures
-  14.56/14.34 MHz PASS (3840 LUT4 + 549 CARRY). The README "Honest limits" states CLINT/mip/WFI/
+- `ifdef FPGA` in `rtl/ctrl.sv` KEPT as a safety margin: the review reruns of the no-guard variant
+  at seed4 measured 13.78 and 13.91 MHz, both PASS (the earlier "13.10 / 12.80 FAIL" numbers could
+  not be reproduced and were dropped); with ifdef + mip-guarded netlist seed4 measures 14.56/14.34
+  MHz PASS (3840 LUT4 + 549 CARRY). Evidence: reviews/rv32cpu-21bc66c.md. The README "Honest limits" states CLINT/mip/WFI/
   interrupts are simulation-CPU-only and the FPGA SYSTEM decoder treats csr 0x100 as illegal.
 - Measured after fixes (fresh reruns): `make test` ALL PASS incl. t18; `all_tests` ALL TESTS DONE
   (incl. m7 + doom #RUN cycles=123801143 insns=112822612 frames=31, regress 500); coremark `3.193`
   CoreMark/MHz, 156,610,941 cycles/500 it; `freertos` FREERTOS PASS ticks=60 switches=185 queue=1275
-  mutex=40 spinners=86702/87261 callbacks=12, 1,124,012 cycles; `fpga_full FPGA_FREQ=13 FPGA_SEED=4`
+  mutex=40 spinners=86702/87261 callbacks=12 with 1,124,012 cycles (re-measured twice on this tree,
+  incl. once after deleting all `build/bench/freertos*` artifacts; the independent review clone
+  measured 1,124,191 on a different ELF layout - its `.text` 0x59f0/`.data` 0x4a0 vs this tree's
+  0x5a00/0x3d8, a 179-cycle difference left unexplained, see reviews/rv32cpu-21bc66c.md);
+  `fpga_full FPGA_FREQ=13 FPGA_SEED=4`
   `Info ... 14.56 MHz (PASS)` + `Info ... 14.34 MHz (PASS)`, 3840 LUT4 + 549 CARRY, 8 SB_RAM40_4K,
   1 SB_MAC16; small FPGA 23.05 MHz PASS at 20 MHz.
 
