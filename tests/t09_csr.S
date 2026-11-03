@@ -13,4 +13,4 @@ _start:
   csrrw x0,0x705,t2
   csrr t3,0x705
   sw t3,4(t0)
-  ebreak
+  addi x30,x0,1; csrrw x0,0x3ff,x30

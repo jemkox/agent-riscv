@@ -27,6 +27,7 @@ module ctrl (
   output logic         is_mret,
   output logic         is_ill,
   output logic         is_csr,      // Zicsr CSRRW/S/C and immediate forms
+  output logic         is_wfi,      // WFI (0x10000073): waits until an IRQ is pending
   output logic [11:0]  csr_num      // i[31:20]
 );
   logic [6:0] opc;
@@ -42,6 +43,11 @@ module ctrl (
   assign is_op    = (opc == 7'b0110011);
   assign is_fence = (opc == 7'b0001111);
   assign is_mret  = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h302);
+`ifdef FPGA
+  assign is_wfi   = 1'b0;           // FPGA never executes WFI (no OS on the card)
+`else
+  assign is_wfi   = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h100);
+`endif
   assign f3  = i[14:12];
   assign op7 = i[31:25];
   assign rs1 = i[19:15];
@@ -111,10 +117,17 @@ module ctrl (
       7'b1110011: begin                                                  // SYSTEM / CSR
         case (f3)
           3'b000: begin
+`ifdef FPGA
+            // FPGA build: WFI never runs; keep committed decode shape (Fmax seed4)
             if (i[31:20] == 12'h000) is_sys = 1;                         // ECALL
             else if (i[31:20] == 12'h001) is_sys = 1;                    // EBREAK
             else if (i[31:20] == 12'h302) begin end                      // MRET
             else is_ill = 1;
+`else
+            is_sys = (i[31:20] == 12'h000) || (i[31:20] == 12'h001);
+            if (!((i[31:20] == 12'h000) || (i[31:20] == 12'h001) ||
+                   (i[31:20] == 12'h302) || (i[31:20] == 12'h100))) is_ill = 1;
+`endif
           end
           3'b001: is_csr = 1;
           3'b010: is_csr = 1;

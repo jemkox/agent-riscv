@@ -19,7 +19,7 @@ _start:
   sw x11, 8(x28)
   lw x13, 8(x28)
   lb x14, 11(x28)
-  ebreak
+  addi x30,x0,1; csrrw x0,0x3ff,x30
 .data
 .word 0xDEADBEEF
 .word 0x12345678

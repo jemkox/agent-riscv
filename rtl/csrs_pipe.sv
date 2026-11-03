@@ -1,4 +1,4 @@
-// CSR pipeline helper: wraps CSRs, timer/trap flushes, and id-stage CSR read.
+// CSR pipeline helper: wraps CSRs + CLINT, trap/interrupt/mret flushes, id CSR read.
 module csrs_pipe (
   input  logic        clk,
   input  logic        reset,
@@ -23,6 +23,9 @@ module csrs_pipe (
   input  logic [31:0] exmem_insn,
   input  logic [2:0]  exmem_f3,
   input  logic [31:0] exmem_r1,
+  input  logic [31:0] idex_ea,
+  input  logic [31:0] idex_sd_raw,
+  input  logic        clint_commit,
   output logic        idex_ld,
   output logic        idex_st,
   output logic        idex_trap,
@@ -36,59 +39,57 @@ module csrs_pipe (
   output logic [31:0] idex_cs_old,
   output logic [31:0] cs_old,
   output logic [31:0] cs_mtvec,
-  output logic        halt_out
+  output logic        halt_out,
+  output logic [31:0] clint_ld_data,
+  output logic        irq_pending
 );
-  logic        trap_mode, timer_due, trap_en;
-  logic [31:0] trap_pc, trap_cause;
-  logic        mret_active;
-  /* verilator lint_off UNUSED */
-  logic [31:0] mc_next, mtcmp_next, mstatus_next, mepc_next;
-  logic [31:0] cs_mstatus, cs_mepc, cs_mcause, cs_mcycle, cs_minstret, cs_mtimecmp;
-  /* verilator lint_on UNUSED */
+  logic        trap_en, mret_active, mret_en, irq_due;
+  logic [31:0] trap_cause, irq_cause;
+  logic [31:0] mstatus_next, mie_next, mtvec_next, mepc_next;
+  logic [31:0] insn_cause;
 
   csrs CSRS(.clk(clk), .reset(reset), .halt_in(halt),
-            .trap_en(trap_en), .trap_pc(trap_pc), .trap_cause(trap_cause),
+            .trap_en(trap_en), .trap_pc(idex_pc), .trap_cause(trap_cause),
+            .mret_en(mret_en),
             .cs_read_en(exmem_valid && exmem_csr_en), .cs_rsel(exmem_insn[31:20]),
             .cs_old(cs_old),
             .cs_write_en(exmem_valid && exmem_csr_en && exmem_csr_wen),
             .cs_wsel(exmem_insn[31:20]), .cs_winsn(exmem_insn), .cs_wop(exmem_f3),
             .cs_wrs1(exmem_r1), .retire_en(exmem_valid && !halt && !reset),
             .idex_read_en(idex_valid && ce_csr), .idex_rsel(idex_insn[31:20]), .cs_old_idex(idex_cs_old),
-            .mc_next(mc_next), .mtcmp_next(mtcmp_next), .mstatus_next(mstatus_next), .mepc_next(mepc_next),
-            .halt_out(halt_out),
-            .mstatus(cs_mstatus), .mtvec(cs_mtvec), .mepc(cs_mepc),
-            .mcause(cs_mcause), .mcycle(cs_mcycle), .minstret(cs_minstret), .mtimecmp(cs_mtimecmp));
+            .mstatus_next(mstatus_next), .mie_next(mie_next), .mtvec_next(mtvec_next),
+            .mepc_next(mepc_next), .halt_out(halt_out));
+
+  clint_dev CL(.clk(clk), .reset(reset), .halt_in(halt),
+            .retire_en(exmem_valid && !halt && !reset),
+            .commit(clint_commit), .ea(idex_ea), .wdata(idex_sd_raw),
+            .mstatus_in(mstatus_next), .mie_in(mie_next),
+            .ld_data(clint_ld_data), .pending(irq_pending), .cause(irq_cause));
 
   always_comb begin
     idex_ld = idex_valid && ld_ok;
     idex_st = idex_valid && st_ok;
-    trap_mode = mstatus_next[12];
-    idex_trap = idex_valid && (ce_sys || ce_ill || ce_fetch_bad) && trap_mode;
-    idex_stop = idex_valid && (ce_sys || ce_ill || ce_fetch_bad) && !trap_mode;
+    // Standard model: synchronous traps are always enabled (mtvec set by software).
+    idex_trap = idex_valid && (ce_sys || ce_ill || ce_fetch_bad);
+    idex_stop = 1'b0;
     idex_csr_en = idex_valid && ce_csr;
     idex_csr_wen = idex_csr_en && ((ce_f3 == 3'b001) || (ce_f3 == 3'b101) ||
       ((ce_f3 == 3'b010 || ce_f3 == 3'b011) && ce_rs1 != 5'd0) ||
       ((ce_f3 == 3'b110 || ce_f3 == 3'b111) && idex_insn[19:15] != 5'd0));
-    trap_pc = idex_pc;
-    timer_due = idex_valid && trap_mode && (mc_next >= mtcmp_next) &&
-                (idex_pc != cs_mtvec);
-    if (idex_trap) begin
-      if (idex_insn == 32'h00100073)
-        trap_cause = 32'd3;
-      else if (idex_insn == 32'h00000073)
-        trap_cause = 32'd8;
-      else if (ce_sys || ce_fetch_bad)
-        trap_cause = 32'd0;
-      else
-        trap_cause = 32'd2;
-    end
-    else if (timer_due) trap_cause = 32'h8000_0007;
-    else trap_cause = 32'h0;
-    mret_active = idex_valid && ce_mret && !stall && !m_stall;
-    trap_flush = idex_trap && !stall && !m_stall && !mret_active;
-    timer_flush = timer_due && !stall && !m_stall && !trap_flush && !mret_active;
+    if (idex_insn == 32'h0010_0073)      insn_cause = 32'd3;           // EBREAK
+    else if (idex_insn == 32'h0000_0073) insn_cause = 32'd11;          // ECALL (machine)
+    else if (ce_fetch_bad)               insn_cause = 32'd0;           // misaligned fetch
+    else                                 insn_cause = 32'd2;           // illegal
+    irq_due = idex_valid && irq_pending;
+    mret_active = idex_valid && ce_mret && !stall && !m_stall && !irq_due;
+    trap_flush = idex_trap && !stall && !m_stall;
+    // synchronous exception has priority over a pending interrupt (spec).
+    timer_flush = irq_due && !stall && !m_stall && !trap_flush;
     trap_en = trap_flush || timer_flush;
-    mret_flush = mret_active && !trap_flush && !timer_flush;
+    trap_cause = trap_flush ? insn_cause : irq_cause;
+    mret_en = mret_active && !trap_flush && !timer_flush;
+    mret_flush = mret_en;
     mret_pc = mepc_next;   // a csrw mepc right before the mret must count
+    cs_mtvec = mtvec_next; // mtvec write retiring this cycle is visible
   end
 endmodule

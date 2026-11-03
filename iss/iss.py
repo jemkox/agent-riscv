@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # RV32I reference simulator (ISS). Logs retiring instructions "pc insn rd val".
-# Usage: iss.py [--quiet] [--log FILE] BINFILE
-# Exit: 0 ok (ebreak reached) 2 timeout 3 illegal instruction / bad align
+# Standard M-mode trap model (L1): traps always; mstatus MIE/MPIE/MPP per spec;
+# CLINT MMIO timer at 0x0200_0000 (mtime ticks once per retired instruction).
+# Exit: 0 ok (halt via xhalt CSR or timeout-with-gp) 2 timeout 3 illegal-halt
 import sys
 
 def main(argv):
@@ -25,23 +26,18 @@ def main(argv):
     LIM = 200000
     lines = []
     mask = 0xFFFFFFFF
-    cs = {0x300:0,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
-          0x705:0xffffffff,0x340:0,0x301:0x40001001,0xb82:0,0x320:0,
-          0xc02:0,0xc82:0}
+    cs = {0x300:0x1800,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
+          0x340:0,0x301:0x40001001,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0}
     def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
-        if n == 0x704: return cs[0xb00]
         if n == 0xb02 or n == 0xc02: return cs[0xb02]
         if n == 0xb82 or n == 0xc82: return cs[0xb82]
         return cs.get(n,0)
     def cs_set(n,v):
-        if n == 0x704:
-            cs[0xb00] = v & mask
-        elif n == 0x301:
+        if n == 0x301:
             pass
         elif n == 0x300:
-            if v & 0x1000: cs[n] = (v | 0x800) & mask
-            else: cs[n] = (v & ~0x800) & mask
+            cs[n] = ((v & ~0x1800) | 0x1800) & mask   # MPP fixed M-mode
         elif n == 0x320:
             cs[n] = v & 0x7
         elif n == 0xc02:
@@ -50,15 +46,42 @@ def main(argv):
             cs[0xb82] = v & mask
         elif n in cs:
             cs[n] = v & mask
+    def mret_mstatus():   # MIE <- MPIE
+        m = cs_get(0x300)
+        cs[0x300] = ((m & ~0x8) | (0x8 if (m & 0x80) else 0)) & mask
+    def trap_mstatus():   # MPIE <- MIE, MIE <- 0
+        m = cs_get(0x300)
+        cs[0x300] = ((m & ~0x88) | (0x80 if (m & 8) else 0) | 0x1800) & mask
+    def clint_off(ea):    # slot offset inside the CLINT page or None
+        if (ea & 0xFFFFF000) != 0x02000000: return None
+        return ea & 0xFFF
+    CLW = 0xFFFFFFFFFFFFFFFF
+    msip = 0
+    mtime = 0
+    mtpcmp = 0xFFFFFFFFFFFFFFFF
+    def mip_bits():
+        return ((1<<7) if mtime >= mtpcmp else 0) | ((1<<3) if (msip & 1) else 0)
+    def irq_bits():
+        return (cs_get(0x304) & mip_bits()) if (cs_get(0x300) & 8) else 0
+    def do_trap(c):
+        cs[0x341] = pc & mask; cs[0x342] = c & mask; trap_mstatus()
+        return cs_get(0x305) & mask
+    def do_irq():
+        b = irq_bits()
+        c = 0x80000000 | (11 if (b & 0x800) else (7 if (b & 0x80) else 3))
+        cs[0x341] = pc & mask; cs[0x342] = c; trap_mstatus()
+        return cs_get(0x305) & mask
     def retire_counters(xret=False):
+        nonlocal mtime
         if not (cs.get(0x320,0) & 1):
             cs[0xb00] = (cs[0xb00] + 1) & mask
         if not (xret or (cs.get(0x320,0) & 4)):
             old = cs[0xb02]
             cs[0xb02] = (cs[0xb02] + 1) & mask
             if cs[0xb02] == 0: cs[0xb82] = (cs[0xb82] + 1) & mask
+        mtime = (mtime + 1) & CLW   # CLINT mtime ticks per retire (not inhibit-gated)
     def rd8(a):  return mem[a & 0x3FFFF]
-    def rw(a):   return int.from_bytes(mem[(a&0x3FFFF):(a+4)&0x3FFFF+0],'little') if False else int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+4)],'little')
+    def rw(a):   return int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+4)],'little')
     def rw16(a): return int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+2)],'little')
     def w8(a,v):  mem[a&0x3FFFF] = v & 0xFF
     def w16(a,v): mem[(a&0x3FFFF):((a&0x3FFFF)+2)] = (v&0xFFFF).to_bytes(2,'little')
@@ -89,14 +112,7 @@ def main(argv):
         a0 = reg[r1] if r1 else 0; a1 = reg[r2] if r2 else 0
         wv = None; wv_ok = False; npc = (pc+4) & 0xFFFFFFFF
         neg = (ins>>30)&1
-        trap_mode = ((cs_get(0x300) >> 12) & 1) == 1
-        # the RTL lets an mret in EX finish before a due timer interrupt (mret_active blocks timer_flush)
-        if trap_mode and cs_get(0xb00) >= cs_get(0x705) and pc != cs_get(0x305) and ins != 0x30200073:
-            cs[0x341] = pc & mask; cs[0x342] = 0x80000007
-            cs[0x300] = (cs[0x300] | 0x1800) & mask
-            pc = cs_get(0x305) & mask
-            steps += 1
-            continue
+        irq_p = irq_bits()      # pending now; fires unless this insn traps first
         if opc == 0x33:   # OP
             op7 = (ins >> 25) & 0x7F
             sh = a1 & 31
@@ -117,7 +133,7 @@ def main(argv):
                 elif f3 == 1 and not neg: wv = a0 << sh
                 elif f3 == 2 and not neg: wv = 1 if sx(a0,32) < sx(a1,32) else 0
                 elif f3 == 3 and not neg: wv = 1 if a0 < a1 else 0
-                elif f3 == 4 and not neg: wv = a0 ^ a1
+                elif f3 == 4: wv = a0 ^ a1
                 elif f3 == 5: wv = (sx(a0,32) >> sh) if neg else ((a0&0xFFFFFFFF) >> sh)
                 elif f3 == 6 and not neg: wv = a0 | a1
                 elif f3 == 7 and not neg: wv = a0 & a1
@@ -135,7 +151,17 @@ def main(argv):
             else:         wv = a0 & iimm
         elif opc == 0x03: # LOAD
             ea = (a0 + iimm) & 0xFFFFFFFF
-            if f3 == 2:
+            clw = clint_off(ea)
+            if clw is not None:
+                v32 = ({0:msip,0x800:(mtpcmp & mask),0x804:(mtpcmp>>32)&mask,
+                        0x808:(mtime & mask),0x80c:(mtime>>32)&mask}.get(clw, 0))
+                if   f3 == 2: ldrd = v32
+                elif f3 in (1,5):
+                    v = (v32 >> (16*((ea>>1)&1))) & 0xFFFF; ldrd = sx(v,16) if f3==1 else v
+                elif f3 in (0,4):
+                    v = (v32 >> (8*(ea&3))) & 0xFF; ldrd = sx(v,8) if f3==0 else v
+                else: illegal = True
+            elif f3 == 2:
                 ldrd = rw(ea)
             elif f3 in (1,5):
                 v = rw16(ea); ldrd = sx(v,16) if f3 == 1 else v
@@ -181,34 +207,30 @@ def main(argv):
         elif opc == 0x73:
             csr_num = (ins >> 20) & 0xFFF
             zimm = (ins >> 15) & 0x1F
-            if f3 == 0 and csr_num == 0x302:   # MRET: back to mepc (this CPU leaves mstatus as it is)
-                npc = cs_get(0x341) & mask
-            elif f3 == 0:
-                if csr_num == 0: cause = 8
-                elif csr_num == 1: cause = 3
-                else: cause = 2; illegal = True
-                if illegal:
-                    if trap_mode:
-                        cs[0x341] = pc & mask; cs[0x342] = cause
-                        cs[0x300] = (cs[0x300] | 0x1800) & mask
-                        pc = cs_get(0x305) & mask
-                        steps += 1
+            if f3 == 0:
+                if csr_num == 0x302:   # MRET: back to mepc, MIE <- MPIE
+                    if irq_p:
+                        pc = do_irq(); steps += 1
                         continue
-                    stopped = 1
-                    retire_counters()
-                    lines.append((pc,ins,0,0,0,0,0,0))
-                    break
-                if trap_mode:
-                    cs[0x341] = pc & mask; cs[0x342] = cause
-                    cs[0x300] = (cs[0x300] | 0x1800) & mask
-                    pc = cs_get(0x305) & mask
-                    steps += 1
+                    mret_mstatus()
+                    npc = cs_get(0x341) & mask
+                elif csr_num == 0x100: # WFI: nop when no IRQ pending (pending trapped)
+                    if irq_p:
+                        pc = do_irq(); steps += 1
+                        continue
+                    npc = (pc+4) & mask
+                elif csr_num == 0:
+                    pc = do_trap(11); steps += 1   # ECALL: machine ecall
                     continue
-                stopped = 1
-                retire_counters()
-                lines.append((pc,ins,0,0,0,0,0,0))
-                break
+                elif csr_num == 1:
+                    pc = do_trap(3); steps += 1    # EBREAK
+                    continue
+                else:
+                    cause = 2; illegal = True
             elif f3 in (1,2,3,5,6,7):
+                if irq_p:
+                    pc = do_irq(); steps += 1
+                    continue
                 old = cs_get(csr_num)
                 if f3 == 1: newv = a0
                 elif f3 == 2: newv = a0 | old
@@ -235,36 +257,30 @@ def main(argv):
         else:
             illegal = True
         if illegal:
-            if trap_mode:
-                cs[0x341] = pc & mask; cs[0x342] = cause
-                cs[0x300] = (cs[0x300] | 0x1800) & mask
-                pc = cs_get(0x305) & mask
-                steps += 1
-                continue
-            stopped = 1
-            retire_counters()
-            lines.append((pc,ins,0,0,0,0,0,0))
-            if log:
-                open(log,'w').write("\n".join(
-                    "%08x %08x %d %08x %d %08x %08x %x" % t for t in lines) + "\n")
-            print("HALT illegal at %08x insn %08x" % (pc,ins)); return 0
+            pc = do_trap(cause); steps += 1
+            continue
+        if irq_p:
+            pc = do_irq(); steps += 1
+            continue
         written = False
         if rd and wv is not None:
             reg[rd] = wv & 0xFFFFFFFF
             written = True
         lines.append((pc,ins,rd, (wv & 0xFFFFFFFF) if written else 0, *slog))
-        if st and not illegal:
+        if st:
             wid, ea, v = st
-            if wid == 8: w8(ea, v)
+            off = clint_off(ea)
+            if off is not None:
+                if off == 0x0:     msip = v & 1
+                elif off == 0x800: mtpcmp = (mtpcmp & ~mask) | (v & mask)
+                elif off == 0x804: mtpcmp = (mtpcmp & mask) | ((v & mask) << 32)
+                elif off == 0x808: mtime = (mtime & ~mask) | (v & mask)
+                elif off == 0x80c: mtime = (mtime & mask) | ((v & mask) << 32)
+            elif wid == 8: w8(ea, v)
             elif wid == 16: w16(ea, v)
             else: w32(ea, v)
         retire_counters()
         pc = npc; steps += 1
-    else:
-        if log:
-            open(log,'w').write("\n".join(
-                "%08x %08x %d %08x %d %08x %08x %x" % t for t in lines) + "\n")
-        print("TIMEOUT after %d steps" % steps); return 2
     if log:
         open(log,'w').write("\n".join(
             "%08x %08x %d %08x %d %08x %08x %x" % t for t in lines) + "\n")
@@ -272,6 +288,8 @@ def main(argv):
         if (stopped or cs[0x3ff]) and reg[3] == 1: return 0
         print("FAIL: gp=%d" % (reg[3] if (stopped or cs[0x3ff]) else 0)); return 1
     if not quiet: print("STEPS=%d" % steps)
+    if steps >= LIM and not (stopped or cs[0x3ff]):
+        print("TIMEOUT after %d steps" % steps); return 2
     return 0
 
 sys.exit(main(sys.argv))

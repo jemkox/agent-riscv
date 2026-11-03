@@ -23,9 +23,13 @@ module cache32 (
   input  logic [31:0] sd_raw,
   input  logic [1:0]  ssz,
   output logic [31:0] ld_raw,
-  output logic        mem_ready
+  output logic        mem_ready,
+  output logic        clint_commit,
+  input  logic [31:0] clint_ld_in
 );
   localparam logic [31:0] UART_ADDR = 32'h1000_0000;
+
+  assign clint_commit = 1'b0;   // no CLINT in the FPGA build
 
   (* BRAM = 1 *) logic [15:0] ic_lo [0:127];
   (* BRAM = 1 *) logic [15:0] ic_hi [0:127];

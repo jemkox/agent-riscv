@@ -44,6 +44,4 @@ code_begin:
   li t0,1; \
   csrw 0x3ff,t0
 
-#define mret li x15,0x1800; csrs mstatus,x15; csrr x15,mepc; jalr x0,x15,0
-
 #endif

@@ -36,7 +36,9 @@ module cache32 (
   output logic [31:0] stat_icm = 0,
   output logic [31:0] stat_dcm = 0,
 `endif
-  output logic        mem_ready
+  output logic        mem_ready,
+  output logic        clint_commit,
+  input  logic [31:0] clint_ld_in
 );
 `ifdef CACHE_LAT
   localparam int LAT = `CACHE_LAT;
@@ -98,6 +100,8 @@ module cache32 (
   int i_s, i_t;
   logic ic_hit, dc_hit, ic_p_ready, dc_p_ready, dreq, uart_store, uart_load;
   logic dc_ready_now, ic_ready_now, dc_cross_ready;
+  logic clint_match, clint_store, clint_load;
+  logic [31:0] ld_norm;
 `ifdef DOOM_BIG
   logic key_load, key_store;
 `endif
@@ -150,6 +154,9 @@ module cache32 (
     dreq = idex_valid && (idex_ld || idex_st) && !reset && !halt && !lwe;
     uart_store = dreq && idex_st && (ea == UART_ADDR);
     uart_load  = dreq && idex_ld && (ea == UART_ADDR);
+    clint_match = dreq && ((ea & 32'hFFFFF000) == 32'h0200_0000);
+    clint_store = clint_match && idex_st;
+    clint_load  = clint_match && idex_ld;
 `ifdef DOOM_BIG
     key_load   = dreq && idex_ld && (ea == KEY_ADDR);
     key_store  = dreq && idex_st && (ea == KEY_ADDR);
@@ -161,7 +168,7 @@ module cache32 (
 
     ic_ready_now = ic_hit || ic_p_ready || (LAT == 1);
     dc_ready_now = dc_hit || dc_p_ready || dc_cross_ready ||
-                   uart_store || uart_load ||
+                   uart_store || uart_load || clint_match ||
 `ifdef DOOM_BIG
                    key_load || key_store ||
 `endif
@@ -170,8 +177,7 @@ module cache32 (
     fetch_ready = (reset || halt) ? 1'b1 : ic_ready_now;
     fetch_insn  = ic_ready_now ? (ic_hit ? rb_ic(pc_if) : rbwb(pc_if)) : 32'h0;
     mem_ready   = (reset || halt) ? 1'b1 : (!dreq || dc_ready_now);
-    ld_raw = dc_ready_now ?
-             (uart_load ? 32'h0 :
+    ld_norm = (uart_load ? 32'h0 :
 `ifdef DOOM_BIG
               (key_load ? key_in :
 `endif
@@ -179,8 +185,9 @@ module cache32 (
 `ifdef DOOM_BIG
               )
 `endif
-             ) :
-             32'h0;
+             );
+    ld_raw = dc_ready_now ? (clint_load ? clint_ld_in : ld_norm) : 32'h0;
+    clint_commit = clint_store && dc_ready_now;
   end
 `ifdef DOOM_BIG
   assign key_hit = key_load && dc_ready_now;
@@ -236,7 +243,7 @@ module cache32 (
 
       if (dreq) begin
         if (dc_ready_now) begin
-          if (!(uart_store || uart_load
+          if (!(uart_store || uart_load || clint_store
 `ifdef DOOM_BIG
                || key_store
 `endif

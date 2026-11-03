@@ -1,5 +1,5 @@
 // auto-generated FPGA cache RAM init include for cache32_fpga
-localparam int FPGA_PROG_WORDS = 21;
+localparam int FPGA_PROG_WORDS = 22;
 initial begin
   ic_lo[0] = 16'hf0b7; ic_hi[0] = 16'hffff;
   ic_lo[1] = 16'h8093; ic_hi[1] = 16'hfff0;
@@ -21,5 +21,6 @@ initial begin
   ic_lo[17] = 16'h27b3; ic_hi[17] = 16'h0032;
   ic_lo[18] = 16'h3833; ic_hi[18] = 16'h0032;
   ic_lo[19] = 16'h0897; ic_hi[19] = 16'h0000;
-  ic_lo[20] = 16'h0073; ic_hi[20] = 16'h0010;
+  ic_lo[20] = 16'h0f13; ic_hi[20] = 16'h0010;
+  ic_lo[21] = 16'h1073; ic_hi[21] = 16'h3fff;
 end

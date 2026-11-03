@@ -30,4 +30,4 @@ _start:
   sw x1, 0(x28)
   lw x26, 0(x28)
   mul x27, x26, x2
-  ebreak
+  addi x30,x0,1; csrrw x0,0x3ff,x30

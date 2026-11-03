@@ -28,6 +28,11 @@
 #define configTIMER_QUEUE_LENGTH                8
 #define configTIMER_TASK_STACK_DEPTH            configMINIMAL_STACK_SIZE
 
+/* Stock FreeRTOS RISC-V port (portable/GCC/RISC-V) on our CLINT at 0x0200_0000:
+   mtime 64-bit at +0x808 (lo,hi consecutive), mtimecmp 64-bit at +0x800. */
+#define configMTIME_BASE_ADDRESS                ( 0x02000808 )
+#define configMTIMECMP_BASE_ADDRESS             ( 0x02000800 )
+
 #define INCLUDE_vTaskDelay                      1
 #define INCLUDE_vTaskDelete                     1
 #define INCLUDE_xTaskGetTickCount               1

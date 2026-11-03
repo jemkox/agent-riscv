@@ -3,4 +3,4 @@
 _start:
   addi x1, x0, 1
   fence
-  ecall
+  addi x30,x0,1; csrrw x0,0x3ff,x30

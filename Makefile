@@ -1,4 +1,4 @@
-RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/cache32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv
+RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/cache32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv rtl/clint_dev.sv
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
@@ -6,7 +6,7 @@ TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
-UI_CCFLAGS := -march=rv32i_zifencei -mabi=ilp32
+UI_CCFLAGS := -march=rv32i_zicsr_zifencei -mabi=ilp32
 OC := riscv64-unknown-elf-objcopy
 
 # External inputs (not in the repo). `make deps` clones the two public ones into deps/ at pinned
@@ -34,7 +34,7 @@ UI_HEXES := $(foreach n,$(UI_NAMES),build/ui/$(n).hex)
 UI_BINS := $(foreach n,$(UI_NAMES),build/ui/$(n).bin)
 UI_LOGS := $(foreach n,$(UI_NAMES),build/ui/logs/$(n).rtl.log build/ui/logs/$(n).iss.log)
 
-UM_CCFLAGS := -march=rv32im_zifencei -mabi=ilp32
+UM_CCFLAGS := -march=rv32im_zicsr_zifencei -mabi=ilp32
 UM_NAMES := $(basename $(notdir $(shell ls $(UM_DIR)/*.S 2>/dev/null)))
 UM_HEXES := $(foreach n,$(UM_NAMES),build/um/$(n).hex)
 UM_BINS := $(foreach n,$(UM_NAMES),build/um/$(n).bin)
@@ -276,16 +276,22 @@ coremark: need_coremark build/vlt_bench/run_bench build/bench/coremark.hex
 	@./build/vlt_bench/run_bench build/bench/coremark.hex | tee build/bench/coremark.out
 	@python3 tools/coremark_score.py build/bench/coremark.out
 
-# --- FreeRTOS demo on the same CPU configuration as Doom and CoreMark (os/freertos: own port) ---
+# --- FreeRTOS demo on the same CPU configuration as Doom and CoreMark (stock port) ---
+RTOS_PORT_DIR := $(FREERTOS_DIR)/portable/GCC/RISC-V
+RTOS_CHIP_DIR := $(RTOS_PORT_DIR)/chip_specific_extensions/RISCV_MTIME_CLINT_no_extensions
 RTOS_SRCS := $(addprefix $(FREERTOS_DIR)/,tasks.c queue.c list.c timers.c portable/MemMang/heap_4.c) \
-             os/freertos/port/port.c os/freertos/main.c
-RTOS_FLAGS := $(CCFLAGS) -O2 -I os/freertos -I os/freertos/port -I $(FREERTOS_DIR)/include
+             $(RTOS_PORT_DIR)/port.c os/freertos/main.c
+RTOS_FLAGS := $(CCFLAGS) -O2 -I os/freertos -I $(RTOS_PORT_DIR) -I $(RTOS_CHIP_DIR) -I $(FREERTOS_DIR)/include
+RTOS_ASM_FLAGS := $(CCFLAGS) -O2 -I $(RTOS_PORT_DIR) -I $(RTOS_CHIP_DIR) -I $(FREERTOS_DIR)/include
 
 need_freertos:
 	@[ -f $(FREERTOS_DIR)/tasks.c ] || { echo "FreeRTOS not found at $(FREERTOS_DIR): run 'make deps' or pass FREERTOS_DIR=path/to/FreeRTOS-Kernel" >&2; exit 1; }
 
-build/bench/freertos.elf: $(RTOS_SRCS) os/freertos/port/portasm.S os/freertos/port/portmacro.h os/freertos/FreeRTOSConfig.h doom/crt0_rv32.S doom/exit_rv.S doom/ld.ld | build/bench
-	$(CC) $(RTOS_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ doom/crt0_rv32.S doom/exit_rv.S os/freertos/port/portasm.S $(RTOS_SRCS)
+build/bench/portASM.o: $(RTOS_PORT_DIR)/portASM.S $(RTOS_CHIP_DIR)/freertos_risc_v_chip_specific_extensions.h | build/bench
+	$(CC) $(RTOS_ASM_FLAGS) -c $< -o $@
+
+build/bench/freertos.elf: $(RTOS_SRCS) build/bench/portASM.o $(RTOS_PORT_DIR)/portASM.S $(RTOS_PORT_DIR)/portmacro.h $(RTOS_CHIP_DIR)/freertos_risc_v_chip_specific_extensions.h os/freertos/crt0.S os/freertos/FreeRTOSConfig.h doom/exit_rv.S doom/ld.ld | build/bench
+	$(CC) $(RTOS_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ os/freertos/crt0.S doom/exit_rv.S build/bench/portASM.o $(RTOS_SRCS)
 
 build/bench/freertos.bin: build/bench/freertos.elf
 	$(OC) -O binary $< $@

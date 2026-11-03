@@ -15,7 +15,7 @@ skip:
   addi x5, x0, 66
   jal x0, done
 done:
-  ebreak
+  addi x30,x0,1; csrrw x0,0x3ff,x30
 helper:
   addi x10, x10, 9
   blt x0, x10, ret

@@ -45,6 +45,8 @@ module top_pipe (
   logic [31:0] idex_ea, idex_sd_raw, idex_sd_log, idex_wbval, ldx_raw, ldx_ex, alu_res, md_result, exmem_r1 = 0;
   /* verilator lint_off UNUSED */
   logic [31:0] cs_old, cs_mtvec, idex_cs_old;
+  logic [31:0] clint_ld;
+  logic clint_commit, irq_pend, ce_wfi;
   /* verilator lint_on UNUSED */
   logic [3:0]  ce_alu_op, idex_sbe, exmem_sbe = 0, mwb_sbe = 0;
   logic [1:0]  idex_ssz;
@@ -81,14 +83,15 @@ module top_pipe (
              // are not valid yet, and a store would write a wrong address (it is redone after the stall).
              .idex_valid(idex_valid && !stall), .idex_ld(idex_ld), .idex_st(idex_st),
              .ea(idex_ea), .sd_raw(idex_sd_raw), .ssz(idex_ssz),
-             .ld_raw(ldx_raw), .mem_ready(mem_ready));
+             .ld_raw(ldx_raw), .mem_ready(mem_ready),
+             .clint_commit(clint_commit), .clint_ld_in(clint_ld));
   /* verilator lint_off PINCONNECTEMPTY */
   ctrl   CE(.alu_op(ce_alu_op), .f3(ce_f3), .op7(), .rs1(ce_rs1), .rs2(ce_rs2), .rd(ce_rd),
             .a_sel(), .b_sel(ce_bsel), .is_ld(ce_ld), .is_st(ce_st), .is_br(ce_br),
             .is_jal(ce_jal), .is_jalr(ce_jalr), .is_lui(ce_lui), .is_auipc(ce_auipc),
             .is_opi(ce_opi), .is_op(ce_op),              .is_sys(ce_sys), .is_fence(ce_fence),
              .is_m(ce_m), .m_op(ce_m_op),              .is_mret(ce_mret), .is_ill(ce_ill),
-             .is_csr(ce_csr), .csr_num(), .i(idex_insn));
+             .is_csr(ce_csr), .csr_num(), .is_wfi(ce_wfi), .i(idex_insn));
 `ifdef FPGA
   mdiu_fpga MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(ce_m), .is_ill(ce_ill),
            .idex_done(idex_m_done), .op(ce_m_op), .a(a_ex), .b(b_ex), .ex_stall(stall),
@@ -109,7 +112,7 @@ module top_pipe (
               .is_br(ceif_br), .is_jal(), .is_jalr(ceif_jalr),
                .is_lui(), .is_auipc(), .is_opi(ceif_opi), .is_op(ceif_op),
                .is_sys(), .is_fence(), .is_m(ceif_m), .m_op(),
-                .is_mret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .csr_num(), .i(ifid_insn));
+                .is_mret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .is_wfi(), .csr_num(), .i(ifid_insn));
   /* verilator lint_on PINCONNECTEMPTY */
   ldst  LDST(.is_ld(ce_ld), .is_st(ce_st), .is_ill(ce_ill), .ld_ok(ld_ok), .st_ok(st_ok));
   fwd   FWDD(.idex_valid(idex_valid), .ce_br(ce_br), .ce_jalr(ce_jalr), .ce_opi(ce_opi),
@@ -175,6 +178,7 @@ module top_pipe (
     stall = exmem_valid && exmem_ld && (exmem_rd != 5'd0) &&
             ((read_a && (ce_rs1 == exmem_rd)) || (read_b && (ce_rs2 == exmem_rd)));
     mem_pend = idex_valid && (idex_ld || idex_st) && !mem_ready;
+    // WFI retires as a nop; a pending IRQ traps before it (mepc = WFI pc).
     m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend;
   end
 
@@ -212,6 +216,8 @@ module top_pipe (
             .exmem_insn(exmem_insn), .exmem_f3(exmem_f3), .exmem_r1(exmem_r1),
             .idex_ld(idex_ld), .idex_st(idex_st), .idex_trap(idex_trap), .idex_stop(idex_stop),
             .idex_csr_en(idex_csr_en), .idex_csr_wen(idex_csr_wen),
+            .idex_ea(idex_ea), .idex_sd_raw(idex_sd_raw),
+            .clint_commit(clint_commit), .clint_ld_data(clint_ld), .irq_pending(irq_pend),
             .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .mret_pc(mret_pc),
             .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_mtvec(cs_mtvec), .halt_out(halt_out));
   ldext LDX(.f3(exmem_f3), .raw(exmem_ld_raw), .ext(ldx_ex));

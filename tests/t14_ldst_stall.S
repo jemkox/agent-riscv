@@ -45,7 +45,7 @@ _start:
   addi x11, x11, 1      # x11 = 0x21
   sw x11, 16(x28)       # [0x1010] = 0x21, exactly once (no double store)
   lw x10, 16(x28)
-  ebreak
+  addi x30,x0,1; csrrw x0,0x3ff,x30
 .data
 .word 0xDEADBEEF
 .word 0x12345678

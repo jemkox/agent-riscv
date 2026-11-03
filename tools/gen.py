@@ -189,7 +189,8 @@ for i in range(Bn):
 prog.append(I(-1, 31, 0, 31, 0x13))
 bi = len(prog)
 prog.append(B(-4 * (bi - loop_idx), 31, 0, 1, 0x63))
-prog.append(0x00100073)
+prog.append(I(1, 31, 6, 31, 0x13))      # ori x31,x31,1 -> always odd
+prog.append(I(0x3ff, 31, 1, 0, 0x73))   # csrrw x0,0x3ff,x31 = test-exit halt
 
 with open(out + '.bin', 'wb') as f:
     for w in prog:

@@ -1,4 +1,6 @@
-// csrs.sv — machine-mode CSR state: counters, trap state, test halt CSR.
+// csrs.sv - machine-mode CSR state: counters, trap state, test halt CSR.
+// Standard L1 model: mstatus MPP is read-only M-mode (0b11); trap does
+// MPIE<-MIE, MIE<-0; mret does MIE<-MPIE. Timer is the CLINT device.
 `default_nettype none
 /* verilator lint_off UNUSED */
 module csrs (
@@ -8,6 +10,7 @@ module csrs (
   input  logic        trap_en,
   input  logic [31:0] trap_pc,
   input  logic [31:0] trap_cause,
+  input  logic        mret_en,
 
   input  logic        cs_read_en,
   input  logic [11:0] cs_rsel,
@@ -21,18 +24,11 @@ module csrs (
   input  logic        idex_read_en,
   input  logic [11:0] idex_rsel,
   output logic [31:0] cs_old_idex,
-  output logic [31:0] mc_next,
-  output logic [31:0] mtcmp_next,
   output logic [31:0] mstatus_next,
-  output logic [31:0] mepc_next,      // mepc including a CSR write now in MEM (for mret in EX)
-  output logic        halt_out,
-  output logic [31:0] mstatus,
-  output logic [31:0] mtvec,
-  output logic [31:0] mepc,
-  output logic [31:0] mcause,
-  output logic [31:0] mcycle,
-  output logic [31:0] minstret,
-  output logic [31:0] mtimecmp
+  output logic [31:0] mie_next,
+  output logic [31:0] mtvec_next,
+  output logic [31:0] mepc_next,
+  output logic        halt_out
 );
   localparam CSR_MSTATUS = 12'h300;
   localparam CSR_MTVEC   = 12'h305;
@@ -46,16 +42,14 @@ module csrs (
   localparam CSR_MINSTRT_H = 12'hb82;
   localparam CSR_INSTRET   = 12'hc02;
   localparam CSR_INSTRET_H = 12'hc82;
-  localparam CSR_MTIME     = 12'h704;
-  localparam CSR_MTIMECMP  = 12'h705;
   localparam CSR_MSCRATCH  = 12'h340;
   localparam CSR_MISA      = 12'h301;
-  localparam MSTATUS_MPP = 32'h0000_1800;
-  localparam MSTATUS_M   = 32'h0000_1000;
+  localparam CSR_MIE       = 12'h304;
+  localparam MSTATUS_MPP   = 32'h0000_1800;
 
   logic [31:0] st_mscratch = 0;
   logic [31:0] st_misa = 32'h40001001;
-  logic [31:0] st_mstatus = 0;
+  logic [31:0] st_mstatus = 32'h1800;
   logic [31:0] st_mtvec = 0;
   logic [31:0] st_mepc = 0;
   logic [31:0] st_mcause = 0;
@@ -63,7 +57,7 @@ module csrs (
   logic [31:0] st_minstret;
   logic [31:0] st_minstret_hi;
   logic [31:0] st_mcountinhibit;
-  logic [31:0] st_mtimecmp;
+  logic [31:0] st_mie;
   logic        st_halt;
 
   wire [31:0] mc_ref;
@@ -76,8 +70,8 @@ module csrs (
   logic [31:0] newv;
   logic [31:0] idex_old;
   logic xret_write, inhibit_cycle, inhibit_instret;
-  logic [31:0] after_mstatus, after_mtvec, after_mepc, after_mcause, after_mcycle, after_minstret, after_mtimecmp;
-  logic [31:0] after_minstret_hi, after_mcountinhibit;
+  logic [31:0] after_mstatus, after_mtvec, after_mepc, after_mcause, after_mcycle, after_minstret;
+  logic [31:0] after_minstret_hi, after_mcountinhibit, after_mie;
   logic after_halt;
   logic [31:0] mstatus_wr;
   logic halt_wr;
@@ -91,11 +85,11 @@ module csrs (
             | (cs_rsel == CSR_MCAUSE   ? st_mcause : 32'h0)
             | (cs_rsel == CSR_MSCRATCH ? st_mscratch : 32'h0)
             | (cs_rsel == CSR_MISA     ? st_misa : 32'h0)
-            | (cs_rsel == CSR_MCYCLE || cs_rsel == CSR_MTIME ? mc_ref : 32'h0)
+            | (cs_rsel == CSR_MIE      ? st_mie : 32'h0)
+            | (cs_rsel == CSR_MCYCLE   ? mc_ref : 32'h0)
             | (cs_rsel == CSR_MINSTRT || cs_rsel == CSR_INSTRET ? min_ref : 32'h0)
             | (cs_rsel == CSR_MINSTRT_H || cs_rsel == CSR_INSTRET_H ? minh_ref : 32'h0)
             | (cs_rsel == CSR_MCOUNTHI ? st_mcountinhibit : 32'h0)
-            | (cs_rsel == CSR_MTIMECMP ? st_mtimecmp : 32'h0)
             | (cs_rsel == CSR_XHALT ? {31'b0, st_halt} : 32'h0);
     end
     newv = cs_wrs1;
@@ -107,16 +101,21 @@ module csrs (
     else if (cs_wop == 3'b111) newv = old & ~{27'b0, cs_winsn[19:15]};
 
     mstatus_wr = st_mstatus;
-    if (!halt_in && !reset && cs_write_en && (cs_wsel == CSR_MSTATUS))
-      mstatus_wr = ((newv & MSTATUS_M) != 0) ? (newv | 32'h0000_0800)
-                                             : (newv & ~32'h0000_0800);
+    if (cs_write_en && (cs_wsel == CSR_MSTATUS))
+      mstatus_wr = (newv & ~MSTATUS_MPP) | MSTATUS_MPP;   // MPP fixed to M-mode
+
     halt_wr = st_halt;
     if (!halt_in && !reset && cs_write_en && (cs_wsel == CSR_XHALT) && newv[0]) halt_wr = 1'b1;
     after_mcycle = mc_ref;
     after_minstret = min_ref;
     after_minstret_hi = minh_ref;
-    after_mtimecmp = st_mtimecmp;
     after_mcountinhibit = st_mcountinhibit;
+    after_mstatus = st_mstatus;
+    after_mtvec = st_mtvec;
+    after_mepc = st_mepc;
+    after_mcause = st_mcause;
+    after_mie = st_mie;
+    after_halt = st_halt;
     xret_write = cs_write_en &&
       (cs_wsel == CSR_MINSTRT || cs_wsel == CSR_MINSTRT_H ||
        cs_wsel == CSR_INSTRET || cs_wsel == CSR_INSTRET_H);
@@ -128,42 +127,22 @@ module csrs (
         after_minstret = after_minstret + 32'd1;
 `ifndef FPGA
         // 64-bit instret rollover carry: SIM builds only (MI instret_overflow).
-        // FPGA build keeps the truncated 32-bit low counter + real writable hi
-        // (the 32-bit AND-accumulate+carry chain regressed the FPGA netlist).
         if (min_ref == 32'hFFFF_FFFF) after_minstret_hi = minh_ref + 32'd1;
 `endif
       end
     end
-    if (cs_write_en) begin
-      if (cs_wsel == CSR_MCYCLE) after_mcycle = newv;
-      else if (cs_wsel == CSR_MINSTRT || cs_wsel == CSR_INSTRET) after_minstret = newv;
-      else if (cs_wsel == CSR_MINSTRT_H || cs_wsel == CSR_INSTRET_H) after_minstret_hi = newv;
-      else if (cs_wsel == CSR_MTIME) after_mcycle = newv;
+    if (!halt_in && !reset && cs_write_en) begin
+      if (cs_wsel == CSR_MSTATUS) after_mstatus = mstatus_wr;
+      else if (cs_wsel == CSR_MTVEC) after_mtvec = newv;
+      else if (cs_wsel == CSR_MEPC) after_mepc = newv;
+      else if (cs_wsel == CSR_MCAUSE) after_mcause = newv;
+      else if (cs_wsel == CSR_MIE) after_mie = newv;
+      else if (cs_wsel == CSR_XHALT) after_halt = newv[0] ? 1'b1 : after_halt;
       if (cs_wsel == CSR_MCOUNTHI) after_mcountinhibit = newv & 32'h7;
-      else if (cs_wsel == CSR_MTIMECMP) after_mtimecmp = newv;
-    end
-  end
-
-  always_comb begin
-    after_mstatus = st_mstatus;
-    after_mtvec = st_mtvec;
-    after_mepc = st_mepc;
-    after_mcause = st_mcause;
-    after_halt = st_halt;
-    if (!halt_in && !reset) begin
-      if (cs_write_en) begin
-        if (cs_wsel == CSR_MSTATUS)
-          after_mstatus = ((newv & MSTATUS_M) != 0) ? (newv | 32'h0000_0800)
-                                                   : (newv & ~32'h0000_0800);
-        else if (cs_wsel == CSR_MTVEC) after_mtvec = newv;
-        else if (cs_wsel == CSR_MEPC) after_mepc = newv;
-        else if (cs_wsel == CSR_MCAUSE) after_mcause = newv;
-        else if (cs_wsel == CSR_XHALT) after_halt = newv[0] ? 1'b1 : after_halt;
-      end
-      if (trap_en) begin
-        after_mepc = trap_pc;
-        after_mcause = trap_cause;
-        after_mstatus = after_mstatus | MSTATUS_MPP;
+      else begin
+        if (cs_wsel == CSR_MCYCLE) after_mcycle = newv;
+        else if (cs_wsel == CSR_MINSTRT || cs_wsel == CSR_INSTRET) after_minstret = newv;
+        else if (cs_wsel == CSR_MINSTRT_H || cs_wsel == CSR_INSTRET_H) after_minstret_hi = newv;
       end
     end
     idex_old = 32'h0;
@@ -174,36 +153,25 @@ module csrs (
             | (idex_rsel == CSR_MCAUSE   ? after_mcause : 32'h0)
             | (idex_rsel == CSR_MSCRATCH ? st_mscratch : 32'h0)
             | (idex_rsel == CSR_MISA     ? st_misa : 32'h0)
-            | (idex_rsel == CSR_MCYCLE || idex_rsel == CSR_MTIME ? after_mcycle : 32'h0)
+            | (idex_rsel == CSR_MIE      ? after_mie : 32'h0)
+            | (idex_rsel == CSR_MCYCLE   ? after_mcycle : 32'h0)
             | (idex_rsel == CSR_MINSTRT || idex_rsel == CSR_INSTRET ? after_minstret : 32'h0)
             | (idex_rsel == CSR_MINSTRT_H || idex_rsel == CSR_INSTRET_H ? after_minstret_hi : 32'h0)
             | (idex_rsel == CSR_MCOUNTHI ? after_mcountinhibit : 32'h0)
-            | (idex_rsel == CSR_MTIMECMP ? after_mtimecmp : 32'h0)
             | (idex_rsel == CSR_XHALT ? {31'b0, after_halt} : 32'h0);
     end
   end
     assign cs_old = old;
     assign cs_old_idex = idex_old;
-    assign mc_next = after_mcycle;
-    assign mtcmp_next = after_mtimecmp;
-    assign mstatus_next = mstatus_wr;
+    assign mstatus_next = after_mstatus;
+    assign mie_next = after_mie;
+    assign mtvec_next = after_mtvec;
     assign mepc_next = after_mepc;
     assign halt_out = halt_wr;
 
-
-  always_comb begin
-    mstatus = st_mstatus;
-    mtvec = st_mtvec;
-    mepc = st_mepc;
-    mcause = st_mcause;
-    mcycle = mc_ref;
-    minstret = min_ref;
-    mtimecmp = st_mtimecmp;
-  end
-
   always_ff @(posedge clk) begin
     if (reset) begin
-      st_mstatus <= 32'h0;
+      st_mstatus <= 32'h0000_1800;   // MPP is fixed M-mode
       st_mtvec <= 32'h0;
       st_mepc <= 32'h0;
       st_mcause <= 32'h0;
@@ -213,35 +181,43 @@ module csrs (
       st_minstret <= 32'h0;
       st_minstret_hi <= 32'h0;
       st_mcountinhibit <= 32'h0;
-      st_mtimecmp <= 32'hFFFF_FFFF;
+      st_mie <= 32'h0;
       st_halt <= 1'b0;
-      end else if (!halt_in) begin
-        if (retire_en) begin
-          if (!inhibit_cycle) st_mcycle <= st_mcycle + 32'd1;
-          if (!inhibit_instret && !xret_write) begin
-            st_minstret <= st_minstret + 32'd1;
+    end else if (!halt_in) begin
+      if (retire_en) begin
+        if (!inhibit_cycle) st_mcycle <= st_mcycle + 32'd1;
+        if (!inhibit_instret && !xret_write) begin
+          st_minstret <= st_minstret + 32'd1;
 `ifndef FPGA
-            if (st_minstret == 32'hFFFF_FFFF) st_minstret_hi <= st_minstret_hi + 32'd1;
+          if (st_minstret == 32'hFFFF_FFFF) st_minstret_hi <= st_minstret_hi + 32'd1;
 `endif
-          end
         end
-        if (!halt_in) st_mstatus <= mstatus_wr;
-      if (trap_en) st_mstatus <= st_mstatus | MSTATUS_MPP;
+      end
+      if (trap_en)
+        // trap: MPIE <- MIE, MIE <- 0, MPP stays 11
+        st_mstatus <= (after_mstatus & ~32'h0000_0088) |
+                      (((after_mstatus & 32'h0000_0008) != 0) ? 32'h0000_0080 : 32'h0) |
+                      MSTATUS_MPP;
+      else if (mret_en)
+        // mret: MIE <- MPIE, MPP stays 11
+        st_mstatus <= (after_mstatus & ~32'h0000_0008) |
+                      (((after_mstatus & 32'h0000_0080) != 0) ? 32'h0000_0008 : 32'h0);
+      else
+        st_mstatus <= mstatus_wr;
       if (cs_write_en) begin
         case (cs_wsel)
-          CSR_MTVEC:   st_mtvec <= newv;
+          CSR_MTVEC:    st_mtvec <= newv;
           CSR_MSCRATCH: st_mscratch <= newv;
-          CSR_MISA:    begin end
-          CSR_MEPC:    st_mepc <= newv;
-          CSR_MCAUSE:  st_mcause <= newv;
-          CSR_MTVAL:   begin end
-          CSR_MCYCLE:  st_mcycle <= newv;
-          CSR_MINSTRT, 12'hc02: st_minstret <= newv;
-          CSR_MINSTRT_H, 12'hc82: st_minstret_hi <= newv;
-          CSR_MTIME:   st_mcycle <= newv;
+          CSR_MISA:     begin end
+          CSR_MEPC:     st_mepc <= newv;
+          CSR_MCAUSE:   st_mcause <= newv;
+          CSR_MTVAL:    begin end
+          CSR_MIE:      st_mie <= newv;
+          CSR_MCYCLE:   st_mcycle <= newv;
+          CSR_MINSTRT, CSR_INSTRET: st_minstret <= newv;
+          CSR_MINSTRT_H, CSR_INSTRET_H: st_minstret_hi <= newv;
           CSR_MCOUNTHI: st_mcountinhibit <= newv & 32'h7;
-          CSR_MTIMECMP: st_mtimecmp <= newv;
-          CSR_XHALT:   st_halt <= newv[0] ? 1'b1 : st_halt;
+          CSR_XHALT:    st_halt <= newv[0] ? 1'b1 : st_halt;
           default: begin end
         endcase
       end

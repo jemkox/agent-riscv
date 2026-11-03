@@ -27,8 +27,8 @@ fail:
   csrrw x0, 0x3ff, t4
 handler:
   csrr t2, mcause
-  li t3, 8
-  bne t2, t3, fail          # an mret taken as illegal comes back here with mcause 2
+  li t3, 11
+  bne t2, t3, fail          # machine ecall cause (M-mode ECALL = 0xb)
   addi s0, s0, 1
   csrr t2, mepc
   addi t2, t2, 4

@@ -21,4 +21,4 @@ _start:
   slt x15, x4, x3
   sltu x16, x4, x3
   auipc x17, 0
-  ebreak
+  addi x30,x0,1; csrrw x0,0x3ff,x30
