@@ -3,18 +3,18 @@
 # the whole system is read-only, only the workspace is writable, /tmp is private, the network is shared
 # (Ubuntu 24.04+ forbids the sandbox loopback trick that bwrap uses to block network, so we keep it shared),
 # and secret folders (~/.ssh, ~/.gnupg, keyrings, browser profiles, agent and Claude config) are hidden.
-# Usage: hdl <iverilog|vvp|verilator|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|qemu-riscv32|qemu-riscv64|sby> [args...]   (run from inside the workspace)
+# Usage: hdl <iverilog|vvp|verilator|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|riscv64-linux-gnu-*|qemu-riscv32|qemu-riscv64|qemu-system-riscv32|dtc|sby> [args...]   (run from inside the workspace)
 # Workspace from ~/.config/cpu-agent/config (install.sh), default ~/agent-workspace.
 WORKSPACE=""; [ -f "$HOME/.config/cpu-agent/config" ] && . "$HOME/.config/cpu-agent/config"
 WS="${WORKSPACE:-$HOME/agent-workspace}"
 exec 2>&1   # errors and output in one stream, so no 2>&1 is needed
 tool="${1:-}"
 if [ -z "$tool" ]; then
-  echo "usage: hdl <iverilog|vvp|verilator|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|qemu-riscv32|qemu-riscv64|sby> [args...]   (sandboxed: no network, writes only inside $WS)"; exit 0
+  echo "usage: hdl <iverilog|vvp|verilator|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|riscv64-linux-gnu-*|qemu-riscv32|qemu-riscv64|qemu-system-riscv32|dtc|sby> [args...]   (sandboxed: no network, writes only inside $WS)"; exit 0
 fi
 case "$tool" in
-  iverilog|vvp|verilator|verilator_bin|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|qemu-riscv32|qemu-riscv64|sby) ;;
-  *) echo "hdl: only iverilog, vvp, verilator, yosys, make, nextpnr-ice40, icepack, icetime, riscv64-unknown-elf-*, qemu-riscv32/64 or sby (got '${tool:-nothing}')" >&2; exit 2 ;;
+  iverilog|vvp|verilator|verilator_bin|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|riscv64-linux-gnu-*|qemu-riscv32|qemu-riscv64|qemu-system-riscv32|dtc|sby) ;;
+  *) echo "hdl: only iverilog, vvp, verilator, yosys, make, nextpnr-ice40, icepack, icetime, riscv64-unknown-elf-*, riscv64-linux-gnu-*, qemu-riscv32/64, qemu-system-riscv32, dtc or sby (got '${tool:-nothing}')" >&2; exit 2 ;;
 esac
 here=$(pwd -P)
 case "$here/" in

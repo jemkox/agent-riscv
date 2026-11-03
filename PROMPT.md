@@ -9,7 +9,8 @@ TASK: Design, verify, synthesize and benchmark a RISC-V CPU in SystemVerilog, wo
 - Run ALL tools through the wrapper: `hdl make <target>` (preferred), `hdl iverilog -g2012 ...`, `hdl vvp ...`, `hdl verilator ...`, `hdl yosys ...`, `hdl nextpnr-ice40 ...`, `hdl icepack ...`, `hdl icetime ...`, `hdl riscv64-unknown-elf-gcc ...`. Never call them directly.
 - python3 scripts may be run directly: `python3 iss/iss.py ...`
 - NEVER use redirection (>, >>, 2>&1, 2>/dev/null) or $( ) or tee or xargs in commands. To save output to files: testbenches use $fopen/$fdisplay, Python scripts open and write files themselves, and the Makefile may redirect internally (it runs inside `hdl make`). Piping into `| head` or `| tail` is fine.
-- Do not try to clone or download anything. Write all tests and benchmarks yourself.
+- Do not clone or download anything yourself; what you need is in ~/agent-workspace/downloads. Exception: a Buildroot build
+  may fetch a missing source into its own dl/ cache.
 - Your output per message is limited: keep every file under ~250 lines. Split big designs into many small modules and files. Edit files with small targeted edits instead of rewriting them.
 
 ## TOOLS (all installed and working)
@@ -24,6 +25,11 @@ TASK: Design, verify, synthesize and benchmark a RISC-V CPU in SystemVerilog, wo
 - Official tests: ~/agent-workspace/downloads/riscv-tests (isa/rv32ui, rv32um, rv32mi + env/ macros) and ~/agent-workspace/downloads/riscv-arch-test (tests/rv32i/I, M, Zicsr...). Copy into tests/official/, write a small env/linker script for your testbench (pass/fail via a tohost-style store the testbench watches), and add them to `make test`. From M2 on, every rv32ui test must pass; from M3, every rv32um test.
 - Formal: `hdl sby -f job.sby` with engine `smtbmc z3` (never boolector). After M2, add assertions (x0 always reads 0, PC aligned, no write to x0, stall/flush never both drop an instruction) and prove them. riscv-formal is in ~/agent-workspace/downloads/riscv-formal if you want to try the full RVFI check later.
 - ccache makes Verilator rebuilds fast. SDL2 is available for a framebuffer window (stretch goals).
+
+## LINUX TOOLS (installed for the LINUX goal)
+- `hdl qemu-system-riscv32` (reference machine), `hdl dtc` (device tree compiler), `hdl riscv64-linux-gnu-*` (kernel cross
+  compiler; builds rv32 kernels with ARCH=riscv), and Buildroot 2025.02.19 in ~/agent-workspace/downloads (run it with
+  `hdl make -C <buildroot> O=<out dir>`; it builds its own rv32 toolchain, kernel, OpenSBI and BusyBox).
 
 ## WORK LOOP
 PLAN → WRITE HDL → LINT → SIMULATE → SYNTHESIZE → READ OUTPUT → FIX → REPEAT.
@@ -132,7 +138,7 @@ before or after the Doom steps, but all must be done and recorded in PROGRESS.md
   [ ] Final FPGA numbers (LC, BRAM, DSP, Fmax) and all regressions passing, measured after the three items above.
 When F1-F4 (including the F4 DONE CHECKLIST) are done, M10d and M10e are proven with real frame images, the P1-P3 numbers are measured and M10f `make play` works, write the line `M10 DOOM: MET` in PROGRESS.md and stop.
 
-## FINISH THE DOOM CPU (current goal; M10 DOOM: MET is done - do not redo it. NOT Linux: Linux comes later)
+## FINISH THE DOOM CPU (DONE: `DOOM CPU: DONE` is in PROGRESS.md - do not redo it)
 Same rules as before: keep ALL existing tests passing (test, CACHE_LAT=5, ui, um, mi, regress N=500, m7, doom 31
 frames), commit each step, record measured numbers only in PROGRESS.md.
 D1 Play test: fix tools/play_verify.py so `make play_test` compares against a no-key baseline run (the old check
@@ -150,7 +156,52 @@ D5 Final self-check: run `hdl make all_tests`, `hdl make doom`, `hdl make play_t
    paste the key output lines into PROGRESS.md. Then write the line `DOOM CPU: DONE` in PROGRESS.md (on its own
    line) and stop.
 
-## FINAL ACCEPTANCE (only then may you stop)
+## LINUX (current goal; Doom, CoreMark and FreeRTOS are done - do not redo them)
+Goal: the CPU boots Linux in simulation to a BusyBox shell. Work through L1-L8 in order.
+Rules for every step:
+- Keep ALL suites passing: `hdl make all_tests` (test, CACHE_LAT=5, ui, um, mi, regress N=500, m7, doom),
+  `hdl make coremark`, `hdl make freertos`. Each new feature gets directed tests and goes into the Python ISS and
+  the random generator (tools/gen.py) where it is ISA-visible, so the differential tests cover it.
+- The iCE40 build must keep working: `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` must still PASS at 13 MHz (CI
+  checks it). Put Linux-only hardware (MMU, S/U modes, atomics, PLIC) under `ifdef LINUX` or leave it out of the
+  FPGA top; the Linux CPU itself is simulation-only (it will not fit the UP5K).
+- Big builds (Buildroot, kernel, OpenSBI) go OUTSIDE the project: out-of-tree dirs under
+  ~/agent-workspace/build-linux/ (e.g. `hdl make -C ../../downloads/buildroot-2025.02.19 O=../../build-linux/nommu`).
+  Buildroot 2025.02.19 is unpacked in ~/agent-workspace/downloads/ with its dl/ cache pre-filled for
+  qemu_riscv32_nommu_virt_defconfig and qemu_riscv32_virt_defconfig. The project keeps only small files: Buildroot
+  defconfig fragments, kernel config fragments, the .dts, patches, scripts, and Makefile targets that build from them.
+- RAM: the model already uses most of it. Build with BR2_JLEVEL=2 / make -j2.
+- QEMU is the reference machine: `hdl qemu-system-riscv32 -M virt -nographic ...` must boot the same software
+  first, so a failure on our CPU is a CPU bug, not a software one. Compare console output and, when stuck,
+  instruction traces (`-d in_asm,exec -D trace.log`) against our RTL trace.
+- Record measured numbers only (cycles to banner/prompt, wall-clock time) in PROGRESS.md; commit after each step.
+
+L1 Standard machine-mode traps (needed by OpenSBI and Linux; FreeRTOS showed the current model is nonstandard):
+   mstatus.MIE/MPIE/MPP with the spec behaviour (trap: MPIE<-MIE, MIE<-0; mret: MIE<-MPIE), mie/mip
+   (MSIE/MTIE/MEIE), mcause interrupt priorities, mtvec direct mode, WFI, ecall/ebreak/illegal ALWAYS trap
+   (keep CSR 0x3ff only as the test-exit halt). Timer: a CLINT at 0x0200_0000 with 64-bit mtime/mtimecmp and
+   msip (remove the CSR 0x704/0x705 timer). Update the ISS identically, run ALL official rv32mi tests that apply,
+   remove the `#define mret` workaround from env/mi/riscv_test.h, and move os/freertos to the stock FreeRTOS
+   GCC/RISC-V port with the CLINT (`hdl make freertos` must still print FREERTOS PASS).
+L2 A extension: LR/SC and all AMO*, official rv32ua tests (`hdl make ua`), ISS + random generator.
+L3 Linux platform testbench `hdl make linux_sim`: >= 64 MB RAM at 0x8000_0000, CLINT at 0x0200_0000, a 16550
+   UART at 0x1000_0000 (TX to stdout, RX from a script or the keyboard), a minimal PLIC at 0x0C00_0000 if the UART
+   interrupt needs it, and a .dts -> .dtb for exactly this machine. Fast C++ Verilator runner (like run_bench).
+L4 Linux without MMU: Buildroot qemu_riscv32_nommu_virt_defconfig adapted to our .dtb (M-mode kernel, BusyBox
+   initramfs). First boot it in QEMU, then on the CPU in linux_sim to the shell prompt. Record cycles to prompt.
+L5 S-mode and U-mode: medeleg/mideleg, sstatus/sie/sip/stvec/sepc/scause/stval/satp/scounteren, SRET; official
+   rv32si tests (`hdl make si`); rv32mi still passes.
+L6 Sv32 MMU: page-table walker, small TLB, SFENCE.VMA, A/D bits (hardware update or page fault - document which),
+   MXR/SUM, instruction/load/store page faults. Directed MMU tests, rv32si, differential tests with paging on.
+L7 OpenSBI (generic platform, FW_JUMP or FW_PAYLOAD) + Linux with MMU: Buildroot qemu_riscv32_virt_defconfig adapted
+   to our .dtb. QEMU first, then linux_sim: OpenSBI banner, kernel boot log, BusyBox shell prompt.
+L8 Shell: scripted UART input runs `uname -a`, `cat /proc/cpuinfo`, `ls /` with correct output; `hdl make linux`
+   reproduces the whole boot from the committed files; README section with a boot log excerpt, cycles and time
+   to the prompt, and honest limits. Then write the line `LINUX CPU: DONE` in PROGRESS.md (on its own line) and stop.
+If a step is truly impossible on this machine, record exactly why in PROGRESS.md, do what is possible, and continue
+with the next step instead of stopping.
+
+## FINAL ACCEPTANCE (met long ago; kept for reference - the current goal is the LINUX section above)
 - `hdl make test` runs the whole regression from scratch (directed, random differential, official rv32ui + rv32um tests) and prints ALL PASS. Show that output.
 - 5000+ random differential tests: 0 mismatches.
 - M7 programs print correct results over UART.
