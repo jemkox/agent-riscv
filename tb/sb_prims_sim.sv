@@ -22,14 +22,21 @@ module SB_RAM40_4K (
   localparam int WRITE_MODE = 0;
   logic [15:0] mem [0:63];
 
+  logic [15:0] rdata;
+
   initial begin
+    rdata = 16'h0;
     for (int i = 0; i < 64; i++) mem[i] = 16'h0;
   end
 
-  assign RDATA = mem[RADDR];
+  assign RDATA = rdata;
 
   always @(posedge WCLK) begin
     if (WCLKE && WE) mem[WADDR] <= (mem[WADDR] & MASK) | (WDATA & ~MASK);
+  end
+
+  always @(posedge RCLK) begin
+    rdata <= mem[RADDR];
   end
 endmodule
 `default_nettype wire

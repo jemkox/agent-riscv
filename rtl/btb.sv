@@ -1,7 +1,5 @@
 // Branch target buffer with 2-bit saturating counters.
 // Direct-mapped by pc[7:2]; tag is pc[31:8]. Query during fetch, update at EX.
-/* verilator lint_off WIDTHEXPAND */
-/* verilator lint_off WIDTHTRUNC */
 module btb (
   input  logic        clk,
   input  logic        reset,
@@ -40,6 +38,8 @@ module btb (
   (* BRAM = 1 *) logic [1:0]  cnt [0:N-1];
   logic [IDX-1:0] qi, ui;
   logic [STAT_W-1:0] branches_cnt = 0, taken_cnt = 0, misp_cnt = 0;
+  localparam logic [STAT_W-1:0] STAT_ZERO = {STAT_W{1'b0}};
+  localparam logic [STAT_W-1:0] STAT_ONE = {{(STAT_W - 1){1'b0}}, 1'b1};
 
   assign qi = q_pc[IDX+1:2];
   assign ui = upd_pc[IDX+1:2];
@@ -57,9 +57,9 @@ module btb (
 
   always_ff @(posedge clk) begin
     if (reset) begin
-      branches_cnt <= 32'h0;
-      taken_cnt <= 32'h0;
-      misp_cnt <= 32'h0;
+      branches_cnt <= STAT_ZERO;
+      taken_cnt <= STAT_ZERO;
+      misp_cnt <= STAT_ZERO;
       for (int k = 0; k < N; k++) begin
         valid[k] <= 1'b0;
         tag[k] <= {TAG_W{1'b0}};
@@ -68,9 +68,9 @@ module btb (
       end
     end else begin
       if (upd_enable) begin
-        branches_cnt <= branches_cnt + 32'd1;
-        if (upd_pred_taken) taken_cnt <= taken_cnt + 32'd1;
-        if (upd_mispred) misp_cnt <= misp_cnt + 32'd1;
+        branches_cnt <= branches_cnt + STAT_ONE;
+        if (upd_pred_taken) taken_cnt <= taken_cnt + STAT_ONE;
+        if (upd_mispred) misp_cnt <= misp_cnt + STAT_ONE;
         if (valid[ui] && (tag[ui] == upd_pc[31:IDX+2])) begin
           if (upd_taken) begin
             if (cnt[ui] < 2'd3) cnt[ui] <= cnt[ui] + 2'd1;
@@ -88,7 +88,13 @@ module btb (
     end
   end
 
+`ifdef FPGA
+  assign out_branches = {20'b0, branches_cnt};
+  assign out_taken_preds = {20'b0, taken_cnt};
+  assign out_mispreds = {20'b0, misp_cnt};
+`else
   assign out_branches = branches_cnt;
   assign out_taken_preds = taken_cnt;
   assign out_mispreds = misp_cnt;
+`endif
 endmodule

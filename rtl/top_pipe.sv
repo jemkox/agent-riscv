@@ -93,14 +93,39 @@ module top_pipe (
 `ifdef DOOM_BIG
   // mst_cnt/st_cnt are output ports (declared in the header), incremented below.
 `endif
+`ifdef FPGA
+  logic        rf_fetch_sched = 0;
+  logic [4:0]  rf_rsel1 = 0, rf_rsel2 = 0;
+  logic [31:0] rf_r1_use, rf_r2_use;
+  assign rf_r1_use = rf_r1;
+  assign rf_r2_use = rf_r2;
+  assign rf_fetch_sched = !halt && !mem_pend && !(stall || m_stall) &&
+                          !(trap_flush || timer_flush || mret_flush) &&
+                          !flush && !conflict && fetch_ready;
+  assign rf_rsel1 = rf_fetch_sched ? fetch_insn[19:15] : ifid_insn[19:15];
+  assign rf_rsel2 = rf_fetch_sched ? fetch_insn[24:20] : ifid_insn[24:20];
+`else
+  logic [31:0] rf_r1_use, rf_r2_use;
+  assign rf_r1_use = rf_r1;
+  assign rf_r2_use = rf_r2;
+`endif
   logic [31:0] ifid_pred_tgt = 0, idex_pred_tgt = 0, branch_upd_tgt, bp_pred_tgt_if;
 
+`ifdef FPGA
+  regs32 RF(.clk(clk), .reset(reset), .rsel1(rf_rsel1), .rsel2(rf_rsel2),
+            .rs1(rf_r1), .rs2(rf_r2),
+`ifdef LINUX
+            .linux_init_valid(1'b1), .linux_init_addr(linux_dtb_addr),
+`endif
+            .wena(mwb_valid && mwb_wben && (mwb_rd != 5'd0) && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
+`else
   regs32 RF(.clk(clk), .reset(reset), .rsel1(ifid_insn[19:15]), .rsel2(ifid_insn[24:20]),
             .rs1(rf_r1), .rs2(rf_r2),
 `ifdef LINUX
             .linux_init_valid(1'b1), .linux_init_addr(linux_dtb_addr),
 `endif
             .wena(mwb_valid && mwb_wben && (mwb_rd != 5'd0) && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
+`endif
   cache32 MM(.clk(clk), .reset(reset), .halt(halt), .lwe(lwe), .lwa(lwa), .lwd(lwd),
 `ifdef DOOM_BIG
              .dbg_re(dbg_re), .dbg_ra(dbg_ra), .dbg_rd(dbg_rd),
@@ -164,7 +189,7 @@ module top_pipe (
               .exmem_ld(exmem_ld), .exmem_st(exmem_st), .exmem_stop(exmem_stop),
               .exmem_result(exmem_result), .mwb_valid(mwb_valid), .mwb_rd(mwb_rd),
              .mwb_wben(mwb_wben), .mwb_wv(mwb_wv),
-             .ifid_valid(ifid_valid), .ifid_r1(rf_r1), .ifid_r2(rf_r2),
+             .ifid_valid(ifid_valid), .ifid_r1(rf_r1_use), .ifid_r2(rf_r2_use),
              .ceif_br(ceif_br), .ceif_jalr(ceif_jalr), .ceif_ld(ceif_ld), .ceif_st(ceif_st),
 `ifdef FPGA
 `else

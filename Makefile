@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -54,7 +54,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),build/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),build/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate all_tests play play_test doom_mem doom_probe doom_elf fpga_full ua build/vlt/run_hex build/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate all_tests play play_test doom_mem doom_probe doom_elf fpga_full ua build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -533,6 +533,20 @@ fpga_mgate: build/vlt_fpga_m/fpga_mtop build/t07_m.bin | build/fpga_m
 	@./build/vlt_fpga_m/fpga_mtop > build/fpga_m/t07_m.rtl.log; grep -q "TEST PASSED" build/fpga_m/t07_m.rtl.log
 	@python3 iss/iss.py --quiet --log build/fpga_m/t07_m.iss.log build/t07_m.bin > /dev/null
 	@python3 tools/cmp.py build/fpga_m/t07_m.rtl.log build/fpga_m/t07_m.iss.log
+
+build/fpga_subw:
+	@mkdir -p build/fpga_subw
+
+build/fpga_subw/fpga_m_prog_init.sv: build/t21_fpga_subw.hex | build/fpga_subw
+	@python3 tools/gen_fpga_rom.py $< $@
+
+build/vlt_fpga_subw/fpga_subwtop: $(FPGA_PIPE_RTL) build/fpga_subw/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | build/fpga_subw
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -Ibuild/fpga_subw --Mdir build/vlt_fpga_subw -o fpga_subwtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+
+fpga_subw_gate: build/vlt_fpga_subw/fpga_subwtop build/t21_fpga_subw.bin | build/fpga_subw
+	@./build/vlt_fpga_subw/fpga_subwtop > build/fpga_subw/t21_fpga_subw.rtl.log; grep -q "TEST PASSED" build/fpga_subw/t21_fpga_subw.rtl.log
+	@python3 iss/iss.py --quiet --log build/fpga_subw/t21_fpga_subw.iss.log build/t21_fpga_subw.bin > /dev/null
+	@python3 tools/cmp.py build/fpga_subw/t21_fpga_subw.rtl.log build/fpga_subw/t21_fpga_subw.iss.log
 
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
