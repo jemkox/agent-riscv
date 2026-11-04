@@ -14,6 +14,12 @@
 #include <unistd.h>
 #include <cerrno>
 #include "Vrun_linux.h"
+#ifdef LINUX_CKPT
+#include <verilated_save.h>
+#include <vector>
+#include <deque>
+#include <array>
+#endif
 
 static const uint32_t KERNEL_ADDR = 0x80000000u;
 
@@ -58,6 +64,15 @@ int main(int argc, char **argv) {
     const uint64_t max_cycles = (argc > 3) ? strtoull(argv[3], nullptr, 10) : 1200000000ull;
     const bool prompt_stop = (argc > 4) && !std::strcmp(argv[4], "prompt");
     const bool platform_stop = (argc > 4) && !std::strcmp(argv[4], "platform");
+#ifdef LINUX_CKPT
+    const bool ckpt_save = (argc > 5) && !std::strcmp(argv[5], "save");
+    const bool ckpt_restore = (argc > 5) && !std::strcmp(argv[5], "restore");
+    const bool ckpt_mark = (argc > 5) && !std::strcmp(argv[5], "mark");
+    const uint64_t mark_cycle = (ckpt_mark && argc > 6) ? strtoull(argv[6], nullptr, 10) : 0ull;
+    const uint64_t save_cycle = (ckpt_save && max_cycles > 0) ? (max_cycles - 1) : 0ull;
+    const std::string ckpt_file = (argc > 6 && (ckpt_save || ckpt_restore)) ? std::string(argv[6]) : std::string();
+    const std::string ckpt_hash_arg = (argc > 7 && (ckpt_save || ckpt_restore)) ? std::string(argv[7]) : std::string();
+#endif
 
     uint32_t kernel_bytes = (uint32_t)(kernel.size() * 4u);
     uint32_t pad = (kernel_bytes + 0xFFFu) & ~0xFFFu;
@@ -84,12 +99,18 @@ int main(int argc, char **argv) {
         }
     };
 
-    setc(0, 1, 0, 0, 0, 0, 0); model->eval();
-    load_words(KERNEL_ADDR, kernel);
-    load_words(dtb_addr, dtb);
+#ifdef LINUX_CKPT
+    if (!ckpt_restore) {
+#else
+    {
+#endif
+        setc(0, 1, 0, 0, 0, 0, 0); model->eval();
+        load_words(KERNEL_ADDR, kernel);
+        load_words(dtb_addr, dtb);
 
-    setc(1, 1, 0, 0, 0, 0, 0); model->eval();
-    setc(0, 0, 0, 0, 0, 0, 0); model->eval();
+        setc(1, 1, 0, 0, 0, 0, 0); model->eval();
+        setc(0, 0, 0, 0, 0, 0, 0); model->eval();
+    }
 
     uint64_t cyc = 0, insns = 0;
     std::string tail;
@@ -126,7 +147,124 @@ int main(int argc, char **argv) {
         return false;
     };
 
+#ifdef LINUX_CKPT
+    auto print_state = [&](const char *tag) {
+        printf("#CKPT_%s cyc=%llu insns=%llu pc=%08x insn=%08x rd=%u wv=%08x st=%u ea=%08x halt=%u prompt=%u done=%u platform=%u\n",
+               tag, (unsigned long long)cyc, (unsigned long long)insns,
+               (unsigned)model->ex_pc, (unsigned)model->ex_insn,
+               (unsigned)model->ex_rd, (unsigned)model->ex_wv,
+               (unsigned)model->ex_st, (unsigned)model->ex_ea,
+               (unsigned)model->halt, prompt_seen ? 1u : 0u,
+               done_seen ? 1u : 0u, platform_seen ? 1u : 0u);
+    };
+
+    if (ckpt_restore) {
+        if (ckpt_file.empty()) {
+            printf("#CKPT_FAIL usage: restore <file> <hash>\n");
+            return 3;
+        }
+        VerilatedRestore os;
+        os.open(ckpt_file.c_str());
+        if (!os.isOpen()) {
+            printf("#CKPT_FAIL cannot open %s\n", ckpt_file.c_str());
+            return 1;
+        }
+        std::string h;
+        os >> h;
+        if (h != ckpt_hash_arg) {
+            printf("#CKPT_REFUSE hash mismatch: file=%s snapshot=%s expected=%s\n",
+                   ckpt_file.c_str(), h.c_str(), ckpt_hash_arg.c_str());
+            exit(3);
+        }
+        os >> cyc;
+        os >> insns;
+        os >> prompt_seen;
+        os >> done_seen;
+        os >> platform_seen;
+        os >> watch_addr;
+        os >> watch_val;
+        uint32_t gate_count = 0;
+        os >> gate_count;
+        if (gate_count != (uint32_t)gates.size()) {
+            printf("#CKPT_REFUSE gate count mismatch: file=%u snapshot=%u\n",
+                   (unsigned)gates.size(), (unsigned)gate_count);
+            exit(3);
+        }
+        for (auto &g : gates) os >> g.seen;
+        uint32_t trace_count = 0;
+        os >> trace_count;
+        for (uint32_t i = 0; i < trace_count; i++) {
+            TraceEntry e;
+            os >> e.pc; os >> e.insn; os >> e.rd; os >> e.wv; os >> e.ea;
+            trace.push_back(e);
+        }
+        uint32_t store_count = 0;
+        os >> store_count;
+        for (uint32_t i = 0; i < store_count; i++) {
+            std::array<uint32_t, 3> s;
+            os >> s[0]; os >> s[1]; os >> s[2];
+            store_ring.push_back(s);
+        }
+        os >> tail;
+        os >> contextp.get();
+        os >> *model;
+        if (!os.isOpen()) {
+            printf("#CKPT_FAIL restore stream closed before model: %s\n", ckpt_file.c_str());
+            exit(1);
+        }
+        os.close();
+        print_state("RESTORE");
+    }
+#endif
+
     while (cyc < max_cycles) {
+#ifdef LINUX_CKPT
+        if (ckpt_mark && cyc == mark_cycle) print_state("MARK");
+        if (ckpt_save && cyc == save_cycle) {
+            printf("#CKPT_SAVE cyc=%llu insns=%llu file=%s hash=%s\n",
+                   (unsigned long long)cyc, (unsigned long long)insns,
+                   ckpt_file.c_str(), ckpt_hash_arg.c_str());
+            print_state("SAVE");
+            VerilatedSave os;
+            os.open(ckpt_file.c_str());
+            if (!os.isOpen()) {
+                printf("#CKPT_FAIL cannot create %s\n", ckpt_file.c_str());
+                return 1;
+            }
+            os << ckpt_hash_arg;
+            os << (uint64_t)cyc;
+            os << (uint64_t)insns;
+            os << prompt_seen;
+            os << done_seen;
+            os << platform_seen;
+            os << watch_addr;
+            os << watch_val;
+            os << (uint32_t)gates.size();
+            for (const auto &g : gates) os << g.seen;
+            os << (uint32_t)trace.size();
+            for (const auto &t : trace) {
+                os << (uint32_t)t.pc; os << (uint32_t)t.insn;
+                os << (uint32_t)t.rd; os << (uint32_t)t.wv;
+                os << (uint32_t)t.ea;
+            }
+            os << (uint32_t)store_ring.size();
+            for (const auto &s : store_ring) {
+                os << (uint32_t)s[0]; os << (uint32_t)s[1];
+                os << (uint32_t)s[2];
+            }
+            os << tail;
+            os << contextp.get();
+            os << *model;
+            if (!os.isOpen()) {
+                printf("#CKPT_FAIL save stream closed: %s\n", ckpt_file.c_str());
+                os.close();
+                return 1;
+            }
+            os.close();
+            model->final();
+            return 0;
+        }
+#endif
         uint32_t rx_ready = 0, rx_byte = 0;
         if (!model->uart_rx_pending) {
             unsigned char ch = 0;

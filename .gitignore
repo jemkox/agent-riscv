@@ -8,8 +8,6 @@ __pycache__/
 *.pyc
 deps/
 # Linux binaries/DTBs/initramfs/gate outputs: generated Buildroot outputs are release assets, not git history.
-linux/linux.dtb
-linux/vmlinux.bin
 linux/gate.txt
 linux/Image
 linux/vmlinux

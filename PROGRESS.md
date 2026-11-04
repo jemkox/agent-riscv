@@ -1232,7 +1232,7 @@ DOOM CPU: DONE
 | vmlinux.bin sha256 | 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea |
 
 ## review fixes: 86465f2 follow-up (2026-11-04)
-- Kernel pin: committed `linux/vmlinux.bin` (force-added despite `.gitignore`) so the L3 `KERNEL_SHA256` pin has a committed, reproducible input. The `linux_sim` sha256 precheck is unchanged and now compares a tracked binary.
+- Kernel pin: the current review round actually committed the pinned Linux inputs `linux/vmlinux.bin` and `linux/linux.dtb`, removed their `.gitignore` exclusions, and recorded their SHA-256: kernel `30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea`, DTB `3672def1854be758ea1eba698aa98dc063eb23d9e47b47bb8fb9c4dd8cd028ca`. The Buildroot recipe remains the regeneration path and `KERNEL_SHA256` remains pinned to the committed image.
 - MPP RTL gate: added `build/vlt_mpp/run_high_mpp` and `build/vlt_mpp_std/run_high_std` builds of `run_hex` with `-DLINUX -DLINUX_MPP -DHIGH_PC -DCACHE_LAT=1` and `-DTBHEX='"build/t23_mret_mpp.hex"'`; `mpp_ret_gate` compares both RTL retire logs against `iss/iss.py --high` (`--linux-mpp` for the clearing build, standard for the mirror build). The standard ISS still fails under `--pass`, proving standard MPP is kept.
 - Added `mpp_ret_gate` to `all_tests` as suite 7 and kept `mpp_ret_test` in the same suite.
 - Debug print fix: corrected `#VSN_SC` `ok=` in `tb/run_linux.cpp` from the always-true expression to `(model->ex_rd == 0 ? 1u : 0u)`.

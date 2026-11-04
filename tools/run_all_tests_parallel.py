@@ -15,19 +15,20 @@ def main():
     root = os.environ.get("BUILD_ROOT")
 
     specs = [
-        ("test", "[1/6] test (CACHE_LAT=1)", ["test"]),
-        ("test_lat5", "[2/6] test CACHE_LAT=5", ["CACHE_LAT=5", "test"]),
-        ("ui_um_mi", "[3/6] ui um mi", ["ui", "um", "mi"]),
-        ("regress", "[4/6] regress N=500", ["regress", "N=500"]),
-        ("m7", "[5/6] m7", ["m7"]),
-        ("doom", "[6/7] doom (31 frames)", ["doom"]),
-        ("mpp_ret", "[7/7] mpp_ret_gate (ISS mret MPP + RTL LINUX_MPP + standard mirror)", ["mpp_ret_test", "mpp_ret_gate"]),
+        ("test", "[1/8] test (CACHE_LAT=1)", ["test"]),
+        ("test_lat5", "[2/8] test CACHE_LAT=5", ["CACHE_LAT=5", "test"]),
+        ("ui_um_mi", "[3/8] ui um mi", ["ui", "um", "mi"]),
+        ("regress", "[4/8] regress N=500", ["regress", "N=500"]),
+        ("m7", "[5/8] m7", ["m7"]),
+        ("doom", "[6/8] doom (31 frames)", ["doom"]),
+        ("mpp_ret", "[7/8] mpp_ret_gate (ISS mret MPP + RTL LINUX_MPP + standard mirror)", ["mpp_ret_test", "mpp_ret_gate"]),
+        ("fpga_gates", "[8/8] FPGA gates (mgate, subw, control, CSR writes)", ["fpga_mgate", "fpga_subw_gate", "fpga_control_gate", "fpga_csr_gate"]),
     ]
     jobs = [(name, label, ["hdl", "make", "B=" + os.path.join(os.environ.get("BUILD_ROOT", "build"), "all_tests_parallel", name)] + args)
             for name, label, args in specs]
     outputs = {}
     failed = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(jobs))) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, max(1, len(jobs)))) as ex:
         future_to_name = {ex.submit(run, cmd): name for name, _label, cmd in jobs}
         for fut in concurrent.futures.as_completed(future_to_name):
             name = future_to_name[fut]
@@ -45,7 +46,7 @@ def main():
         if out["rc"] != 0:
             print(f"SUITE FAILED: {name} rc={out['rc']}")
     if failed:
-        print("ALL TESTS DONE" if False else "TEST FAILED: " + ", ".join(failed))
+        print("TEST FAILED: " + ", ".join(failed))
         raise SystemExit(1)
     print("ALL TESTS DONE")
 

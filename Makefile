@@ -55,7 +55,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell $(B)/vlt/run_hex $(B)/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -358,6 +358,10 @@ KERNEL_SHA256 ?= 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729de
 BR_ROOT ?= ../../downloads/buildroot-2025.02.19
 BR_OUT ?= ../../build-linux/nommu
 BR_DEFCONFIG ?= linux/configs/qemu_riscv32_nommu_virt_defconfig
+LINUX_CKPT_FILE ?= $(B)/linux_ckpt.bin
+LINUX_CKPT_SAVE_CYCLE ?= 85000000
+LINUX_CKPT_LATER_CYCLE ?= 90000000
+LINUX_CKPT_HASH ?= $(shell sha256sum $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb | sha256sum | cut -d' ' -f1)
 linux:
 	@mkdir -p linux $(B)/linux
 linux/linux.dtb: rtl/linux.dts linux | $(B)
@@ -401,6 +405,52 @@ linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux
 
 linux_shell: $(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb | linux
 	@mkdir -p $(B)/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 2000000000 > $(B)/linux/logs/shell.out; sed -n '1,120p' $(B)/linux/logs/shell.out; grep -q LINUX_SIM_DONE $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED" >&2; exit 1; }
+
+$(B)/vlt_linux_ckpt/run_linux_ckpt: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
+	verilator --cc --exe --savable --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DLINUX_CKPT -CFLAGS -DLINUX_CKPT -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux_ckpt -o run_linux_ckpt $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	$(MAKE) -C $(B)/vlt_linux_ckpt -f Vrun_linux.mk OPT_FAST="-O3" run_linux_ckpt -j 4
+
+linux_ckpt_hash: $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb
+	@echo "LINUX_CKPT_HASH=$(LINUX_CKPT_HASH)"
+
+linux_ckpt_save: $(B)/vlt_linux_ckpt/run_linux_ckpt linux/gate.txt | linux $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs $(B)/linux_ckpt
+	@./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $$(( $(LINUX_CKPT_SAVE_CYCLE)+1 )) run save $(LINUX_CKPT_FILE) $(LINUX_CKPT_HASH) | tee $(B)/linux/logs/ckpt_save.out
+	@grep -q "^#CKPT_SAVE " $(B)/linux/logs/ckpt_save.out || { echo "LINUX CHECKPOINT SAVE FAILED" >&2; exit 1; }
+	@sha256sum $(LINUX_CKPT_FILE) | tee $(B)/linux/logs/ckpt_save_sha.out
+
+linux_ckpt_restore: $(B)/vlt_linux_ckpt/run_linux_ckpt $(LINUX_CKPT_FILE) | linux $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs
+	@./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run restore $(LINUX_CKPT_FILE) $(LINUX_CKPT_HASH) | tee $(B)/linux/logs/ckpt_restore.out
+	@grep -q "^#CKPT_RESTORE " $(B)/linux/logs/ckpt_restore.out || { echo "LINUX CHECKPOINT RESTORE FAILED" >&2; exit 1; }
+	@grep -q "^#LINUX cycles=" $(B)/linux/logs/ckpt_restore.out || { echo "LINUX CHECKPOINT RESTORE DID NOT FINISH" >&2; exit 1; }
+
+linux_ckpt_equiv: linux_ckpt_save linux_ckpt_restore | linux $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs
+	@./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run mark $(LINUX_CKPT_SAVE_CYCLE) | tee $(B)/linux/logs/ckpt_mark.out
+	@grep -q "^#CKPT_MARK " $(B)/linux/logs/ckpt_mark.out || { echo "LINUX CHECKPOINT MARK FAILED" >&2; exit 1; }
+	@grep -q "^#LINUX cycles=" $(B)/linux/logs/ckpt_mark.out || { echo "LINUX CHECKPOINT MARK DID NOT FINISH" >&2; exit 1; }
+	@sed -n '/^#CKPT_MARK /,$$p' $(B)/linux/logs/ckpt_mark.out | grep -v '^#CKPT_MARK ' > $(B)/linux/logs/ckpt_mark_tail.out
+	@sed -n '/^#CKPT_RESTORE /,$$p' $(B)/linux/logs/ckpt_restore.out | grep -v '^#CKPT_RESTORE ' > $(B)/linux/logs/ckpt_restore_tail.out
+	@diff -u $(B)/linux/logs/ckpt_mark_tail.out $(B)/linux/logs/ckpt_restore_tail.out || { echo "LINUX CHECKPOINT EQUIVALENCE FAILED" >&2; exit 1; }
+	@grep -q "^#CKPT_SAVE " $(B)/linux/logs/ckpt_save.out || { echo "LINUX CHECKPOINT EQUIVALENCE: no save marker" >&2; exit 1; }
+	@grep -q "^#CKPT_RESTORE " $(B)/linux/logs/ckpt_restore.out || { echo "LINUX CHECKPOINT EQUIVALENCE: no restore marker" >&2; exit 1; }
+	@echo "LINUX CHECKPOINT EQUIVALENCE PASSED"
+
+linux_dbg_ckpt: $(B)/vlt_linux_ckpt/run_linux_ckpt linux/gate.txt | linux $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs $(B)/linux_ckpt
+	@echo "Checkpoint hash: $(LINUX_CKPT_HASH)"
+	@if [ -s $(LINUX_CKPT_FILE) ]; then \
+	  if ./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run restore $(LINUX_CKPT_FILE) $(LINUX_CKPT_HASH) | tee $(B)/linux/logs/ckpt_debug.out; then \
+	    echo "Restored from $(LINUX_CKPT_FILE) at cycle $(LINUX_CKPT_SAVE_CYCLE)."; \
+	  else \
+	  echo "Snapshot refused/failed; falling back to boot from cycle 0 at $$(( $(LINUX_CKPT_SAVE_CYCLE)+1 ))."; \
+	  ./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run mark $(LINUX_CKPT_SAVE_CYCLE) | tee -a $(B)/linux/logs/ckpt_debug.out; \
+	  fi; \
+	else \
+	  echo "No checkpoint file $(LINUX_CKPT_FILE); booting from cycle 0 with debug marker at $(LINUX_CKPT_SAVE_CYCLE)."; \
+	  ./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) platform mark $(LINUX_CKPT_SAVE_CYCLE) | tee $(B)/linux/logs/ckpt_debug.out; \
+	fi
 
 # --- M10b Doom probe: crt0 + picolibc stdio over the fd-table fsys layer ---
 $(B)/doom:
@@ -600,7 +650,7 @@ $(B)/fpga_m/fpga_m_prog_init.sv: $(B)/t07_m.hex | $(B)/fpga_m
 	@python3 tools/gen_fpga_rom.py $< $@
 
 $(B)/vlt_fpga_m/fpga_mtop: $(FPGA_PIPE_RTL) $(B)/fpga_m/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | $(B)/fpga_m
-	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I/fpga_m --Mdir $(B)/vlt_fpga_m -o fpga_mtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I$(B)/fpga_m --Mdir $(B)/vlt_fpga_m -o fpga_mtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
 
 fpga_mgate: $(B)/vlt_fpga_m/fpga_mtop $(B)/t07_m.bin | $(B)/fpga_m
 	@./$(B)/vlt_fpga_m/fpga_mtop > $(B)/fpga_m/t07_m.rtl.log; grep -q "TEST PASSED" $(B)/fpga_m/t07_m.rtl.log
@@ -614,7 +664,7 @@ $(B)/fpga_subw/fpga_m_prog_init.sv: $(B)/t21_fpga_subw.hex | $(B)/fpga_subw
 	@python3 tools/gen_fpga_rom.py $< $@
 
 $(B)/vlt_fpga_subw/fpga_subwtop: $(FPGA_PIPE_RTL) $(B)/fpga_subw/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | $(B)/fpga_subw
-	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I/fpga_subw --Mdir $(B)/vlt_fpga_subw -o fpga_subwtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I$(B)/fpga_subw --Mdir $(B)/vlt_fpga_subw -o fpga_subwtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
 
 fpga_subw_gate: $(B)/vlt_fpga_subw/fpga_subwtop $(B)/t21_fpga_subw.bin | $(B)/fpga_subw
 	@./$(B)/vlt_fpga_subw/fpga_subwtop > $(B)/fpga_subw/t21_fpga_subw.rtl.log; grep -q "TEST PASSED" $(B)/fpga_subw/t21_fpga_subw.rtl.log
@@ -628,7 +678,7 @@ $(B)/fpga_control/fpga_m_prog_init.sv: $(B)/t22_fpga_control.hex | $(B)/fpga_con
 	@python3 tools/gen_fpga_rom.py $< $@
 
 $(B)/vlt_fpga_control/fpga_controltop: $(FPGA_PIPE_RTL) $(B)/fpga_control/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | $(B)/fpga_control
-	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I/fpga_control --Mdir $(B)/vlt_fpga_control -o fpga_controltop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I$(B)/fpga_control --Mdir $(B)/vlt_fpga_control -o fpga_controltop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
 
 fpga_control_gate: $(B)/vlt_fpga_control/fpga_controltop $(B)/t22_fpga_control.bin | $(B)/fpga_control
 	@./$(B)/vlt_fpga_control/fpga_controltop > $(B)/fpga_control/t22_fpga_control.rtl.log; grep -q "TEST PASSED" $(B)/fpga_control/t22_fpga_control.rtl.log
@@ -642,7 +692,7 @@ $(B)/fpga_csr/fpga_m_prog_init.sv: $(B)/t24_fpga_csr_writes.hex | $(B)/fpga_csr
 	@python3 tools/gen_fpga_rom.py $(B)/t24_fpga_csr_writes.hex $(B)/fpga_csr/fpga_m_prog_init.sv
 
 $(B)/vlt_fpga_csr/fpga_csr_top: $(FPGA_PIPE_RTL) $(B)/fpga_csr/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | $(B)/fpga_csr
-	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I/fpga_csr --Mdir $(B)/vlt_fpga_csr -o fpga_csr_top $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I$(B)/fpga_csr --Mdir $(B)/vlt_fpga_csr -o fpga_csr_top $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
 
 fpga_csr_gate: $(B)/vlt_fpga_csr/fpga_csr_top $(B)/t24_fpga_csr_writes.bin | $(B)/fpga_csr
 	@./$(B)/vlt_fpga_csr/fpga_csr_top > $(B)/fpga_csr/t24_fpga_csr_writes.rtl.log; grep -q "TEST PASSED" $(B)/fpga_csr/t24_fpga_csr_writes.rtl.log
