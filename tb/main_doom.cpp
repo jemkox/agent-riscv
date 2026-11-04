@@ -32,9 +32,9 @@ static uint32_t lookup_sym(const char *path, const char *name) {
     return 0;
 }
 
-static std::string frame_path(int i) {
-    char buf[96];
-    snprintf(buf, sizeof buf, "build/doom/frames/frame_%03d.ppm", i);
+static std::string frame_path(const std::string &base, int i) {
+    char buf[128];
+    snprintf(buf, sizeof buf, "%s/frame_%03d.ppm", base.c_str(), i);
     return std::string(buf);
 }
 
@@ -43,14 +43,19 @@ int main(int argc, char **argv) {
     std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
     std::unique_ptr<Vrun_doom> model{new Vrun_doom(contextp.get())};
 
+    const std::string prog_path = (argc > 2) ? argv[2] : "build/doom/doom.hex";
+    const std::string wad_path = (argc > 3) ? argv[3] : "build/doom/wad.hex";
+    const std::string sym_path = (argc > 4) ? argv[4] : "build/doom/doom.syms";
+    const std::string log_path = (argc > 5) ? argv[5] : "build/doom/logs/run.out";
+    const std::string frames_base = (argc > 6) ? argv[6] : "build/doom/frames";
     std::vector<uint32_t> prog, wad;
-    if (!load_hex("build/doom/doom.hex", prog)) {
-        printf("doom hex missing\n"); return 1;
+    if (!load_hex(prog_path.c_str(), prog)) {
+        printf("doom hex missing: %s\n", prog_path.c_str()); return 1;
     }
-    if (!load_hex("build/doom/wad.hex", wad)) {
-        printf("wad hex missing\n"); return 1;
+    if (!load_hex(wad_path.c_str(), wad)) {
+        printf("wad hex missing: %s\n", wad_path.c_str()); return 1;
     }
-    uint32_t fb_sym = lookup_sym("build/doom/doom.syms", "DG_ScreenBuffer");
+    uint32_t fb_sym = lookup_sym(sym_path.c_str(), "DG_ScreenBuffer");
     printf("sym DG_ScreenBuffer = %08x\n", fb_sym);
 
     const uint32_t FRAME_ADDR = 0x1FF00004u;
@@ -96,7 +101,7 @@ int main(int argc, char **argv) {
         return (rww[w] >> s) | (rww[(w + 1) & 0x7FFFFFu] << (32 - s));
     };
 
-    FILE *uartlog = fopen("build/doom/logs/run.out", "w");
+    FILE *uartlog = fopen(log_path.c_str(), "w");
     uint64_t insn = 0, frames = 0, last_frame_cyc = 0;
     const uint64_t max_cycles = (argc > 1) ? atoll(argv[1]) : 400000000ull;
     const int max_frames = 31;
@@ -114,7 +119,7 @@ int main(int argc, char **argv) {
         if (model->ex_st && model->ex_sa == FRAME_ADDR) {
             uint32_t fb = read_word(fb_sym);
             if (frames < (uint64_t)max_frames && fb && uartlog) {
-                std::string p = frame_path((int)frames);
+                    std::string p = frame_path(frames_base, (int)frames);
                 FILE *ppm = fopen(p.c_str(), "w");
                 if (ppm) {
                     fprintf(ppm, "P6\n%d %d\n255\n", FB_W, FB_H);

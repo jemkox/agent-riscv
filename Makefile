@@ -364,6 +364,8 @@ LINUX_CKPT_LATER_CYCLE ?= 90000000
 LINUX_CKPT_HASH ?= $(shell sha256sum $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb | sha256sum | cut -d' ' -f1)
 linux:
 	@mkdir -p linux $(B)/linux
+$(B)/linux/logs:
+	@mkdir -p $@
 linux/linux.dtb: rtl/linux.dts linux | $(B)
 	@mkdir -p linux
 	@dtc -I dts -O dtb -o linux/linux.dtb rtl/linux.dts
@@ -390,10 +392,10 @@ linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
 	@mkdir -p $(B)/linux/logs; ./$(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee $(B)/linux/logs/boot_dbg.out
 
-linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux
+linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux $(B)/linux/logs
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX L3 TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256)); rebuild with make linux_rebuild_kernel or download the pinned image from the GitHub Release asset" >&2; exit 1; }
-	@mkdir -p $(B)/linux/logs; ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 6000000 platform | tee $(B)/linux/logs/boot.out
+	./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 6000000 platform | tee $(B)/linux/logs/boot.out
 	@grep -q "^#STOP platform" $(B)/linux/logs/boot.out || { echo "LINUX L3 PLATFORM BOOT TEST FAILED" >&2; exit 1; }
 	@grep -q "#GATE start_kernel " $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: start_kernel not reached" >&2; exit 1; }
 	@grep -q "#GATE kernel_init " $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init not reached" >&2; exit 1; }
@@ -441,15 +443,18 @@ linux_dbg_ckpt: $(B)/vlt_linux_ckpt/run_linux_ckpt linux/gate.txt | linux $(B)/l
 	@mkdir -p $(B)/linux/logs $(B)/linux_ckpt
 	@echo "Checkpoint hash: $(LINUX_CKPT_HASH)"
 	@if [ -s $(LINUX_CKPT_FILE) ]; then \
-	  if ./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run restore $(LINUX_CKPT_FILE) $(LINUX_CKPT_HASH) | tee $(B)/linux/logs/ckpt_debug.out; then \
+	  ./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run restore $(LINUX_CKPT_FILE) $(LINUX_CKPT_HASH) | tee $(B)/linux/logs/ckpt_debug.out; \
+	  if grep -q '^#CKPT_RESTORE ' $(B)/linux/logs/ckpt_debug.out; then \
 	    echo "Restored from $(LINUX_CKPT_FILE) at cycle $(LINUX_CKPT_SAVE_CYCLE)."; \
 	  else \
-	  echo "Snapshot refused/failed; falling back to boot from cycle 0 at $$(( $(LINUX_CKPT_SAVE_CYCLE)+1 ))."; \
-	  ./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run mark $(LINUX_CKPT_SAVE_CYCLE) | tee -a $(B)/linux/logs/ckpt_debug.out; \
+	    echo "Snapshot refused/failed; falling back to boot from cycle 0 at $$(( $(LINUX_CKPT_SAVE_CYCLE)+1 ))."; \
+	    ./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run mark $(LINUX_CKPT_SAVE_CYCLE) | tee -a $(B)/linux/logs/ckpt_debug.out; \
+	    grep -q '^#CKPT_MARK ' $(B)/linux/logs/ckpt_debug.out || { echo "LINUX_DBG_CKPT fallback marker failed" >&2; exit 1; }; \
 	  fi; \
 	else \
 	  echo "No checkpoint file $(LINUX_CKPT_FILE); booting from cycle 0 with debug marker at $(LINUX_CKPT_SAVE_CYCLE)."; \
 	  ./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) platform mark $(LINUX_CKPT_SAVE_CYCLE) | tee $(B)/linux/logs/ckpt_debug.out; \
+	  grep -q '^#CKPT_MARK ' $(B)/linux/logs/ckpt_debug.out || { echo "LINUX_DBG_CKPT boot marker failed" >&2; exit 1; }; \
 	fi
 
 # --- M10b Doom probe: crt0 + picolibc stdio over the fd-table fsys layer ---
@@ -515,7 +520,11 @@ $(B)/vlt_doom/run_doom: $(RTL) $(DOOM_TB) $(DOOM_MAIN) | $(B)/doom
 	$(MAKE) -C $(B)/vlt_doom -f Vrun_doom.mk OPT_FAST="$(OPT_FAST)" run_doom -j 4
 
 doom: $(B)/vlt_doom/run_doom $(B)/doom/doom.hex $(B)/doom/wad.hex $(B)/doom/doom.syms
-	@mkdir -p $(B)/doom/frames $(B)/doom/logs; ./$(B)/vlt_doom/run_doom 400000000; grep "#frame\|#RUN" $(B)/doom/logs/run.out | tail -n 40
+	@mkdir -p $(B)/doom/frames $(B)/doom/logs
+	@./$(B)/vlt_doom/run_doom 400000000 $(B)/doom/doom.hex $(B)/doom/wad.hex $(B)/doom/doom.syms $(B)/doom/logs/run.out $(B)/doom/frames || exit 1
+	@grep -q "frames=31 .*halt=0" $(B)/doom/logs/run.out || { echo "DOOM 31-FRAME GATE FAILED" >&2; exit 1; }
+	@grep "#frame\|#RUN" $(B)/doom/logs/run.out | tail -n 40
+	@echo "TEST PASSED (Doom: 31 frames, halt=0)"
 
 # M10f: playable Doom (SDL2 window + key FIFO MMIO). WINDOW mode: run with
 # `hdl make play`; `play_test` = scripted headless verification w/ frame diff.
@@ -540,8 +549,9 @@ play_test: $(B)/vlt_play/run_play $(B)/doom/doom.hex $(B)/doom/wad.hex $(B)/doom
 	@PLAY_SCRIPT="$(PLAY_SCRIPT)" python3 tools/play_verify.py
 	@python3 tools/ppm2png.py $(B)/play/frames/frame_342.ppm=docs/doom/play_menu.png $(B)/play/frames/frame_500.ppm=docs/doom/play_move_a.png $(B)/play/frames/frame_560.ppm=docs/doom/play_move_b.png
 
-doom_mem: $(B)/vlt_doom/run_doom | $(B)
-	./$(B)/vlt_doom/run_doom
+doom_mem: $(B)/vlt_doom/run_doom $(B)/doom/doom.hex $(B)/doom/wad.hex $(B)/doom/doom.syms
+	@mkdir -p $(B)/doom/frames $(B)/doom/logs
+	./$(B)/vlt_doom/run_doom 400000000 $(B)/doom/doom.hex $(B)/doom/wad.hex $(B)/doom/doom.syms $(B)/doom/logs/doom_mem.out $(B)/doom/frames
 
 lat1:
 	$(MAKE) CACHE_LAT=1 test

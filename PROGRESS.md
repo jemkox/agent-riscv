@@ -1283,8 +1283,9 @@ NETLIST_BASELINE LUT4=3046 FLOPS=1082 explained: FPGA RF retime retained plus im
 - Current measured checkpoint cycle state matches exactly in all modes:
   `#CKPT_SAVE cyc=85000000 insns=58790789 pc=800369e0 insn=f60708e3 rd=17 wv=80818048 st=0 ea=80818048 halt=0 prompt=0 done=0 platform=0`,
   `#CKPT_MARK ...` and `#CKPT_RESTORE ...` all match that line.
-- Wall times measured: `time hdl make linux_ckpt_save` = `0m41,672s`; `time hdl make linux_ckpt_restore` = `0m2,430s`; direct full `linux_ckpt` mark from cycle 0 to cycle 90,000,000 = `0m41,751s`. The repeated checkpoint-to-90M debug range is `41.75 / 2.43 = 17.2x` faster than booting the full 90M cycles; save once costs `41.67s`, so after the first save the 85M-90M window is the fast path.
+- Wall times measured: `time hdl make linux_ckpt_save` = `0m41,672s` before the review fixes, and current after review fixes: save `0m40,320s`; restore `0m2,413s`; direct full `linux_ckpt` mark from cycle 0 to cycle 90,000,000 = `0m41,598s`. The repeated checkpoint-to-90M debug range is `41.598 / 2.413 = 17.2x` faster than booting the full 90M cycles; save once costs `40.32s`, so after the first save the 85M-90M window is the fast path.
 - `hdl make linux_ckpt_equiv` passed: it builds/saves, restores, marks the full run, extracts both tails after the matching checkpoint marker, and `diff` reported no output. The compared tail files are `build/linux/logs/ckpt_mark_tail.out` and `build/linux/logs/ckpt_restore_tail.out`, each 691 lines.
+- Doom/all_tests honesty: `doom:` now passes `$(B)`-relative `doom.hex`, `wad.hex`, `doom.syms`, log, and frame paths to `tb/main_doom.cpp` via argv, checks runner exit with `|| exit 1`, and gates on `frames=31 .*halt=0`. The `all_tests` gate therefore honestly includes Doom, but it needs the Doom inputs/artifacts to exist for the selected build root: the pinned WAD (or a prebuilt `build/doom/doom.hex` plus the parallel `$(B)/all_tests_parallel/doom` artifacts). With no WAD and no prebuilt Doom artifacts, the Doom suite fails rather than silently skipping.
 - Refusal check: passing a wrong hash to restore printed exactly `#CKPT_REFUSE hash mismatch: file=build/linux_ckpt.bin snapshot=... expected=...` and exited non-zero; the fallback target boots from cycle 0 instead.
 - Re-measured current gates after checkpoint code: `hdl make test` ended `ALL PASS`, `hdl make all_tests` ended `ALL TESTS DONE` in `0m27,988s`, and `hdl make linux_sim` still passed the L3 cycle-0 platform gate.
 
@@ -1292,10 +1293,34 @@ NETLIST_BASELINE LUT4=3046 FLOPS=1082 explained: FPGA RF retime retained plus im
 | item | value |
 |---|---|
 | checkpoint save cycle | 85,000,000 (`#HND_SP_ST` debug region is around 84.6M-85.0M+) |
-| save wall time | 41.672s (`linux_ckpt_save` boot to save and stop) |
-| restore wall time | 2.430s (snapshot at 85M to 90M) |
-| full mark wall time | 41.751s (cycle 0 to 90M) |
-| checkpoint debug speedup | 17.2x for repeated 85M-90M debug runs |
+| save wall time | current after review fixes: 40.320s (`linux_ckpt_save` boot to save and stop) |
+| restore wall time | current after review fixes: 2.413s (snapshot at 85M to 90M) |
+| full mark wall time | current after review fixes: 41.598s (cycle 0 to 90M) |
+| checkpoint debug speedup | current after review fixes: 17.2x for repeated 85M-90M debug runs |
 | equivalence | `linux_ckpt_equiv` PASSED, tails equal, state line equal at cyc=85,000,000 |
 | hash refusal | `#CKPT_REFUSE hash mismatch`, non-zero exit |
 | normal Linux gate | `linux_sim` remains cycle-0 boot, TEST PASSED |
+
+## review fixes: 6b3e22a follow-up (2026-11-04)
+- Added `$(B)/linux/logs:` as a real Make rule with `@mkdir -p $@`, and made `linux_sim`, `linux_ckpt_save`, `linux_ckpt_restore`, `linux_ckpt_equiv`, and `linux_dbg_ckpt` depend on it order-only. `hdl make linux_ckpt_save` now works when `build/linux/logs` is absent instead depending on a previous side effect.
+- `linux_dbg_ckpt` no longer pipes the restore directly into `if`, where the runner exit status is hidden by `tee`. It now runs the restore, `tee`s to the log, then checks for `^#CKPT_RESTORE`; on failure it runs the boot/mark fallback and requires `^#CKPT_MARK` in the same log before declaring success.
+- `doom:` and `doom_mem:` now pass the `$(B)`-relative hex, WAD, symbol, log, and frame-base paths as argv to `tb/main_doom.cpp`. `main()` uses argv paths instead of hard-coded `build/doom/...`; the `doom:` target fails if the runner fails and gates on `frames=31 .*halt=0`.
+- Updated claim metadata:
+  - FreeRTOS current tree `hdl make freertos` is `FREERTOS PASS cycles=1124012 insns=899607 IPC=0.800 halt=1` with the vendored `deps/FreeRTOS-Kernel` input; the fresh/offline clone input reports `cycles=1124204 insns=899606 IPC=0.800 halt=1`. Both are now labeled with input tree/cycles/insns.
+  - `fpga_full` is no longer quoted as one universal 17.38/16.93 value without seed. Current tree after these infrastructure fixes: `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` reports `3046 LUT4 / 1082 flops`, route `17.90 MHz` post-synth / `17.40 MHz` final route, PASS at 13 MHz, netlist check OK. The old `17.38 MHz / 16.93 MHz` row is reproducible with `FPGA_SEED=0`.
+  - Checkpoint speedup is now measured from current run wall times: full 90M mark `41.598s` / restore `2.413s` = `17.2x`.
+- Verified after review fixes: `hdl make test` ended `ALL PASS`; `hdl make all_tests` ended `ALL TESTS DONE` including Doom 31 frames; `hdl make linux_sim` passed L3; `hdl make doom` passed with argv paths and gate `frames=31 .*halt=0`; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` regenerated route 17.90/17.40; `hdl make linux_ckpt_save`/`linux_ckpt_restore` passed; `hdl make linux_ckpt_equiv` printed `LINUX CHECKPOINT EQUIVALENCE PASSED`.
+
+### Metrics (review fixes: 6b3e22a follow-up, measured this session)
+| item | value |
+|---|---|
+| `linux_ckpt_save` logs rule | `$(B)/linux/logs:` rule present; save target passes from saved cycle |
+| `linux_dbg_ckpt` status | restore status checked after `tee` via `#CKPT_RESTORE`; fallback requires `#CKPT_MARK` |
+| `doom` target | TEST PASSED, `frames=31 halt=0`, argv `$(B)` paths, runner failure fails target |
+| `all_tests` | ALL TESTS DONE, Doom included and gated on `frames=31 halt=0` |
+| freertos current tree | `FREERTOS PASS cycles=1124012 insns=899607 IPC=0.800 halt=1` |
+| freertos fresh/offline metadata | fresh/offline input: `cycles=1124204 insns=899606 IPC=0.800 halt=1` |
+| `fpga_full` current seed4 | 3046 LUT4 / 1082 flops / 17.90 MHz post-synth / 17.40 MHz final route, PASS at 13 MHz, netlist check OK |
+| `fpga_full` seed0 metadata | old 17.38/16.93 row reproduced with `FPGA_SEED=0` |
+| checkpoint equivalence | `linux_ckpt_equiv` PASSED, tail files 691 lines each, state line equal at cyc=85,000,000 |
+| checkpoint speedup | current 41.598s full mark / 2.413s restore = 17.2x |
