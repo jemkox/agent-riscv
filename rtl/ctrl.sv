@@ -27,7 +27,7 @@ module ctrl (
   output logic         is_mret,
   output logic         is_ill,
   output logic         is_csr,      // Zicsr CSRRW/S/C and immediate forms
-  output logic         is_wfi,      // WFI (0x10000073): waits until an IRQ is pending
+  output logic         is_wfi,      // WFI builder aliases: 0x100 (x10000073) and 0x105 (x10500073)
   output logic         is_amo,      // A: LR/SC/AMO*.w (simulation CPU only; FPGA: 0)
   output logic         is_lr,       // LR.W
   output logic         is_sc,       // SC.W

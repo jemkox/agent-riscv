@@ -1121,7 +1121,7 @@ DOOM CPU: DONE
 | all_tests | ALL TESTS DONE (doom 123,801,143 cycles unchanged) |
 | coremark | 3.193 CoreMark/MHz unchanged |
 | freertos | PASS, 1,124,012 cycles (deps input; range 1,124,012-1,124,204 cross-tree) |
-| fpga_full | seed4/seed5 13.34/13.10 MHz PASS (3828 LUT4 + 549 CARRY, 8 RAM) |
+| fpga_full | STALE for current tree: 3828 LUT4 + 549 CARRY, 8 RAM, seed4/seed5 13.34/13.10 MHz; current re-measure (review round 2026-11-04, seed 4): 2454 LUT4 / 2984 LC / 17.43/17.14 MHz |
 | fpga (small) | 23.96/23.05 MHz PASS at 20 MHz, TEST PASSED |
 
 ## L2.1: atomics review fixes (2026-11-03)
@@ -1144,7 +1144,7 @@ DOOM CPU: DONE
   - `rtl/cache32_fpga.sv`: FPGA store byte-enable updates now combine the old 16-bit cache cell with changed bytes instead of issuing several assignments to the same cell; store data extraction shifted from `{sd_raw, 32'h0}` to `{32'h0, sd_raw}`.
   - `tb/fpga_pipe_tb.sv`: the FPGA runner prints a retire line before testing `halt`, matching `tb/run_hex.sv`, so the final `xhalt` instruction is counted like the ISS.
 - Fresh clone check after committing this work: `mkdir ../rv32cpu-check3 && git clone -q . ../rv32cpu-check3 && hdl make -C ../rv32cpu-check3 test` printed `ALL PASS`.
-- Re-measured suites on the fixed tree: `hdl make all_tests` ended `ALL TESTS DONE` with Doom unchanged (`cycles=123801143 insns=112822612 frames=31 halt=0`); `hdl make coremark` unchanged `CoreMark 1.0 : 41.504125`, `156610941` ticks / 500 iterations, `3.193 CoreMark/MHz`; `hdl make freertos` printed `FREERTOS PASS` with `cycles=1124012`; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` printed `ICESTORM_LC: 4541/5280` and `Max frequency ... 13.31 MHz (PASS at 13.00 MHz)` / `13.10 MHz (PASS at 13.00 MHz)`; `hdl make lint` and `hdl make mdiu_tb` passed (`TEST PASSED (46 cases)`).
+- Re-measured suites on the fixed tree (historical L2.2 row; `fpga_full` is stale for the current tree): `hdl make all_tests` ended `ALL TESTS DONE` with Doom unchanged (`cycles=123801143 insns=112822612 frames=31 halt=0`); `hdl make coremark` unchanged `CoreMark 1.0 : 41.504125`, `156610941` ticks / 500 iterations, `3.193 CoreMark/MHz`; `hdl make freertos` printed `FREERTOS PASS` with `cycles=1124012`; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` printed `ICESTORM_LC: 4541/5280` and `Max frequency ... 13.31 MHz (PASS at 13.00 MHz)` / `13.10 MHz (PASS at 13.00 MHz)`; `hdl make lint` and `hdl make mdiu_tb` passed (`TEST PASSED (46 cases)`). The current-tree re-measurement is 2454 LUT4 / 2984 LC / 17.43/17.14 MHz at seed 4.
 - Honest limitation: the FPGA behavioral gate uses a simulation stub for `SB_RAM40_4K`; the review round changed it from immediate-read semantics to a one-cycle `RCLK`-latched `RDATA` model and retimed the FPGA-build `regs32` operands so operand reads start one cycle earlier. This matches the routed netlist's synchronous BRAM read latency in simulation, but real physical-card run behavior remains unverified until a physical run is available. The real iCE40 netlist is still checked by `fpga_full` synthesis/route and `fpga_test`.
 - Next: L3 Linux platform runner `hdl make linux_sim` with >= 64 MB RAM, CLINT, 16550 UART, DTS/DTB for this machine.
 
@@ -1212,4 +1212,21 @@ DOOM CPU: DONE
 | lint | clean |
 | all_tests | ALL TESTS DONE |
 | linux_sim | TEST PASSED, cycles=3,648,358, insns=3,376,075, prompt=0 |
+| vmlinux.bin sha256 | 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea |
+
+## review fixes: second pass (2026-11-04)
+- MPP: removed the `cs_pc[31]`-based `mret` privilege clearing in `rtl/csrs.sv`. `mstatus` writes and `mret` now keep MPP fixed at M-mode; `mret` only moves `MPIE` into `MIE`. This matches the ISS `trap_mstatus()`/`mret_mstatus()` policy (`MPP=0x1800`) without high-PC accommodation. Re-run after this change: `hdl make all_tests` ended `ALL TESTS DONE`, and `hdl make linux_sim` still passes L3.
+- Kernel reproducibility: pinned expected Linux kernel sha256 in the Makefile (`KERNEL_SHA256`), added a `linux_sim` precheck `sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256)`, and documented the Buildroot recipe `make linux_rebuild_kernel` with the committed defconfig plus short kernel fragments. If a rebuild yields a different binary, L3 now fails on the sha256 check rather than silently booting the wrong kernel.
+- Reduced committed generated Linux inputs: removed full `linux/configs/System.map` and full 1939-line `linux-nommu.config`; added a tiny `linux/configs/gate-symbols.map` for gate generation and a short `linux-nommu.fragment` (plus existing `linux-isa-min.config`) for the Buildroot kernel config. The runner gate input remains the small generated `linux/gate.txt`.
+- FPGA metrics honesty: annotated the historical L2.1/L2.2 `fpga_full` rows as stale for the current tree and recorded the current re-measurement: `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` -> 2454 LUT4 / 2984 LC / 17.43 MHz post-synth / 17.14 MHz final route, PASS at 13 MHz.
+- WFI wording: made the ISS/RTL comments and README wording agree that simulation accepts the builder alias `0x100` (`x10000073`) and spec encoding `0x105` (`x10500073`) as WFI nops when no IRQ is pending; FPGA `ifdef` keeps WFI disabled.
+- Verified: `hdl make lint` clean, `hdl make all_tests` ended `ALL TESTS DONE`, `hdl make linux_sim` passed with the sha256 check active, and `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` regenerated `build/cpu_full.bin` with the numbers above.
+
+### Metrics (second review pass, measured this session)
+| item | value |
+|---|---|
+| lint | clean |
+| all_tests | ALL TESTS DONE |
+| linux_sim | TEST PASSED, cycles=3,648,358, insns=3,376,075, prompt=0, sha256 verified |
+| fpga_full seed4 | 2454 LUT4 / 2984 LC / 17.43/17.14 MHz PASS at 13 MHz |
 | vmlinux.bin sha256 | 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea |

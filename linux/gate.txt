@@ -3,3 +3,4 @@ kernel_init 8046cfc4
 kernel_init_freeable 804753d0
 wait_for_initramfs 80001068
 run_init_process 804635e0
+__stack_chk_fail 8046c9d4

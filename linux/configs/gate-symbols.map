@@ -1,0 +1,6 @@
+80001068 T wait_for_initramfs
+804635e0 t run_init_process
+8046c9d4 T __stack_chk_fail
+8046cfc4 t kernel_init
+80474b30 T start_kernel
+804753d0 t kernel_init_freeable

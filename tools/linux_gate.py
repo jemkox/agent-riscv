@@ -3,7 +3,7 @@ import sys
 
 def main(argv):
     if len(argv) != 3:
-        print("usage: tools/linux_gate.py System.map linux/gate.txt")
+        print("usage: tools/linux_gate.py gate-symbols.map linux/gate.txt")
         return 1
     names = [
         "start_kernel",
@@ -12,12 +12,13 @@ def main(argv):
         "wait_for_initramfs",
         "run_init_process",
     ]
+    optional = ["__stack_chk_fail"]
     found = {}
     for line in open(argv[1]):
         parts = line.split()
         if len(parts) >= 3:
             addr, typ, name = parts[:3]
-            if name in names and name not in found:
+            if name in (names + optional) and name not in found:
                 try:
                     found[name] = int(addr, 16)
                 except ValueError:
@@ -29,6 +30,9 @@ def main(argv):
     with open(argv[2], "w") as out:
         for n in names:
             out.write("%s %08x\n" % (n, found[n]))
+        for n in optional:
+            if n in found:
+                out.write("%s %08x\n" % (n, found[n]))
     return 0
 
 if __name__ == "__main__":

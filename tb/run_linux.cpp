@@ -97,6 +97,7 @@ int main(int argc, char **argv) {
     std::deque<TraceEntry> trace;
     std::deque<std::array<uint32_t, 3>> store_ring;
     bool prompt_seen = false, done_seen = false, platform_seen = false;
+    uint32_t watch_addr = 0, watch_val = 0;
     auto feed_output = [&](uint32_t ch) {
         std::putchar((char)ch);
         std::fflush(stdout);
@@ -152,6 +153,60 @@ int main(int argc, char **argv) {
             if (model->ex_st) {
                 store_ring.push_back({model->ex_pc, model->ex_ea, model->ex_sd});
                 if (store_ring.size() > 400) store_ring.pop_front();
+            }
+            {
+                uint32_t p = model->ex_pc;
+                if (p == 0x8045ef8cu || p == 0x8045f08cu) {
+                    printf("#VSN_BASE cyc=%llu pc=%08x ea=%08x val=%08x\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_ea, (unsigned)model->ex_wv);
+                }
+                if (p == 0x8045ef90u) {
+                    printf("#VSN_CAN_ST cyc=%llu pc=%08x ea=%08x val=%08x\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_ea, (unsigned)model->ex_sd);
+                    watch_addr = model->ex_ea;
+                    watch_val = model->ex_sd;
+                }
+                if (watch_addr && model->ex_st && model->ex_ea == watch_addr) {
+                    printf("#WATCH_ST cyc=%llu pc=%08x ea=%08x val=%08x expected=%08x\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_ea, (unsigned)model->ex_sd,
+                           (unsigned)watch_val);
+                }
+                if (p == 0x8045f088u) {
+                    printf("#VSN_CAN_LD cyc=%llu pc=%08x ea=%08x val=%08x\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_ea, (unsigned)model->ex_wv);
+                    if (model->ex_ea == watch_addr && model->ex_wv != watch_val) {
+                        printf("#WATCH_BAD_LD cyc=%llu pc=%08x ea=%08x got=%08x expected=%08x\n",
+                               (unsigned long long)cyc, (unsigned)p,
+                               (unsigned)model->ex_ea, (unsigned)model->ex_wv,
+                               (unsigned)watch_val);
+                    }
+                    watch_addr = 0;
+                    watch_val = 0;
+                }
+                if (p == 0x8045f090u && model->ex_wv != 0) {
+                    printf("#VSN_MISMATCH cyc=%llu xor=%08x\n",
+                           (unsigned long long)cyc, (unsigned)model->ex_wv);
+                }
+                if (p == 0x80473ef4u) {
+                    printf("#VSN_SC cyc=%llu pc=%08x ea=%08x val=%08x ok=%u\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_ea, (unsigned)model->ex_sd,
+                           (unsigned)(model->ex_rd == 0 ? 1u : 1u));
+                }
+                if (p == 0x80473dc0u || p == 0x80473dc4u) {
+                    printf("#HND_SP_ST cyc=%llu pc=%08x ea=%08x val=%08x\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_ea, (unsigned)model->ex_sd);
+                }
+                if (p == 0x80473dc8u) {
+                    printf("#HND_SP_LD cyc=%llu pc=%08x ea=%08x val=%08x\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_ea, (unsigned)model->ex_wv);
+                }
             }
         }
         if (model->uart_tx_valid) feed_output(model->uart_tx_out & 0xFFu);

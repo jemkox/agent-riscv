@@ -1,6 +1,5 @@
 // csrs.sv - machine-mode CSR state: counters, trap state, test halt CSR.
-// Standard L1 model: mstatus MPP read-only M-mode in ROM/test code (pc<0x8000_0000);
-// high-region kernel code may write MPP so Linux can drop to userspace (L4+).
+// Standard L1 model: mstatus MPP is read-only M-mode until S/U support arrives (L5).
 // MPIE<-MIE, MIE<-0; mret does MIE<-MPIE. Timer is the CLINT device.
 `default_nettype none
 /* verilator lint_off UNUSED */
@@ -212,12 +211,9 @@ module csrs (
         st_mstatus <= (after_mstatus & ~32'h0000_0088) |
                       (((after_mstatus & 32'h0000_0008) != 0) ? 32'h0000_0080 : 32'h0);
       else if (mret_en)
-        // mret: MIE <- MPIE. High-PC (kernel/Linux) mrets also clear MPP (QEMU/Linux M-mode
-        // nommu: kernel runs at 0x8000_0000+, test ROMs do not) so traps from userspace
-        // save an M-mode-free mstatus and the kernel takes its user-mode ecall path.
-        st_mstatus <= (after_mstatus & ~32'h0000_1808) |
-                      (after_mstatus[7] ? 32'h0000_0008 : 32'h0) |
-                      (cs_pc[31] ? 32'h0 : MSTATUS_MPP);
+        // mret: MIE <- MPIE only. MPP is read-only M-mode until L5; mret does not clear it.
+        st_mstatus <= (after_mstatus & ~32'h0000_0088) |
+                      (((after_mstatus & 32'h0000_0080) != 0) ? 32'h0000_0008 : 32'h0);
       else
         st_mstatus <= mstatus_wr;
       if (cs_write_en) begin

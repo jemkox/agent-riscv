@@ -260,7 +260,7 @@ def main(argv):
                         continue
                     mret_mstatus()
                     npc = cs_get(0x341) & mask
-                elif csr_num in (0x100, 0x105): # WFI builder aliases: nop unless IRQ pending
+                elif csr_num in (0x100, 0x105): # WFI builder aliases: 0x100 (x10000073) and 0x105 (x10500073)
                     if irq_p:
                         pc = do_irq(); steps += 1
                         continue
