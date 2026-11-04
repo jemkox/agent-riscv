@@ -1275,3 +1275,27 @@ NETLIST_BASELINE LUT4=3046 FLOPS=1082 explained: FPGA RF retime retained plus im
 | freertos current tree | `FREERTOS PASS`, cycles=1,124,012, insns=899,607, IPC=0.800 |
 | fpga_full current seed0/seed4 | 3046 LUT4 / 1082 flops / 17.38/16.93 MHz PASS at 13 MHz, netlist check OK |
 | fpga small current | 23.96/23.05 MHz PASS at 20 MHz |
+
+## speedup 2: savable Linux boot checkpoints (2026-11-04)
+- Added a separate Linux checkpoint runner under `-DLINUX_CKPT`: `$(B)/vlt_linux_ckpt/run_linux_ckpt` is built with Verilator `--savable --cc --exe --savable` (actually `--savable`, not the normal `linux_sim` runner), and `tb/run_linux.cpp` now has a guarded save/restore path. The normal `linux_sim` target remains cycle-0 boot gate and does not load snapshots.
+- Added Makefile targets: `linux_ckpt_hash`, `linux_ckpt_save`, `linux_ckpt_restore`, `linux_ckpt_equiv`, and `linux_dbg_ckpt`. Default checkpoint cycle is `LINUX_CKPT_SAVE_CYCLE ?= 85000000` (just before the current `#HND_SP_ST` loop/debug region at ~84.6M-85.0M cycles), and the debug/later target uses `LINUX_CKPT_LATER_CYCLE ?= 90000000`.
+- The snapshot stores `LINUX_CKPT_HASH` (SHA-256 over all Linux `RTL` sources plus `tb/run_linux.sv`, `tb/run_linux.cpp`, `linux/vmlinux.bin`, and `linux/linux.dtb`), then Verilated context/model state plus runner-visible simulation state: cycle, retired-instruction count, prompt/done/platform flags, gate seen flags, trace/store rings, and UART tail. Restore compares the stored hash with the current hash and calls `exit(3)` with `#CKPT_REFUSE hash mismatch...` on mismatch.
+- Current measured checkpoint cycle state matches exactly in all modes:
+  `#CKPT_SAVE cyc=85000000 insns=58790789 pc=800369e0 insn=f60708e3 rd=17 wv=80818048 st=0 ea=80818048 halt=0 prompt=0 done=0 platform=0`,
+  `#CKPT_MARK ...` and `#CKPT_RESTORE ...` all match that line.
+- Wall times measured: `time hdl make linux_ckpt_save` = `0m41,672s`; `time hdl make linux_ckpt_restore` = `0m2,430s`; direct full `linux_ckpt` mark from cycle 0 to cycle 90,000,000 = `0m41,751s`. The repeated checkpoint-to-90M debug range is `41.75 / 2.43 = 17.2x` faster than booting the full 90M cycles; save once costs `41.67s`, so after the first save the 85M-90M window is the fast path.
+- `hdl make linux_ckpt_equiv` passed: it builds/saves, restores, marks the full run, extracts both tails after the matching checkpoint marker, and `diff` reported no output. The compared tail files are `build/linux/logs/ckpt_mark_tail.out` and `build/linux/logs/ckpt_restore_tail.out`, each 691 lines.
+- Refusal check: passing a wrong hash to restore printed exactly `#CKPT_REFUSE hash mismatch: file=build/linux_ckpt.bin snapshot=... expected=...` and exited non-zero; the fallback target boots from cycle 0 instead.
+- Re-measured current gates after checkpoint code: `hdl make test` ended `ALL PASS`, `hdl make all_tests` ended `ALL TESTS DONE` in `0m27,988s`, and `hdl make linux_sim` still passed the L3 cycle-0 platform gate.
+
+### Metrics (speedup 2, measured this session)
+| item | value |
+|---|---|
+| checkpoint save cycle | 85,000,000 (`#HND_SP_ST` debug region is around 84.6M-85.0M+) |
+| save wall time | 41.672s (`linux_ckpt_save` boot to save and stop) |
+| restore wall time | 2.430s (snapshot at 85M to 90M) |
+| full mark wall time | 41.751s (cycle 0 to 90M) |
+| checkpoint debug speedup | 17.2x for repeated 85M-90M debug runs |
+| equivalence | `linux_ckpt_equiv` PASSED, tails equal, state line equal at cyc=85,000,000 |
+| hash refusal | `#CKPT_REFUSE hash mismatch`, non-zero exit |
+| normal Linux gate | `linux_sim` remains cycle-0 boot, TEST PASSED |
