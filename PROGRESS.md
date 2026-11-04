@@ -1251,3 +1251,9 @@ NETLIST_BASELINE LUT4=3046 FLOPS=1082 explained: FPGA RF retime retained plus im
 | fpga_full retime+trap-CSR guard seed4 | 3046 LUT4 / 1082 flops / 17.38/16.93 MHz PASS at 13 MHz, netlist check OK |
 | fpga_full retime+trap-CSR guard seed0 | 3046 LUT4 / 1082 flops / 17.38/16.93 MHz PASS at 13 MHz; explained: FPGA RF retime retained plus impossible-counter guard keeps trap CSR flops |
 | vmlinux.bin sha256 | 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea |
+
+## simulation speedups (2026-11-04)
+### all_tests parallel
+- Baseline serial `hdl make all_tests`: 1m26.7s (locale comma: `1m26,654s`), measured in this tree before parallel changes.
+- `all_tests` now runs suites concurrently with `tools/run_all_tests_parallel.py`. Each suite gets its own build root under `$(B)/all_tests_parallel/<suite>` (Makefile targets were parameterized with `B ?= build` and `$(B)/...` paths), and the captured suite logs are printed in the original suite order after all jobs finish.
+- Wall time after parallelization: 27.802s (`time hdl make all_tests`), final `ALL TESTS DONE`. Speedup: `86.65 / 27.80 = 3.12x`.

@@ -19,6 +19,7 @@ COREMARK_REV ?= 1f483d5b8316753a742cbf5590caf5bd0a4e4777
 FREERTOS_URL ?= https://github.com/FreeRTOS/FreeRTOS-Kernel.git
 FREERTOS_TAG ?= V11.2.0
 WAD_SHA1 := 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d
+B ?= build
 RVTEST_DIR ?= $(firstword $(wildcard deps/riscv-tests/isa ../../downloads/riscv-tests/isa) deps/riscv-tests/isa)
 COREMARK_DIR ?= $(firstword $(wildcard deps/coremark ../../downloads/coremark) deps/coremark)
 FREERTOS_DIR ?= $(firstword $(wildcard deps/FreeRTOS-Kernel ../../downloads/FreeRTOS-Kernel) deps/FreeRTOS-Kernel)
@@ -30,36 +31,36 @@ UI_MACROS := $(RVTEST_DIR)/macros/scalar
 UM_DIR := $(RVTEST_DIR)/rv32um
 UM_MACROS := $(RVTEST_DIR)/macros/scalar
 UI_NAMES := $(basename $(notdir $(shell ls $(UI_DIR)/*.S 2>/dev/null)))
-UI_HEXES := $(foreach n,$(UI_NAMES),build/ui/$(n).hex)
-UI_BINS := $(foreach n,$(UI_NAMES),build/ui/$(n).bin)
-UI_LOGS := $(foreach n,$(UI_NAMES),build/ui/logs/$(n).rtl.log build/ui/logs/$(n).iss.log)
+UI_HEXES := $(foreach n,$(UI_NAMES),$(B)/ui/$(n).hex)
+UI_BINS := $(foreach n,$(UI_NAMES),$(B)/ui/$(n).bin)
+UI_LOGS := $(foreach n,$(UI_NAMES),$(B)/ui/logs/$(n).rtl.log $(B)/ui/logs/$(n).iss.log)
 
 UM_CCFLAGS := -march=rv32im_zicsr_zifencei -mabi=ilp32
 UM_NAMES := $(basename $(notdir $(shell ls $(UM_DIR)/*.S 2>/dev/null)))
-UM_HEXES := $(foreach n,$(UM_NAMES),build/um/$(n).hex)
-UM_BINS := $(foreach n,$(UM_NAMES),build/um/$(n).bin)
-UM_LOGS := $(foreach n,$(UM_NAMES),build/um/logs/$(n).rtl.log build/um/logs/$(n).iss.log)
+UM_HEXES := $(foreach n,$(UM_NAMES),$(B)/um/$(n).hex)
+UM_BINS := $(foreach n,$(UM_NAMES),$(B)/um/$(n).bin)
+UM_LOGS := $(foreach n,$(UM_NAMES),$(B)/um/logs/$(n).rtl.log $(B)/um/logs/$(n).iss.log)
 
 MI_DIR := $(RVTEST_DIR)/rv32mi
 MI_CCFLAGS := -march=rv32im_zicsr_zifencei -mabi=ilp32
 MI_MACROS := $(RVTEST_DIR)/macros/scalar
 MI_NAMES := breakpoint csr illegal instret_overflow lh-misaligned lw-misaligned ma_addr ma_fetch mcsr sbreak scall sh-misaligned shamt sw-misaligned zicntr
-MI_HEXES := $(foreach n,$(MI_NAMES),build/mi/$(n).hex)
-MI_BINS := $(foreach n,$(MI_NAMES),build/mi/$(n).bin)
-MI_LOGS := $(foreach n,$(MI_NAMES),build/mi/logs/$(n).rtl.log build/mi/logs/$(n).iss.log)
+MI_HEXES := $(foreach n,$(MI_NAMES),$(B)/mi/$(n).hex)
+MI_BINS := $(foreach n,$(MI_NAMES),$(B)/mi/$(n).bin)
+MI_LOGS := $(foreach n,$(MI_NAMES),$(B)/mi/logs/$(n).rtl.log $(B)/mi/logs/$(n).iss.log)
 UA_DIR := $(RVTEST_DIR)/rv32ua
 UA_CCFLAGS := -march=rv32im_a_zicsr_zifencei -mabi=ilp32
 UA_MACROS := $(RVTEST_DIR)/macros/scalar
 UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amoswap_w amoxor_w lrsc
-UA_HEXES := $(foreach n,$(UA_NAMES),build/ua/$(n).hex)
-UA_BINS := $(foreach n,$(UA_NAMES),build/ua/$(n).bin)
+UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
+UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell build/vlt/run_hex build/vlt/run_mmio
-.PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
-.SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell $(B)/vlt/run_hex $(B)/vlt/run_mmio
+.PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
+.SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
-build:
-	@mkdir -p build
+$(B):
+	@mkdir -p $(B)
 
 # --- external inputs ---
 deps:
@@ -81,219 +82,219 @@ need_wad:
 	@[ -f "$(WAD_SRC)" ] || { echo "doom1.wad not found at $(WAD_SRC): copy the shareware WAD (v1.9) to deps/doom1.wad or pass WAD_SRC=path" >&2; exit 1; }
 	@echo "$(WAD_SHA1)  $(WAD_SRC)" | sha1sum -c --quiet - || { echo "$(WAD_SRC) is not the v1.9 shareware doom1.wad (sha1 $(WAD_SHA1))" >&2; exit 1; }
 
-build/ui:
-	@mkdir -p build/ui
+$(B)/ui:
+	@mkdir -p $(B)/ui
 
-build/ui/logs:
-	@mkdir -p build/ui/logs
+$(B)/ui/logs:
+	@mkdir -p $(B)/ui/logs
 
-build/um:
-	@mkdir -p build/um
+$(B)/um:
+	@mkdir -p $(B)/um
 
-build/um/logs:
-	@mkdir -p build/um/logs
+$(B)/um/logs:
+	@mkdir -p $(B)/um/logs
 
-build/vlt:
-	@mkdir -p build/vlt
+$(B)/vlt:
+	@mkdir -p $(B)/vlt
 
-build/mi:
-	@mkdir -p build/mi
+$(B)/mi:
+	@mkdir -p $(B)/mi
 
-build/mi/logs:
-	@mkdir -p build/mi/logs
+$(B)/mi/logs:
+	@mkdir -p $(B)/mi/logs
 
-build/ua:
-	@mkdir -p build/ua
+$(B)/ua:
+	@mkdir -p $(B)/ua
 
-build/ua/logs:
-	@mkdir -p build/ua/logs
+$(B)/ua/logs:
+	@mkdir -p $(B)/ua/logs
 
-build/%.o: tests/%.S | build
-	$(CC) $(CCFLAGS) -c $< -o build/$*.rvo
-	$(OC) -O elf32-littleriscv build/$*.rvo $@
+$(B)/%.o: tests/%.S | $(B)
+	$(CC) $(CCFLAGS) -c $< -o $(B)/$*.rvo
+	$(OC) -O elf32-littleriscv $(B)/$*.rvo $@
 
 # t19: atomics need the A extension (rv32ima) in the assembler march
 T19_CCFLAGS := -march=rv32ima_zicsr -mabi=ilp32
-build/t19_amo.o: tests/t19_amo.S | build
-	$(CC) $(T19_CCFLAGS) -c $< -o build/t19_amo.rvo
-	$(OC) -O elf32-littleriscv build/t19_amo.rvo $@
+$(B)/t19_amo.o: tests/t19_amo.S | $(B)
+	$(CC) $(T19_CCFLAGS) -c $< -o $(B)/t19_amo.rvo
+	$(OC) -O elf32-littleriscv $(B)/t19_amo.rvo $@
 
 # t20: reserved atomics and MMIO atomic traps need the A extension too
 T20_CCFLAGS := -march=rv32ima_zicsr -mabi=ilp32
-build/t20_amo_illegal.o: tests/t20_amo_illegal.S | build
-	$(CC) $(T20_CCFLAGS) -c $< -o build/t20_amo_illegal.rvo
-	$(OC) -O elf32-littleriscv build/t20_amo_illegal.rvo $@
+$(B)/t20_amo_illegal.o: tests/t20_amo_illegal.S | $(B)
+	$(CC) $(T20_CCFLAGS) -c $< -o $(B)/t20_amo_illegal.rvo
+	$(OC) -O elf32-littleriscv $(B)/t20_amo_illegal.rvo $@
 
-build/t23_mret_mpp.o: tests/t23_mret_mpp.S | build
-	$(CC) $(CCFLAGS) -c $< -o build/t23_mret_mpp.rvo
-	$(OC) -O elf32-littleriscv build/t23_mret_mpp.rvo $@
+$(B)/t23_mret_mpp.o: tests/t23_mret_mpp.S | $(B)
+	$(CC) $(CCFLAGS) -c $< -o $(B)/t23_mret_mpp.rvo
+	$(OC) -O elf32-littleriscv $(B)/t23_mret_mpp.rvo $@
 
-build/%.elf: build/%.o tests/link.ld | build
+$(B)/%.elf: $(B)/%.o tests/link.ld | $(B)
 	$(CC) $(CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
 
-build/%.bin: build/%.elf | build
+$(B)/%.bin: $(B)/%.elf | $(B)
 	$(OC) -O binary $< $@
 
-build/%.hex: build/%.bin | build
+$(B)/%.hex: $(B)/%.bin | $(B)
 	python3 tools/bin2hex.py $< $@
 
-build/ui/%.o: $(UI_DIR)/%.S env/riscv_test.h | build/ui
-	$(CC) $(UI_CCFLAGS) -c $< -I env -I $(UI_MACROS) -o build/ui/$*.rvo
-	$(OC) -O elf32-littleriscv build/ui/$*.rvo $@
+$(B)/ui/%.o: $(UI_DIR)/%.S env/riscv_test.h | $(B)/ui
+	$(CC) $(UI_CCFLAGS) -c $< -I env -I $(UI_MACROS) -o $(B)/ui/$*.rvo
+	$(OC) -O elf32-littleriscv $(B)/ui/$*.rvo $@
 
-build/ui/%.elf: build/ui/%.o tests/link.ld | build/ui
+$(B)/ui/%.elf: $(B)/ui/%.o tests/link.ld | $(B)/ui
 	$(CC) $(UI_CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
 
-build/ui/%.bin: build/ui/%.elf | build/ui
+$(B)/ui/%.bin: $(B)/ui/%.elf | $(B)/ui
 	$(OC) -O binary $< $@
 
-build/ui/%.hex: build/ui/%.bin | build/ui
+$(B)/ui/%.hex: $(B)/ui/%.bin | $(B)/ui
 	python3 tools/bin2hex.py $< $@
 
-build/um/%.o: $(UM_DIR)/%.S env/riscv_test.h | build/um
-	$(CC) $(UM_CCFLAGS) -c $< -I env -I $(UM_MACROS) -o build/um/$*.rvo
-	$(OC) -O elf32-littleriscv build/um/$*.rvo $@
+$(B)/um/%.o: $(UM_DIR)/%.S env/riscv_test.h | $(B)/um
+	$(CC) $(UM_CCFLAGS) -c $< -I env -I $(UM_MACROS) -o $(B)/um/$*.rvo
+	$(OC) -O elf32-littleriscv $(B)/um/$*.rvo $@
 
-build/um/%.elf: build/um/%.o tests/link.ld | build/um
+$(B)/um/%.elf: $(B)/um/%.o tests/link.ld | $(B)/um
 	$(CC) $(UM_CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
 
-build/um/%.bin: build/um/%.elf | build/um
+$(B)/um/%.bin: $(B)/um/%.elf | $(B)/um
 	$(OC) -O binary $< $@
 
-build/um/%.hex: build/um/%.bin | build/um
+$(B)/um/%.hex: $(B)/um/%.bin | $(B)/um
 	python3 tools/bin2hex.py $< $@
 
-build/mi/%.o: $(MI_DIR)/%.S env/mi/riscv_test.h | build/mi
-	$(CC) $(MI_CCFLAGS) -c $< -I env/mi -I $(RVTEST_DIR)/../env -I $(MI_MACROS) -o build/mi/$*.rvo
-	$(OC) -O elf32-littleriscv build/mi/$*.rvo $@
+$(B)/mi/%.o: $(MI_DIR)/%.S env/mi/riscv_test.h | $(B)/mi
+	$(CC) $(MI_CCFLAGS) -c $< -I env/mi -I $(RVTEST_DIR)/../env -I $(MI_MACROS) -o $(B)/mi/$*.rvo
+	$(OC) -O elf32-littleriscv $(B)/mi/$*.rvo $@
 
-build/mi/%.elf: build/mi/%.o tests/link.ld | build/mi
+$(B)/mi/%.elf: $(B)/mi/%.o tests/link.ld | $(B)/mi
 	$(CC) $(MI_CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
 
-build/mi/%.bin: build/mi/%.elf | build/mi
+$(B)/mi/%.bin: $(B)/mi/%.elf | $(B)/mi
 	$(OC) -O binary $< $@
 
-build/mi/%.hex: build/mi/%.bin | build/mi
+$(B)/mi/%.hex: $(B)/mi/%.bin | $(B)/mi
 	python3 tools/bin2hex.py $< $@
 
-build/ua/%.o: $(UA_DIR)/%.S env/riscv_test.h | build/ua
-	$(CC) $(UA_CCFLAGS) -c $< -I env -I $(UA_MACROS) -o build/ua/$*.rvo
-	$(OC) -O elf32-littleriscv build/ua/$*.rvo $@
+$(B)/ua/%.o: $(UA_DIR)/%.S env/riscv_test.h | $(B)/ua
+	$(CC) $(UA_CCFLAGS) -c $< -I env -I $(UA_MACROS) -o $(B)/ua/$*.rvo
+	$(OC) -O elf32-littleriscv $(B)/ua/$*.rvo $@
 
-build/ua/%.elf: build/ua/%.o tests/link.ld | build/ua
+$(B)/ua/%.elf: $(B)/ua/%.o tests/link.ld | $(B)/ua
 	$(CC) $(UA_CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
 
-build/ua/%.bin: build/ua/%.elf | build/ua
+$(B)/ua/%.bin: $(B)/ua/%.elf | $(B)/ua
 	$(OC) -O binary $< $@
 
-build/ua/%.hex: build/ua/%.bin | build/ua
+$(B)/ua/%.hex: $(B)/ua/%.bin | $(B)/ua
 	python3 tools/bin2hex.py $< $@
 
 
-build/sim_%.vvp: $(RTL) $(TB) | build
-	iverilog -g2012 -Wall -DTBHEX='"build/$*.hex"' -DTOPPIPE -o build/sim_$*.vvp $(RTL) $(TB)
+$(B)/sim_%.vvp: $(RTL) $(TB) | $(B)
+	iverilog -g2012 -Wall -DTBHEX='"$(B)/$*.hex"' -DTOPPIPE -o $(B)/sim_$*.vvp $(RTL) $(TB)
 
-test: $(foreach t,$(TESTS),build/$t.bin build/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | need_rvtests build/ui build/ui/logs build/um build/um/logs
-	@bad=0; mkdir -p build/rand; \
+test: $(foreach t,$(TESTS),$(B)/$t.bin $(B)/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_BINS) $(UM_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ui $(B)/ui/logs $(B)/um $(B)/um/logs
+	@bad=0; mkdir -p $(B)/rand; \
 	for t in $(TESTS); do \
-	 cp build/$$t.hex build/p.hex; ./build/vlt/run_hex > build/$$t.rtl.log; \
-	 python3 iss/iss.py --quiet --log build/$$t.iss.log build/$$t.bin > /dev/null; \
-	 python3 tools/cmp.py build/$$t.rtl.log build/$$t.iss.log || bad=$$((bad+1)); \
+	 cp $(B)/$$t.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/$$t.rtl.log; \
+	 python3 iss/iss.py --quiet --log $(B)/$$t.iss.log $(B)/$$t.bin > /dev/null; \
+	 python3 tools/cmp.py $(B)/$$t.rtl.log $(B)/$$t.iss.log || bad=$$((bad+1)); \
 	 done; \
-	 python3 iss/iss.py --quiet --pass build/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
-	 python3 iss/iss.py --quiet --pass build/t18_wfi.bin > /dev/null || { echo "t18_wfi: self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
-	 python3 iss/iss.py --quiet --pass build/t19_amo.bin > /dev/null || { echo "t19_amo: atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
-	 python3 iss/iss.py --quiet --pass build/t20_amo_illegal.bin > /dev/null || { echo "t20_amo_illegal: illegal/reserved/MMIO atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
+	 python3 iss/iss.py --quiet --pass $(B)/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
+	 python3 iss/iss.py --quiet --pass $(B)/t18_wfi.bin > /dev/null || { echo "t18_wfi: self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
+	 python3 iss/iss.py --quiet --pass $(B)/t19_amo.bin > /dev/null || { echo "t19_amo: atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
+	 python3 iss/iss.py --quiet --pass $(B)/t20_amo_illegal.bin > /dev/null || { echo "t20_amo_illegal: illegal/reserved/MMIO atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
 	 for n in $(UI_NAMES); do \
-	 cp build/ui/$$n.hex build/p.hex; ./build/vlt/run_hex > build/ui/logs/$$n.rtl.log; \
-	 python3 iss/iss.py --quiet --pass --log build/ui/logs/$$n.iss.log build/ui/$$n.bin > /dev/null; \
-	 python3 tools/cmp.py build/ui/logs/$$n.rtl.log build/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+	 cp $(B)/ui/$$n.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/ui/logs/$$n.rtl.log; \
+	 python3 iss/iss.py --quiet --pass --log $(B)/ui/logs/$$n.iss.log $(B)/ui/$$n.bin > /dev/null; \
+	 python3 tools/cmp.py $(B)/ui/logs/$$n.rtl.log $(B)/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
 	 for n in $(UM_NAMES); do \
-	 cp build/um/$$n.hex build/p.hex; ./build/vlt/run_hex > build/um/logs/$$n.rtl.log; \
-	 python3 iss/iss.py --quiet --pass --log build/um/logs/$$n.iss.log build/um/$$n.bin > /dev/null; \
-	 python3 tools/cmp.py build/um/logs/$$n.rtl.log build/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+	 cp $(B)/um/$$n.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/um/logs/$$n.rtl.log; \
+	 python3 iss/iss.py --quiet --pass --log $(B)/um/logs/$$n.iss.log $(B)/um/$$n.bin > /dev/null; \
+	 python3 tools/cmp.py $(B)/um/logs/$$n.rtl.log $(B)/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
 	 for i in $(shell seq 1 $(N)); do \
- 	 python3 tools/gen.py $$i build/rand/p$$i > /dev/null || bad=$$((bad+1)); cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; \
-	 python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; \
-	 python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); \
+ 	 python3 tools/gen.py $$i $(B)/rand/p$$i > /dev/null || bad=$$((bad+1)); cp $(B)/rand/p$$i.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/rand/$$i.rtl.log; \
+	 python3 iss/iss.py --quiet --log $(B)/rand/$$i.iss.log $(B)/rand/p$$i.bin > /dev/null; \
+	 python3 tools/cmp.py $(B)/rand/$$i.rtl.log $(B)/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
 	 if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
 
-ui: $(UI_BINS) $(UI_HEXES) build/vlt/run_hex | need_rvtests build/ui build/ui/logs
+ui: $(UI_BINS) $(UI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ui $(B)/ui/logs
 	@bad=0; \
   for n in $(UI_NAMES); do \
-    cp build/ui/$$n.hex build/p.hex; \
-    ./build/vlt/run_hex > build/ui/logs/$$n.rtl.log; \
-    python3 iss/iss.py --quiet --pass --log build/ui/logs/$$n.iss.log build/ui/$$n.bin > /dev/null || bad=$$((bad+1)); \
-    python3 tools/cmp.py build/ui/logs/$$n.rtl.log build/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+    cp $(B)/ui/$$n.hex $(B)/p.hex; \
+    ./$(B)/vlt/run_hex > $(B)/ui/logs/$$n.rtl.log; \
+    python3 iss/iss.py --quiet --pass --log $(B)/ui/logs/$$n.iss.log $(B)/ui/$$n.bin > /dev/null || bad=$$((bad+1)); \
+    python3 tools/cmp.py $(B)/ui/logs/$$n.rtl.log $(B)/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
   if [ $$bad -eq 0 ]; then echo ALL UI PASS; else echo "UI TEST FAILED: $$bad errors"; exit 1; fi
 
-build/vlt/run_hex_lat$(CACHE_LAT): $(RTL) $(TB) | build build/vlt
-	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_hex_lat$(CACHE_LAT) $(RTL) $(TB)
+$(B)/vlt/run_hex_lat$(CACHE_LAT): $(RTL) $(TB) | $(B) $(B)/vlt
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=$(CACHE_LAT) --Mdir $(B)/vlt -o run_hex_lat$(CACHE_LAT) $(RTL) $(TB)
 
-build/vlt/run_hex: build/vlt/run_hex_lat$(CACHE_LAT)
+$(B)/vlt/run_hex: $(B)/vlt/run_hex_lat$(CACHE_LAT)
 	@cp -f $< $@
 
-um: $(UM_BINS) $(UM_HEXES) build/vlt/run_hex | need_rvtests build/um build/um/logs
+um: $(UM_BINS) $(UM_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/um $(B)/um/logs
 	@bad=0; \
   for n in $(UM_NAMES); do \
-    cp build/um/$$n.hex build/p.hex; \
-    ./build/vlt/run_hex > build/um/logs/$$n.rtl.log; \
-    python3 iss/iss.py --quiet --pass --log build/um/logs/$$n.iss.log build/um/$$n.bin > /dev/null || bad=$$((bad+1)); \
-    python3 tools/cmp.py build/um/logs/$$n.rtl.log build/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+    cp $(B)/um/$$n.hex $(B)/p.hex; \
+    ./$(B)/vlt/run_hex > $(B)/um/logs/$$n.rtl.log; \
+    python3 iss/iss.py --quiet --pass --log $(B)/um/logs/$$n.iss.log $(B)/um/$$n.bin > /dev/null || bad=$$((bad+1)); \
+    python3 tools/cmp.py $(B)/um/logs/$$n.rtl.log $(B)/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
   if [ $$bad -eq 0 ]; then echo ALL UM PASS; else echo "UM TEST FAILED: $$bad errors"; exit 1; fi
 
-mi: $(MI_BINS) $(MI_HEXES) build/vlt/run_hex | need_rvtests build/mi build/mi/logs
+mi: $(MI_BINS) $(MI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/mi $(B)/mi/logs
 	@bad=0; \
   for n in $(MI_NAMES); do \
-    cp build/mi/$$n.hex build/p.hex; \
-    ./build/vlt/run_hex > build/mi/logs/$$n.rtl.log; \
-    python3 iss/iss.py --quiet --pass --log build/mi/logs/$$n.iss.log build/mi/$$n.bin > /dev/null || bad=$$((bad+1)); \
-    python3 tools/cmp.py build/mi/logs/$$n.rtl.log build/mi/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+    cp $(B)/mi/$$n.hex $(B)/p.hex; \
+    ./$(B)/vlt/run_hex > $(B)/mi/logs/$$n.rtl.log; \
+    python3 iss/iss.py --quiet --pass --log $(B)/mi/logs/$$n.iss.log $(B)/mi/$$n.bin > /dev/null || bad=$$((bad+1)); \
+    python3 tools/cmp.py $(B)/mi/logs/$$n.rtl.log $(B)/mi/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
   if [ $$bad -eq 0 ]; then echo ALL MI PASS; else echo "MI TEST FAILED: $$bad errors"; exit 1; fi
 
-ua: $(UA_BINS) $(UA_HEXES) build/vlt/run_hex | need_rvtests build/ua build/ua/logs
-	@bad=0;   for n in $(UA_NAMES); do     cp build/ua/$$n.hex build/p.hex;     ./build/vlt/run_hex > build/ua/logs/$$n.rtl.log;     python3 iss/iss.py --quiet --pass --log build/ua/logs/$$n.iss.log build/ua/$$n.bin > /dev/null || bad=$$((bad+1));     python3 tools/cmp.py build/ua/logs/$$n.rtl.log build/ua/logs/$$n.iss.log > /dev/null || bad=$$((bad+1));   done;   if [ $$bad -eq 0 ]; then echo ALL UA PASS; else echo "UA TEST FAILED: $$bad errors"; exit 1; fi
+ua: $(UA_BINS) $(UA_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ua $(B)/ua/logs
+	@bad=0;   for n in $(UA_NAMES); do     cp $(B)/ua/$$n.hex $(B)/p.hex;     ./$(B)/vlt/run_hex > $(B)/ua/logs/$$n.rtl.log;     python3 iss/iss.py --quiet --pass --log $(B)/ua/logs/$$n.iss.log $(B)/ua/$$n.bin > /dev/null || bad=$$((bad+1));     python3 tools/cmp.py $(B)/ua/logs/$$n.rtl.log $(B)/ua/logs/$$n.iss.log > /dev/null || bad=$$((bad+1));   done;   if [ $$bad -eq 0 ]; then echo ALL UA PASS; else echo "UA TEST FAILED: $$bad errors"; exit 1; fi
 
-regress: build/vlt/run_hex
-	@bad=0; mkdir -p build/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i build/rand/p$$i > /dev/null || bad=$$((bad+1)); cp build/rand/p$$i.hex build/p.hex; ./build/vlt/run_hex > build/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log build/rand/$$i.iss.log build/rand/p$$i.bin > /dev/null; python3 tools/cmp.py build/rand/$$i.rtl.log build/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
+regress: $(B)/vlt/run_hex
+	@bad=0; mkdir -p $(B)/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i $(B)/rand/p$$i > /dev/null || bad=$$((bad+1)); cp $(B)/rand/p$$i.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log $(B)/rand/$$i.iss.log $(B)/rand/p$$i.bin > /dev/null; python3 tools/cmp.py $(B)/rand/$$i.rtl.log $(B)/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
 
 TB_MMIO := tb/run_mmio.sv
 M7_NAMES := hello fib sort matmul bench
 M7_CFLAGS := $(CCFLAGS) -O2 -fno-plt -fno-stack-protector -Iprograms
-M7_HEXS := $(foreach n,$(M7_NAMES),build/m7/$(n).hex)
+M7_HEXS := $(foreach n,$(M7_NAMES),$(B)/m7/$(n).hex)
 
-build/m7:
-	@mkdir -p build/m7
+$(B)/m7:
+	@mkdir -p $(B)/m7
 
-build/m7/crt0.o: programs/crt0.S | build/m7
+$(B)/m7/crt0.o: programs/crt0.S | $(B)/m7
 	$(CC) $(CCFLAGS) -c $< -o $@
 
-build/m7/%.o: programs/%.c | build/m7
+$(B)/m7/%.o: programs/%.c | $(B)/m7
 	$(CC) $(M7_CFLAGS) -c $< -o $@
 
-build/m7/%.elf: build/m7/%.o build/m7/crt0.o tools/m7.ld | build/m7
-	$(CC) $(M7_CFLAGS) -nostdlib -nostartfiles -Wl,-Ttools/m7.ld -Wl,-m,elf32lriscv -o $@ build/m7/crt0.o $<
+$(B)/m7/%.elf: $(B)/m7/%.o $(B)/m7/crt0.o tools/m7.ld | $(B)/m7
+	$(CC) $(M7_CFLAGS) -nostdlib -nostartfiles -Wl,-Ttools/m7.ld -Wl,-m,elf32lriscv -o $@ $(B)/m7/crt0.o $<
 
-build/m7/%.bin: build/m7/%.elf | build/m7
+$(B)/m7/%.bin: $(B)/m7/%.elf | $(B)/m7
 	$(OC) -O binary $< $@
 
-build/m7/%.hex: build/m7/%.bin | build/m7
+$(B)/m7/%.hex: $(B)/m7/%.bin | $(B)/m7
 	python3 tools/bin2hex.py $< $@
 
-build/vlt/run_mmio_lat$(CACHE_LAT): $(RTL) $(TB_MMIO) | build/vlt
-	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir build/vlt -o run_mmio_lat$(CACHE_LAT) $(RTL) $(TB_MMIO)
+$(B)/vlt/run_mmio_lat$(CACHE_LAT): $(RTL) $(TB_MMIO) | $(B)/vlt
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DCACHE_LAT=$(CACHE_LAT) --Mdir $(B)/vlt -o run_mmio_lat$(CACHE_LAT) $(RTL) $(TB_MMIO)
 
-build/vlt/run_mmio: build/vlt/run_mmio_lat$(CACHE_LAT)
+$(B)/vlt/run_mmio: $(B)/vlt/run_mmio_lat$(CACHE_LAT)
 	@cp -f $< $@
 
-m7: build/vlt/run_mmio $(M7_HEXS)
-	@bad=0; mkdir -p build/m7/logs; for n in $(M7_NAMES); do cp build/m7/$$n.hex build/m7/p.hex; ./build/vlt/run_mmio > build/m7/logs/$$n.out; grep -q PASS build/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; exit 1; fi
+m7: $(B)/vlt/run_mmio $(M7_HEXS)
+	@bad=0; mkdir -p $(B)/m7/logs; for n in $(M7_NAMES); do cp $(B)/m7/$$n.hex $(B)/m7/p.hex; ./$(B)/vlt/run_mmio > $(B)/m7/logs/$$n.out; grep -q PASS $(B)/m7/logs/$$n.out > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL M7 PASS; else echo "M7 TEST FAILED: $$bad errors"; exit 1; fi
 
 # --- CoreMark (EEMBC) on the Doom-configuration CPU (16+16 KB caches, CACHE_LAT=5) ---
 # COREMARK_DIR: an upstream checkout of https://github.com/eembc/coremark (port files in bench/coremark).
@@ -304,25 +305,25 @@ CM_SRCS := $(addprefix $(COREMARK_DIR)/,core_list_join.c core_main.c core_matrix
            bench/coremark/core_portme.c bench/coremark/ee_printf.c bench/coremark/cvt.c
 CM_FLAGS := $(CCFLAGS) $(CM_OPT) -DITERATIONS=$(CM_ITER) -DPERFORMANCE_RUN=1 -DFLAGS_STR='"$(CM_OPT)"'
 
-build/bench:
-	@mkdir -p build/bench
+$(B)/bench:
+	@mkdir -p $(B)/bench
 
-build/bench/coremark.elf: $(CM_SRCS) bench/coremark/core_portme.h doom/crt0_rv32.S doom/exit_rv.S doom/ld.ld | build/bench
+$(B)/bench/coremark.elf: $(CM_SRCS) bench/coremark/core_portme.h doom/crt0_rv32.S doom/exit_rv.S doom/ld.ld | $(B)/bench
 	$(CC) $(CM_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -I bench/coremark -I $(COREMARK_DIR) -o $@ doom/crt0_rv32.S doom/exit_rv.S $(CM_SRCS)
 
-build/bench/coremark.bin: build/bench/coremark.elf
+$(B)/bench/coremark.bin: $(B)/bench/coremark.elf
 	$(OC) -O binary $< $@
 
-build/bench/coremark.hex: build/bench/coremark.bin
+$(B)/bench/coremark.hex: $(B)/bench/coremark.bin
 	python3 tools/bin2hex.py $< $@
 
-build/vlt_bench/run_bench: $(RTL) tb/run_doom.sv tb/bench_main.cpp | build
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_bench -o run_bench $(RTL) tb/run_doom.sv $(CURDIR)/tb/bench_main.cpp
-	$(MAKE) -C build/vlt_bench -f Vrun_doom.mk OPT_FAST="-O3" run_bench -j 4
+$(B)/vlt_bench/run_bench: $(RTL) tb/run_doom.sv tb/bench_main.cpp | $(B)
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir $(B)/vlt_bench -o run_bench $(RTL) tb/run_doom.sv $(CURDIR)/tb/bench_main.cpp
+	$(MAKE) -C $(B)/vlt_bench -f Vrun_doom.mk OPT_FAST="-O3" run_bench -j 4
 
-coremark: need_coremark build/vlt_bench/run_bench build/bench/coremark.hex
-	@./build/vlt_bench/run_bench build/bench/coremark.hex | tee build/bench/coremark.out
-	@python3 tools/coremark_score.py build/bench/coremark.out
+coremark: need_coremark $(B)/vlt_bench/run_bench $(B)/bench/coremark.hex
+	@./$(B)/vlt_bench/run_bench $(B)/bench/coremark.hex | tee $(B)/bench/coremark.out
+	@python3 tools/coremark_score.py $(B)/bench/coremark.out
 
 # --- FreeRTOS demo on the same CPU configuration as Doom and CoreMark (stock port) ---
 RTOS_PORT_DIR := $(FREERTOS_DIR)/portable/GCC/RISC-V
@@ -335,21 +336,21 @@ RTOS_ASM_FLAGS := $(CCFLAGS) -O2 -I $(RTOS_PORT_DIR) -I $(RTOS_CHIP_DIR) -I $(FR
 need_freertos:
 	@[ -f $(FREERTOS_DIR)/tasks.c ] || { echo "FreeRTOS not found at $(FREERTOS_DIR): run 'make deps' or pass FREERTOS_DIR=path/to/FreeRTOS-Kernel" >&2; exit 1; }
 
-build/bench/portASM.o: $(RTOS_PORT_DIR)/portASM.S $(RTOS_CHIP_DIR)/freertos_risc_v_chip_specific_extensions.h | build/bench
+$(B)/bench/portASM.o: $(RTOS_PORT_DIR)/portASM.S $(RTOS_CHIP_DIR)/freertos_risc_v_chip_specific_extensions.h | $(B)/bench
 	$(CC) $(RTOS_ASM_FLAGS) -c $< -o $@
 
-build/bench/freertos.elf: $(RTOS_SRCS) build/bench/portASM.o $(RTOS_PORT_DIR)/portASM.S $(RTOS_PORT_DIR)/portmacro.h $(RTOS_CHIP_DIR)/freertos_risc_v_chip_specific_extensions.h os/freertos/crt0.S os/freertos/FreeRTOSConfig.h doom/exit_rv.S doom/ld.ld | build/bench
-	$(CC) $(RTOS_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ os/freertos/crt0.S doom/exit_rv.S build/bench/portASM.o $(RTOS_SRCS)
+$(B)/bench/freertos.elf: $(RTOS_SRCS) $(B)/bench/portASM.o $(RTOS_PORT_DIR)/portASM.S $(RTOS_PORT_DIR)/portmacro.h $(RTOS_CHIP_DIR)/freertos_risc_v_chip_specific_extensions.h os/freertos/crt0.S os/freertos/FreeRTOSConfig.h doom/exit_rv.S doom/ld.ld | $(B)/bench
+	$(CC) $(RTOS_FLAGS) -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ os/freertos/crt0.S doom/exit_rv.S $(B)/bench/portASM.o $(RTOS_SRCS)
 
-build/bench/freertos.bin: build/bench/freertos.elf
+$(B)/bench/freertos.bin: $(B)/bench/freertos.elf
 	$(OC) -O binary $< $@
 
-build/bench/freertos.hex: build/bench/freertos.bin
+$(B)/bench/freertos.hex: $(B)/bench/freertos.bin
 	python3 tools/bin2hex.py $< $@
 
-freertos: need_freertos build/vlt_bench/run_bench build/bench/freertos.hex
-	@./build/vlt_bench/run_bench build/bench/freertos.hex 400000000 | tee build/bench/freertos.out
-	@grep -q "^FREERTOS PASS" build/bench/freertos.out || { echo "FREERTOS TEST FAILED" >&2; exit 1; }
+freertos: need_freertos $(B)/vlt_bench/run_bench $(B)/bench/freertos.hex
+	@./$(B)/vlt_bench/run_bench $(B)/bench/freertos.hex 400000000 | tee $(B)/bench/freertos.out
+	@grep -q "^FREERTOS PASS" $(B)/bench/freertos.out || { echo "FREERTOS TEST FAILED" >&2; exit 1; }
 
 # --- Linux platform: 64MB RAM, UART 16550 at 0x1000_0000, CLINT at 0x0200_0000 ---
 LINUX_KERNEL_BIN ?= ../../build-linux/nommu/images/vmlinux.bin
@@ -358,11 +359,11 @@ BR_ROOT ?= ../../downloads/buildroot-2025.02.19
 BR_OUT ?= ../../build-linux/nommu
 BR_DEFCONFIG ?= linux/configs/qemu_riscv32_nommu_virt_defconfig
 linux:
-	@mkdir -p linux build/linux
-linux/linux.dtb: rtl/linux.dts linux | build
+	@mkdir -p linux $(B)/linux
+linux/linux.dtb: rtl/linux.dts linux | $(B)
 	@mkdir -p linux
 	@dtc -I dts -O dtb -o linux/linux.dtb rtl/linux.dts
-linux/vmlinux.bin: linux | build
+linux/vmlinux.bin: linux | $(B)
 	@if [ ! -f linux/vmlinux.bin ]; then cp $(LINUX_KERNEL_BIN) linux/vmlinux.bin; fi
 linux_rebuild_kernel: linux | $(BR_OUT)
 	$(MAKE) -C $(BR_ROOT) O=$(BR_OUT) defconfig BR2_DEFCONFIG=$(CURDIR)/$(BR_DEFCONFIG)
@@ -370,64 +371,64 @@ linux_rebuild_kernel: linux | $(BR_OUT)
 	@mkdir -p linux
 	@cp $(BR_OUT)/images/vmlinux.bin linux/vmlinux.bin
 	@sha256sum linux/vmlinux.bin
-linux/gate.txt: linux/configs/gate-symbols.map linux | build
+linux/gate.txt: linux/configs/gate-symbols.map linux | $(B)
 	@mkdir -p linux
 	@python3 tools/linux_gate.py linux/configs/gate-symbols.map linux/gate.txt
-build/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 --top-module run_linux --Mdir build/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
-	$(MAKE) -C build/vlt_linux -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
+$(B)/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	$(MAKE) -C $(B)/vlt_linux -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
 
-build/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir build/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
-	$(MAKE) -C build/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
+$(B)/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir $(B)/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	$(MAKE) -C $(B)/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
 
-linux_sim_dbg: build/vlt_linux_dbg/run_linux | linux
+linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
-	@mkdir -p build/linux/logs; ./build/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee build/linux/logs/boot_dbg.out
+	@mkdir -p $(B)/linux/logs; ./$(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee $(B)/linux/logs/boot_dbg.out
 
-linux_sim: build/vlt_linux/run_linux linux/gate.txt | linux
+linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX L3 TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256)); rebuild with make linux_rebuild_kernel or download the pinned image from the GitHub Release asset" >&2; exit 1; }
-	@mkdir -p build/linux/logs; ./build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 6000000 platform | tee build/linux/logs/boot.out
-	@grep -q "^#STOP platform" build/linux/logs/boot.out || { echo "LINUX L3 PLATFORM BOOT TEST FAILED" >&2; exit 1; }
-	@grep -q "#GATE start_kernel " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: start_kernel not reached" >&2; exit 1; }
-	@grep -q "#GATE kernel_init " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init not reached" >&2; exit 1; }
-	@grep -q "#GATE kernel_init_freeable " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init_freeable not reached" >&2; exit 1; }
-	@grep -q "#GATE wait_for_initramfs " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: wait_for_initramfs not reached" >&2; exit 1; }
-	@grep -q "#GATE run_init_process " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: run_init_process not reached" >&2; exit 1; }
-	@grep -q "^#LINUX" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: runner did not finish" >&2; exit 1; }
+	@mkdir -p $(B)/linux/logs; ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 6000000 platform | tee $(B)/linux/logs/boot.out
+	@grep -q "^#STOP platform" $(B)/linux/logs/boot.out || { echo "LINUX L3 PLATFORM BOOT TEST FAILED" >&2; exit 1; }
+	@grep -q "#GATE start_kernel " $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: start_kernel not reached" >&2; exit 1; }
+	@grep -q "#GATE kernel_init " $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init not reached" >&2; exit 1; }
+	@grep -q "#GATE kernel_init_freeable " $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init_freeable not reached" >&2; exit 1; }
+	@grep -q "#GATE wait_for_initramfs " $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: wait_for_initramfs not reached" >&2; exit 1; }
+	@grep -q "#GATE run_init_process " $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: run_init_process not reached" >&2; exit 1; }
+	@grep -q "^#LINUX" $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: runner did not finish" >&2; exit 1; }
 	@echo "TEST PASSED (L3 platform boot: Linux reaches init_freeable; BusyBox prompt not reached yet)"
 
-linux_shell: build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb | linux
-	@mkdir -p build/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | ./build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 2000000000 > build/linux/logs/shell.out; sed -n '1,120p' build/linux/logs/shell.out; grep -q LINUX_SIM_DONE build/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED" >&2; exit 1; }
+linux_shell: $(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb | linux
+	@mkdir -p $(B)/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 2000000000 > $(B)/linux/logs/shell.out; sed -n '1,120p' $(B)/linux/logs/shell.out; grep -q LINUX_SIM_DONE $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED" >&2; exit 1; }
 
 # --- M10b Doom probe: crt0 + picolibc stdio over the fd-table fsys layer ---
-build/doom:
-	@mkdir -p build/doom
+$(B)/doom:
+	@mkdir -p $(B)/doom
 
-build/doom/wad.bin: | need_wad build/doom
+$(B)/doom/wad.bin: | need_wad $(B)/doom
 	cp $(WAD_SRC) $@
 
-build/doom/wad.hex: build/doom/wad.bin | build/doom
+$(B)/doom/wad.hex: $(B)/doom/wad.bin | $(B)/doom
 	python3 tools/bin2hex.py $< $@
 
-build/doom/fsys.o: doom/fsys_rv32.c | build/doom
+$(B)/doom/fsys.o: doom/fsys_rv32.c | $(B)/doom
 	$(CC) $(CCFLAGS) -O1 -c --specs=picolibc.specs -o $@ $<
 
-build/doom/probe.elf: doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_fs.c build/doom/fsys.o | build/doom
-	$(CC) $(CCFLAGS) -O1 -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_fs.c build/doom/fsys.o
+$(B)/doom/probe.elf: doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_fs.c $(B)/doom/fsys.o | $(B)/doom
+	$(CC) $(CCFLAGS) -O1 -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S tools/probe_fs.c $(B)/doom/fsys.o
 
-build/doom/probe.bin: build/doom/probe.elf | build/doom
+$(B)/doom/probe.bin: $(B)/doom/probe.elf | $(B)/doom
 	$(OC) -O binary $< $@
 
-build/doom/probe.hex: build/doom/probe.bin | build/doom
+$(B)/doom/probe.hex: $(B)/doom/probe.bin | $(B)/doom
 	python3 tools/bin2hex.py $< $@
 
-build/vlt_big/run_mmio_big: $(RTL) $(TB_MMIO) | build/doom
-	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DDOOM_BIG -DUARTTRACE -DCACHE_LAT=5 --Mdir build/vlt_big -o run_mmio_big $(RTL) $(TB_MMIO)
+$(B)/vlt_big/run_mmio_big: $(RTL) $(TB_MMIO) | $(B)/doom
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DDOOM_BIG -DUARTTRACE -DCACHE_LAT=5 --Mdir $(B)/vlt_big -o run_mmio_big $(RTL) $(TB_MMIO)
 
-doom_probe: build/vlt_big/run_mmio_big build/doom/probe.hex build/doom/wad.hex
-	@mkdir -p build/doom/logs; cp build/doom/probe.hex build/m7/p.hex; ./build/vlt_big/run_mmio_big > build/doom/logs/probe.out; grep "#UBYTE" build/doom/logs/probe.out | head -n 30; grep "#UART_BYTES\|#M7SUM\|#BPSTAT" build/doom/logs/probe.out
+doom_probe: $(B)/vlt_big/run_mmio_big $(B)/doom/probe.hex $(B)/doom/wad.hex
+	@mkdir -p $(B)/doom/logs; cp $(B)/doom/probe.hex $(B)/m7/p.hex; ./$(B)/vlt_big/run_mmio_big > $(B)/doom/logs/probe.out; grep "#UBYTE" $(B)/doom/logs/probe.out | head -n 30; grep "#UART_BYTES\|#M7SUM\|#BPSTAT" $(B)/doom/logs/probe.out
 
 DOOM_TB := tb/run_doom.sv
 DOOM_MAIN := tb/main_doom.cpp
@@ -436,35 +437,35 @@ DOOM_MAIN_ABS := $(CURDIR)/$(DOOM_MAIN)
 # Doom ELF: all doom/src/*.c except the desktop-port frontends and music extras.
 DOOM_EXCLUDE := doomgeneric_allegro doomgeneric_emscripten doomgeneric_linuxvt doomgeneric_sdl doomgeneric_soso doomgeneric_sosox doomgeneric_win doomgeneric_xlib gusconf mus2mid i_allegromusic i_allegrosound i_cdmus i_sdlmusic i_sdlsound
 DOOM_NAMES := $(filter-out $(DOOM_EXCLUDE),$(notdir $(basename $(wildcard doom/src/*.c))))
-DOOM_OBJS := $(foreach n,$(DOOM_NAMES),build/doom/$(n).o)
+DOOM_OBJS := $(foreach n,$(DOOM_NAMES),$(B)/doom/$(n).o)
 
-build/doom/%.o: doom/src/%.c | build/doom
+$(B)/doom/%.o: doom/src/%.c | $(B)/doom
 	$(CC) $(CCFLAGS) -O2 -c --specs=picolibc.specs -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -I doom/src -I . -o $@ $<
 
-build/doom/port_rv32.o: doom/port_rv32.c | build/doom
+$(B)/doom/port_rv32.o: doom/port_rv32.c | $(B)/doom
 	$(CC) $(CCFLAGS) -O2 -c --specs=picolibc.specs -DDOOMGENERIC_RESX=320 -DDOOMGENERIC_RESY=200 -I doom/src -o $@ $<
 
-build/doom/doom.elf: $(DOOM_OBJS) build/doom/port_rv32.o build/doom/fsys.o doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S | build/doom
-	$(CC) $(CCFLAGS) -O2 -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S $(DOOM_OBJS) build/doom/port_rv32.o build/doom/fsys.o
+$(B)/doom/doom.elf: $(DOOM_OBJS) $(B)/doom/port_rv32.o $(B)/doom/fsys.o doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S | $(B)/doom
+	$(CC) $(CCFLAGS) -O2 -static -nostartfiles -T doom/ld.ld -Wl,-m,elf32lriscv --specs=picolibc.specs -o $@ doom/crt0_rv32.S doom/exit_rv.S doom/stdout_sym.S $(DOOM_OBJS) $(B)/doom/port_rv32.o $(B)/doom/fsys.o
 
-build/doom/doom.bin: build/doom/doom.elf | build/doom
+$(B)/doom/doom.bin: $(B)/doom/doom.elf | $(B)/doom
 	$(OC) -O binary $< $@
 
-build/doom/doom.hex: build/doom/doom.bin | build/doom
+$(B)/doom/doom.hex: $(B)/doom/doom.bin | $(B)/doom
 	python3 tools/bin2hex.py $< $@
 
-doom_elf: build/doom/doom.elf
+doom_elf: $(B)/doom/doom.elf
 	@echo doom_elf: $^
 
-build/doom/doom.syms: build/doom/doom.elf | build/doom
+$(B)/doom/doom.syms: $(B)/doom/doom.elf | $(B)/doom
 	@riscv64-unknown-elf-nm $< > $@
 
-build/vlt_doom/run_doom: $(RTL) $(DOOM_TB) $(DOOM_MAIN) | build/doom
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(GFT) $(VROPT) $(THREADS) -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_doom -o run_doom $(RTL) $(DOOM_TB) $(DOOM_MAIN_ABS)
-	$(MAKE) -C build/vlt_doom -f Vrun_doom.mk OPT_FAST="$(OPT_FAST)" run_doom -j 4
+$(B)/vlt_doom/run_doom: $(RTL) $(DOOM_TB) $(DOOM_MAIN) | $(B)/doom
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(GFT) $(VROPT) $(THREADS) -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir $(B)/vlt_doom -o run_doom $(RTL) $(DOOM_TB) $(DOOM_MAIN_ABS)
+	$(MAKE) -C $(B)/vlt_doom -f Vrun_doom.mk OPT_FAST="$(OPT_FAST)" run_doom -j 4
 
-doom: build/vlt_doom/run_doom build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
-	@mkdir -p build/doom/frames build/doom/logs; ./build/vlt_doom/run_doom 400000000; grep "#frame\|#RUN" build/doom/logs/run.out | tail -n 40
+doom: $(B)/vlt_doom/run_doom $(B)/doom/doom.hex $(B)/doom/wad.hex $(B)/doom/doom.syms
+	@mkdir -p $(B)/doom/frames $(B)/doom/logs; ./$(B)/vlt_doom/run_doom 400000000; grep "#frame\|#RUN" $(B)/doom/logs/run.out | tail -n 40
 
 # M10f: playable Doom (SDL2 window + key FIFO MMIO). WINDOW mode: run with
 # `hdl make play`; `play_test` = scripted headless verification w/ frame diff.
@@ -474,23 +475,23 @@ OPT_FAST ?= -O3
 THREADS ?= --threads 1
 VROPT ?=
 
-build/vlt_play/run_play: $(RTL) $(DOOM_TB) tb/play_main.cpp | build
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(THREADS) -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir build/vlt_play -o run_play $(RTL) $(DOOM_TB) $(CURDIR)/tb/play_main.cpp
-	$(MAKE) -C build/vlt_play -f Vrun_doom.mk OPT_FAST="-O3" LIBS="$(SDL2_LIBS)" run_play -j 4
+$(B)/vlt_play/run_play: $(RTL) $(DOOM_TB) tb/play_main.cpp | $(B)
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(THREADS) -DDOOM_BIG -DCACHE_LAT=5 -DTOPPIPE --top-module run_doom --Mdir $(B)/vlt_play -o run_play $(RTL) $(DOOM_TB) $(CURDIR)/tb/play_main.cpp
+	$(MAKE) -C $(B)/vlt_play -f Vrun_doom.mk OPT_FAST="-O3" LIBS="$(SDL2_LIBS)" run_play -j 4
 
-play: build/vlt_play/run_play build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
-	@rm -f build/play/frames/frame_*.ppm; mkdir -p build/play/frames build/play/logs; ./build/vlt_play/run_play 3000000000
+play: $(B)/vlt_play/run_play $(B)/doom/doom.hex $(B)/doom/wad.hex $(B)/doom/doom.syms
+	@rm -f $(B)/play/frames/frame_*.ppm; mkdir -p $(B)/play/frames $(B)/play/logs; ./$(B)/vlt_play/run_play 3000000000
 
 PLAY_SCRIPT ?= @3000000,enter:2000000,@30000000,enter:2000000,@30000000,enter:2000000,@60000000,up:400000000
-play_test: build/vlt_play/run_play build/doom/doom.hex build/doom/wad.hex build/doom/doom.syms
-	@rm -rf build/play build/play_baseline; mkdir -p build/play/logs build/play/frames build/play_baseline/logs build/play_baseline/frames
-	@PLAY_SCRIPT= ./build/vlt_play/run_play 1600000000 build/play_baseline | tail -n 1
-	@PLAY_SCRIPT="$(PLAY_SCRIPT)" ./build/vlt_play/run_play 1600000000 build/play | tail -n 1
+play_test: $(B)/vlt_play/run_play $(B)/doom/doom.hex $(B)/doom/wad.hex $(B)/doom/doom.syms
+	@rm -rf $(B)/play $(B)/play_baseline; mkdir -p $(B)/play/logs $(B)/play/frames $(B)/play_baseline/logs $(B)/play_baseline/frames
+	@PLAY_SCRIPT= ./$(B)/vlt_play/run_play 1600000000 $(B)/play_baseline | tail -n 1
+	@PLAY_SCRIPT="$(PLAY_SCRIPT)" ./$(B)/vlt_play/run_play 1600000000 $(B)/play | tail -n 1
 	@PLAY_SCRIPT="$(PLAY_SCRIPT)" python3 tools/play_verify.py
-	@python3 tools/ppm2png.py build/play/frames/frame_342.ppm=docs/doom/play_menu.png build/play/frames/frame_500.ppm=docs/doom/play_move_a.png build/play/frames/frame_560.ppm=docs/doom/play_move_b.png
+	@python3 tools/ppm2png.py $(B)/play/frames/frame_342.ppm=docs/doom/play_menu.png $(B)/play/frames/frame_500.ppm=docs/doom/play_move_a.png $(B)/play/frames/frame_560.ppm=docs/doom/play_move_b.png
 
-doom_mem: build/vlt_doom/run_doom | build
-	./build/vlt_doom/run_doom
+doom_mem: $(B)/vlt_doom/run_doom | $(B)
+	./$(B)/vlt_doom/run_doom
 
 lat1:
 	$(MAKE) CACHE_LAT=1 test
@@ -504,49 +505,35 @@ lat20:
 
 # D1: one target running every regression suite from the milestone rules.
 all_tests:
-	@echo "== [1/6] test (CACHE_LAT=1) =="
-	$(MAKE) test
-	@echo "== [2/6] test CACHE_LAT=5 =="
-	$(MAKE) CACHE_LAT=5 test
-	@echo "== [3/6] ui um mi =="
-	$(MAKE) ui um mi
-	@echo "== [4/6] regress N=500 =="
-	$(MAKE) regress N=500
-	@echo "== [5/6] m7 =="
-	$(MAKE) m7
-	@echo "== [6/7] doom (31 frames) =="
-	$(MAKE) doom
-	@echo "== [7/7] mpp_ret_gate (ISS mret MPP + RTL LINUX_MPP + standard mirror) =="
-	$(MAKE) mpp_ret_test mpp_ret_gate
-	@echo "ALL TESTS DONE"
+	@BUILD_ROOT=$(B) python3 tools/run_all_tests_parallel.py
 
-mpp_ret_test: build/t23_mret_mpp.bin
-	@python3 iss/iss.py --high --linux-mpp --quiet --pass build/t23_mret_mpp.bin || { echo "MPP HIGH-PC LINUX_MPP RET TEST FAILED"; exit 1; }
-	@! python3 iss/iss.py --high --quiet --pass build/t23_mret_mpp.bin || { echo "MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
+mpp_ret_test: $(B)/t23_mret_mpp.bin
+	@python3 iss/iss.py --high --linux-mpp --quiet --pass $(B)/t23_mret_mpp.bin || { echo "MPP HIGH-PC LINUX_MPP RET TEST FAILED"; exit 1; }
+	@! python3 iss/iss.py --high --quiet --pass $(B)/t23_mret_mpp.bin || { echo "MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
 	@echo "TEST PASSED (mret MPP: high PC clear under LINUX_MPP; standard keeps MPP)"
 
-build/vlt_mpp:
-	@mkdir -p build/vlt_mpp build/vlt_mpp/logs
+$(B)/vlt_mpp:
+	@mkdir -p $(B)/vlt_mpp $(B)/vlt_mpp/logs
 
-build/vlt_mpp/run_high_mpp: $(RTL) tb/run_hex.sv build/t23_mret_mpp.hex | build/vlt_mpp
-	verilator --binary --Wall --timing -O2 -DTOPPIPE -DLINUX -DLINUX_MPP -DHIGH_PC -DCACHE_LAT=1 -DTBHEX='"build/t23_mret_mpp.hex"' --Mdir build/vlt_mpp -o run_high_mpp $(RTL) tb/run_hex.sv
+$(B)/vlt_mpp/run_high_mpp: $(RTL) tb/run_hex.sv $(B)/t23_mret_mpp.hex | $(B)/vlt_mpp
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DLINUX -DLINUX_MPP -DHIGH_PC -DCACHE_LAT=1 -DTBHEX='"$(B)/t23_mret_mpp.hex"' --Mdir $(B)/vlt_mpp -o run_high_mpp $(RTL) tb/run_hex.sv
 
-build/vlt_mpp_std:
-	@mkdir -p build/vlt_mpp_std build/vlt_mpp_std/logs
+$(B)/vlt_mpp_std:
+	@mkdir -p $(B)/vlt_mpp_std $(B)/vlt_mpp_std/logs
 
-build/vlt_mpp_std/run_high_std: $(RTL) tb/run_hex.sv build/t23_mret_mpp.hex | build/vlt_mpp_std
-	verilator --binary --Wall --timing -O2 -DTOPPIPE -DLINUX -DHIGH_PC -DCACHE_LAT=1 -DTBHEX='"build/t23_mret_mpp.hex"' --Mdir build/vlt_mpp_std -o run_high_std $(RTL) tb/run_hex.sv
+$(B)/vlt_mpp_std/run_high_std: $(RTL) tb/run_hex.sv $(B)/t23_mret_mpp.hex | $(B)/vlt_mpp_std
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DLINUX -DHIGH_PC -DCACHE_LAT=1 -DTBHEX='"$(B)/t23_mret_mpp.hex"' --Mdir $(B)/vlt_mpp_std -o run_high_std $(RTL) tb/run_hex.sv
 
-mpp_ret_gate: build/t23_mret_mpp.hex build/t23_mret_mpp.bin build/vlt_mpp/run_high_mpp build/vlt_mpp_std/run_high_std
-	@mkdir -p build/vlt_mpp_std/logs
-	@./build/vlt_mpp/run_high_mpp > build/vlt_mpp/logs/t23_mpp.rtl.log; grep -q 'HALT=1' build/vlt_mpp/logs/t23_mpp.rtl.log || { echo "MPP LINUX_MPP RTL GATE FAILED: no halt"; exit 1; }
-	@python3 iss/iss.py --high --linux-mpp --quiet --pass --log build/vlt_mpp/logs/t23_mpp.iss.log build/t23_mret_mpp.bin > /dev/null || { echo "MPP LINUX_MPP ISS GATE FAILED"; exit 1; }
-	@python3 tools/cmp.py build/vlt_mpp/logs/t23_mpp.rtl.log build/vlt_mpp/logs/t23_mpp.iss.log || { echo "MPP LINUX_MPP RTL/ISS MISMATCH"; exit 1; }
-	@./build/vlt_mpp_std/run_high_std > build/vlt_mpp_std/logs/t23_std.rtl.log; grep -q 'HALT=1' build/vlt_mpp_std/logs/t23_std.rtl.log || { echo "MPP STANDARD RTL GATE FAILED: no halt"; exit 1; }
-	@python3 iss/iss.py --high --quiet --log build/vlt_mpp_std/logs/t23_std.iss.log build/t23_mret_mpp.bin > /dev/null
-	@python3 tools/cmp.py build/vlt_mpp_std/logs/t23_std.rtl.log build/vlt_mpp_std/logs/t23_std.iss.log || { echo "MPP STANDARD RTL/ISS MISMATCH"; exit 1; }
-	@! python3 iss/iss.py --high --quiet --pass build/t23_mret_mpp.bin || { echo "MPP STANDARD ISS SHOULD FAIL (MPP kept): MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
-	@grep -q '#VSN_SC\|#BPSTAT\|#SUMMARY' build/vlt_mpp_std/logs/t23_std.rtl.log
+mpp_ret_gate: $(B)/t23_mret_mpp.hex $(B)/t23_mret_mpp.bin $(B)/vlt_mpp/run_high_mpp $(B)/vlt_mpp_std/run_high_std
+	@mkdir -p $(B)/vlt_mpp_std/logs
+	@./$(B)/vlt_mpp/run_high_mpp > $(B)/vlt_mpp/logs/t23_mpp.rtl.log; grep -q 'HALT=1' $(B)/vlt_mpp/logs/t23_mpp.rtl.log || { echo "MPP LINUX_MPP RTL GATE FAILED: no halt"; exit 1; }
+	@python3 iss/iss.py --high --linux-mpp --quiet --pass --log $(B)/vlt_mpp/logs/t23_mpp.iss.log $(B)/t23_mret_mpp.bin > /dev/null || { echo "MPP LINUX_MPP ISS GATE FAILED"; exit 1; }
+	@python3 tools/cmp.py $(B)/vlt_mpp/logs/t23_mpp.rtl.log $(B)/vlt_mpp/logs/t23_mpp.iss.log || { echo "MPP LINUX_MPP RTL/ISS MISMATCH"; exit 1; }
+	@./$(B)/vlt_mpp_std/run_high_std > $(B)/vlt_mpp_std/logs/t23_std.rtl.log; grep -q 'HALT=1' $(B)/vlt_mpp_std/logs/t23_std.rtl.log || { echo "MPP STANDARD RTL GATE FAILED: no halt"; exit 1; }
+	@python3 iss/iss.py --high --quiet --log $(B)/vlt_mpp_std/logs/t23_std.iss.log $(B)/t23_mret_mpp.bin > /dev/null
+	@python3 tools/cmp.py $(B)/vlt_mpp_std/logs/t23_std.rtl.log $(B)/vlt_mpp_std/logs/t23_std.iss.log || { echo "MPP STANDARD RTL/ISS MISMATCH"; exit 1; }
+	@! python3 iss/iss.py --high --quiet --pass $(B)/t23_mret_mpp.bin || { echo "MPP STANDARD ISS SHOULD FAIL (MPP kept): MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
+	@grep -q '#VSN_SC\|#BPSTAT\|#SUMMARY' $(B)/vlt_mpp_std/logs/t23_std.rtl.log
 	@echo "TEST PASSED (mpp_ret_gate: high-PC mret MPP clear under LINUX_MPP RTL, standard keeps MPP RTL/ISS)"
 
 lint:
@@ -560,115 +547,115 @@ SYN_FILES := rtl/cache32_small.sv $(RTL_NO_CACHE)
 FPGA_RTL := rtl/fpga_top.sv
 TB_FPGA := tb/fpga_tb.sv
 
-build/vlt/fpga_run: $(FPGA_RTL) $(TB_FPGA) | build/vlt
-	verilator --binary --Wall --timing -O2 --Mdir build/vlt -o fpga_run $(FPGA_RTL) $(TB_FPGA)
+$(B)/vlt/fpga_run: $(FPGA_RTL) $(TB_FPGA) | $(B)/vlt
+	verilator --binary --Wall --timing -O2 --Mdir $(B)/vlt -o fpga_run $(FPGA_RTL) $(TB_FPGA)
 
-build/cpu.json: $(FPGA_RTL) | build
-	yosys -p 'read_verilog -sv -Irtl $(FPGA_RTL); synth_ice40 -top fpga_top -json build/cpu.json; stat' > build/cpu_syn.log
+$(B)/cpu.json: $(FPGA_RTL) | $(B)
+	yosys -p 'read_verilog -sv -Irtl $(FPGA_RTL); synth_ice40 -top fpga_top -json $(B)/cpu.json; stat' > $(B)/cpu_syn.log
 
-build/cpu.asc: build/cpu.json | build
-	nextpnr-ice40 --up5k --package sg48 --json build/cpu.json --asc build/cpu.asc --freq 20 > build/cpu_route.log 2>&1
+$(B)/cpu.asc: $(B)/cpu.json | $(B)
+	nextpnr-ice40 --up5k --package sg48 --json $(B)/cpu.json --asc $(B)/cpu.asc --freq 20 > $(B)/cpu_route.log 2>&1
 
-build/cpu.bin: build/cpu.asc
-	icepack build/cpu.asc build/cpu.bin
+$(B)/cpu.bin: $(B)/cpu.asc
+	icepack $(B)/cpu.asc $(B)/cpu.bin
 
-fpga_test: build/vlt/fpga_run
-	@./build/vlt/fpga_run > build/fpga.out; grep -q "TEST PASSED" build/fpga.out
+fpga_test: $(B)/vlt/fpga_run
+	@./$(B)/vlt/fpga_run > $(B)/fpga.out; grep -q "TEST PASSED" $(B)/fpga.out
 
-fpga: build/cpu.bin | fpga_test
-	@echo "build/cpu.bin"
-	@grep -H 'SB_LUT4 *[0-9]\|ICESTORM_RAM\|Max frequency' build/cpu_syn.log build/cpu_route.log
+fpga: $(B)/cpu.bin | fpga_test
+	@echo "$(B)/cpu.bin"
+	@grep -H 'SB_LUT4 *[0-9]\|ICESTORM_RAM\|Max frequency' $(B)/cpu_syn.log $(B)/cpu_route.log
 
-build/fpga_prog.hex: build/t01_basic.hex | build
-	@cp build/t01_basic.hex $@
+$(B)/fpga_prog.hex: $(B)/t01_basic.hex | $(B)
+	@cp $(B)/t01_basic.hex $@
 
-rtl/fpga_prog_init.sv: build/fpga_prog.hex
+rtl/fpga_prog_init.sv: $(B)/fpga_prog.hex
 	@python3 tools/gen_fpga_rom.py $< $@
 
 FPGA_PIPE_RTL := rtl/fpga_pipe_top.sv rtl/cache32_fpga.sv $(filter-out rtl/mdiu_fast.sv,$(RTL_NO_CACHE)) rtl/mdiu_fpga.sv
 
-build/cpu_full.json: $(FPGA_PIPE_RTL) rtl/fpga_prog_init.sv | build
-	@yosys -p 'read_verilog -sv -Irtl -DFPGA $(FPGA_PIPE_RTL); synth_ice40 -dsp -top fpga_pipe_top -json build/cpu_full.json; stat' > build/cpu_full_syn.log
+$(B)/cpu_full.json: $(FPGA_PIPE_RTL) rtl/fpga_prog_init.sv | $(B)
+	@yosys -p 'read_verilog -sv -Irtl -DFPGA $(FPGA_PIPE_RTL); synth_ice40 -dsp -top fpga_pipe_top -json $(B)/cpu_full.json; stat' > $(B)/cpu_full_syn.log
 
-build/cpu_full.asc: build/cpu_full.json | build
-	@nextpnr-ice40 --up5k --package sg48 --json build/cpu_full.json --asc build/cpu_full.asc --freq $(FPGA_FREQ) --seed $(FPGA_SEED) > build/cpu_full_route.log 2>&1
+$(B)/cpu_full.asc: $(B)/cpu_full.json | $(B)
+	@nextpnr-ice40 --up5k --package sg48 --json $(B)/cpu_full.json --asc $(B)/cpu_full.asc --freq $(FPGA_FREQ) --seed $(FPGA_SEED) > $(B)/cpu_full_route.log 2>&1
 
-build/cpu_full.bin: build/cpu_full.asc
-	@icepack build/cpu_full.asc build/cpu_full.bin
+$(B)/cpu_full.bin: $(B)/cpu_full.asc
+	@icepack $(B)/cpu_full.asc $(B)/cpu_full.bin
 
-fpga_full: build/cpu_full.bin | build
-	@echo "build/cpu_full.bin"
-	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' build/cpu_full_syn.log build/cpu_full_route.log
-	@python3 tools/fpga_netlist_check.py build/cpu_full.json PROGRESS.md
+fpga_full: $(B)/cpu_full.bin | $(B)
+	@echo "$(B)/cpu_full.bin"
+	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' $(B)/cpu_full_syn.log $(B)/cpu_full_route.log
+	@python3 tools/fpga_netlist_check.py $(B)/cpu_full.json PROGRESS.md
 
 # Behavioral gate for the full pipelined FPGA top (review round, 2026-11-03):
 # -DFPGA Verilator build of fpga_pipe_top running the M-heavy t07_m.hex baked
 # into the cache ROM INIT (fpga_m_prog_init.sv), retire log cmp.py-compared
 # against ISS -> verifies the MUL/DIV rd/val values through the idex_m_go +
 # SB_MAC16 MDU path (the fpga_full gate only places/routes; this one runs it).
-build/fpga_m:
-	@mkdir -p build/fpga_m
+$(B)/fpga_m:
+	@mkdir -p $(B)/fpga_m
 
-build/fpga_m/fpga_m_prog_init.sv: build/t07_m.hex | build/fpga_m
+$(B)/fpga_m/fpga_m_prog_init.sv: $(B)/t07_m.hex | $(B)/fpga_m
 	@python3 tools/gen_fpga_rom.py $< $@
 
-build/vlt_fpga_m/fpga_mtop: $(FPGA_PIPE_RTL) build/fpga_m/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | build/fpga_m
-	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -Ibuild/fpga_m --Mdir build/vlt_fpga_m -o fpga_mtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+$(B)/vlt_fpga_m/fpga_mtop: $(FPGA_PIPE_RTL) $(B)/fpga_m/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | $(B)/fpga_m
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I/fpga_m --Mdir $(B)/vlt_fpga_m -o fpga_mtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
 
-fpga_mgate: build/vlt_fpga_m/fpga_mtop build/t07_m.bin | build/fpga_m
-	@./build/vlt_fpga_m/fpga_mtop > build/fpga_m/t07_m.rtl.log; grep -q "TEST PASSED" build/fpga_m/t07_m.rtl.log
-	@python3 iss/iss.py --quiet --log build/fpga_m/t07_m.iss.log build/t07_m.bin > /dev/null
-	@python3 tools/cmp.py build/fpga_m/t07_m.rtl.log build/fpga_m/t07_m.iss.log
+fpga_mgate: $(B)/vlt_fpga_m/fpga_mtop $(B)/t07_m.bin | $(B)/fpga_m
+	@./$(B)/vlt_fpga_m/fpga_mtop > $(B)/fpga_m/t07_m.rtl.log; grep -q "TEST PASSED" $(B)/fpga_m/t07_m.rtl.log
+	@python3 iss/iss.py --quiet --log $(B)/fpga_m/t07_m.iss.log $(B)/t07_m.bin > /dev/null
+	@python3 tools/cmp.py $(B)/fpga_m/t07_m.rtl.log $(B)/fpga_m/t07_m.iss.log
 
-build/fpga_subw:
-	@mkdir -p build/fpga_subw
+$(B)/fpga_subw:
+	@mkdir -p $(B)/fpga_subw
 
-build/fpga_subw/fpga_m_prog_init.sv: build/t21_fpga_subw.hex | build/fpga_subw
+$(B)/fpga_subw/fpga_m_prog_init.sv: $(B)/t21_fpga_subw.hex | $(B)/fpga_subw
 	@python3 tools/gen_fpga_rom.py $< $@
 
-build/vlt_fpga_subw/fpga_subwtop: $(FPGA_PIPE_RTL) build/fpga_subw/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | build/fpga_subw
-	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -Ibuild/fpga_subw --Mdir build/vlt_fpga_subw -o fpga_subwtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+$(B)/vlt_fpga_subw/fpga_subwtop: $(FPGA_PIPE_RTL) $(B)/fpga_subw/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | $(B)/fpga_subw
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I/fpga_subw --Mdir $(B)/vlt_fpga_subw -o fpga_subwtop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
 
-fpga_subw_gate: build/vlt_fpga_subw/fpga_subwtop build/t21_fpga_subw.bin | build/fpga_subw
-	@./build/vlt_fpga_subw/fpga_subwtop > build/fpga_subw/t21_fpga_subw.rtl.log; grep -q "TEST PASSED" build/fpga_subw/t21_fpga_subw.rtl.log
-	@python3 iss/iss.py --quiet --log build/fpga_subw/t21_fpga_subw.iss.log build/t21_fpga_subw.bin > /dev/null
-	@python3 tools/cmp.py build/fpga_subw/t21_fpga_subw.rtl.log build/fpga_subw/t21_fpga_subw.iss.log
+fpga_subw_gate: $(B)/vlt_fpga_subw/fpga_subwtop $(B)/t21_fpga_subw.bin | $(B)/fpga_subw
+	@./$(B)/vlt_fpga_subw/fpga_subwtop > $(B)/fpga_subw/t21_fpga_subw.rtl.log; grep -q "TEST PASSED" $(B)/fpga_subw/t21_fpga_subw.rtl.log
+	@python3 iss/iss.py --quiet --log $(B)/fpga_subw/t21_fpga_subw.iss.log $(B)/t21_fpga_subw.bin > /dev/null
+	@python3 tools/cmp.py $(B)/fpga_subw/t21_fpga_subw.rtl.log $(B)/fpga_subw/t21_fpga_subw.iss.log
 
-build/fpga_control:
-	@mkdir -p build/fpga_control
+$(B)/fpga_control:
+	@mkdir -p $(B)/fpga_control
 
-build/fpga_control/fpga_m_prog_init.sv: build/t22_fpga_control.hex | build/fpga_control
+$(B)/fpga_control/fpga_m_prog_init.sv: $(B)/t22_fpga_control.hex | $(B)/fpga_control
 	@python3 tools/gen_fpga_rom.py $< $@
 
-build/vlt_fpga_control/fpga_controltop: $(FPGA_PIPE_RTL) build/fpga_control/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | build/fpga_control
-	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -Ibuild/fpga_control --Mdir build/vlt_fpga_control -o fpga_controltop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+$(B)/vlt_fpga_control/fpga_controltop: $(FPGA_PIPE_RTL) $(B)/fpga_control/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | $(B)/fpga_control
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I/fpga_control --Mdir $(B)/vlt_fpga_control -o fpga_controltop $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
 
-fpga_control_gate: build/vlt_fpga_control/fpga_controltop build/t22_fpga_control.bin | build/fpga_control
-	@./build/vlt_fpga_control/fpga_controltop > build/fpga_control/t22_fpga_control.rtl.log; grep -q "TEST PASSED" build/fpga_control/t22_fpga_control.rtl.log
-	@python3 iss/iss.py --quiet --log build/fpga_control/t22_fpga_control.iss.log build/t22_fpga_control.bin > /dev/null
-	@python3 tools/cmp.py build/fpga_control/t22_fpga_control.rtl.log build/fpga_control/t22_fpga_control.iss.log
+fpga_control_gate: $(B)/vlt_fpga_control/fpga_controltop $(B)/t22_fpga_control.bin | $(B)/fpga_control
+	@./$(B)/vlt_fpga_control/fpga_controltop > $(B)/fpga_control/t22_fpga_control.rtl.log; grep -q "TEST PASSED" $(B)/fpga_control/t22_fpga_control.rtl.log
+	@python3 iss/iss.py --quiet --log $(B)/fpga_control/t22_fpga_control.iss.log $(B)/t22_fpga_control.bin > /dev/null
+	@python3 tools/cmp.py $(B)/fpga_control/t22_fpga_control.rtl.log $(B)/fpga_control/t22_fpga_control.iss.log
 
-build/fpga_csr:
-	@mkdir -p build/fpga_csr
+$(B)/fpga_csr:
+	@mkdir -p $(B)/fpga_csr
 
-build/fpga_csr/fpga_m_prog_init.sv: build/t24_fpga_csr_writes.hex | build/fpga_csr
-	@python3 tools/gen_fpga_rom.py build/t24_fpga_csr_writes.hex build/fpga_csr/fpga_m_prog_init.sv
+$(B)/fpga_csr/fpga_m_prog_init.sv: $(B)/t24_fpga_csr_writes.hex | $(B)/fpga_csr
+	@python3 tools/gen_fpga_rom.py $(B)/t24_fpga_csr_writes.hex $(B)/fpga_csr/fpga_m_prog_init.sv
 
-build/vlt_fpga_csr/fpga_csr_top: $(FPGA_PIPE_RTL) build/fpga_csr/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | build/fpga_csr
-	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -Ibuild/fpga_csr --Mdir build/vlt_fpga_csr -o fpga_csr_top $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+$(B)/vlt_fpga_csr/fpga_csr_top: $(FPGA_PIPE_RTL) $(B)/fpga_csr/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | $(B)/fpga_csr
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -I/fpga_csr --Mdir $(B)/vlt_fpga_csr -o fpga_csr_top $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
 
-fpga_csr_gate: build/vlt_fpga_csr/fpga_csr_top build/t24_fpga_csr_writes.bin | build/fpga_csr
-	@./build/vlt_fpga_csr/fpga_csr_top > build/fpga_csr/t24_fpga_csr_writes.rtl.log; grep -q "TEST PASSED" build/fpga_csr/t24_fpga_csr_writes.rtl.log
-	@python3 iss/iss.py --quiet --log build/fpga_csr/t24_fpga_csr_writes.iss.log build/t24_fpga_csr_writes.bin > /dev/null
-	@python3 tools/cmp.py build/fpga_csr/t24_fpga_csr_writes.rtl.log build/fpga_csr/t24_fpga_csr_writes.iss.log
+fpga_csr_gate: $(B)/vlt_fpga_csr/fpga_csr_top $(B)/t24_fpga_csr_writes.bin | $(B)/fpga_csr
+	@./$(B)/vlt_fpga_csr/fpga_csr_top > $(B)/fpga_csr/t24_fpga_csr_writes.rtl.log; grep -q "TEST PASSED" $(B)/fpga_csr/t24_fpga_csr_writes.rtl.log
+	@python3 iss/iss.py --quiet --log $(B)/fpga_csr/t24_fpga_csr_writes.iss.log $(B)/t24_fpga_csr_writes.bin > /dev/null
+	@python3 tools/cmp.py $(B)/fpga_csr/t24_fpga_csr_writes.rtl.log $(B)/fpga_csr/t24_fpga_csr_writes.iss.log
 
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
 	verilator --lint-only -Wall --timing $(RTL_SINGLE) $(TB)
 	yosys -p 'read_verilog -sv -Irtl -DCACHE_LAT=2 $(SYN_FILES); synth -top top_pipe; stat'
 
-build/vlt_mdtb/mdtb: tb/mdiu_tb.sv rtl/mdiu_fpga.sv | build
-	verilator --binary --timing -O1 --Wall -o mdtb $(filter %.sv,$^) --Mdir build/vlt_mdtb
+$(B)/vlt_mdtb/mdtb: tb/mdiu_tb.sv rtl/mdiu_fpga.sv | $(B)
+	verilator --binary --timing -O1 --Wall -o mdtb $(filter %.sv,$^) --Mdir $(B)/vlt_mdtb
 
-mdiu_tb: build/vlt_mdtb/mdtb
-	@./build/vlt_mdtb/mdtb | grep -E 'TEST (PASSED|FAILED)'
+mdiu_tb: $(B)/vlt_mdtb/mdtb
+	@./$(B)/vlt_mdtb/mdtb | grep -E 'TEST (PASSED|FAILED)'
