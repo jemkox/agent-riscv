@@ -6,12 +6,14 @@
 import sys
 
 def main(argv):
-    quiet = False; log = None; binfile = None; want_pass = False
+    quiet = False; log = None; binfile = None; want_pass = False; linux_mpp = False; high = False
     i = 1
     while i < len(argv):
         a = argv[i]
         if a == '--quiet': quiet = True
         elif a == '--pass': want_pass = True
+        elif a == '--linux-mpp': linux_mpp = True
+        elif a == '--high': high = True
         elif a == '--log': log = argv[i+1]; i += 2; continue
         else: binfile = a
         i += 1
@@ -21,7 +23,7 @@ def main(argv):
     mem = bytearray(0x40000)          # 256 KiB, word index = (a>>2)&0xFFFF
     mem[0:len(prog)] = prog
     reg = [0]*32
-    pc = 0
+    pc = 0x80000000 if high else 0
     steps = 0
     LIM = 200000
     lines = []
@@ -46,12 +48,15 @@ def main(argv):
             cs[0xb82] = v & mask
         elif n in cs:
             cs[n] = v & mask
-    def mret_mstatus():   # MIE <- MPIE
+    def mret_mstatus(high_pc=False):   # MIE <- MPIE; explicit Linux build clears MPP at high PCs
         m = cs_get(0x300)
-        cs[0x300] = ((m & ~0x8) | (0x8 if (m & 0x80) else 0)) & mask
-    def trap_mstatus():   # MPIE <- MIE, MIE <- 0
+        v = (m & ~0x8) | (0x8 if (m & 0x80) else 0)
+        if linux_mpp and high_pc:
+            v &= 0xFFFFE7FF
+        cs[0x300] = v & mask
+    def trap_mstatus():   # MPIE <- MIE, MIE <- 0; MPP preserved (M-mode CSR writes keep it fixed)
         m = cs_get(0x300)
-        cs[0x300] = ((m & ~0x88) | (0x80 if (m & 8) else 0) | 0x1800) & mask
+        cs[0x300] = ((m & ~0x88) | (0x80 if (m & 8) else 0)) & mask
     def clint_off(ea):    # slot offset inside the 64 KiB CLINT window or None
         if (ea & 0xFFFF0000) != 0x02000000: return None
         return ea & 0xFFFF
@@ -258,7 +263,7 @@ def main(argv):
                     if irq_p:
                         pc = do_irq(); steps += 1
                         continue
-                    mret_mstatus()
+                    mret_mstatus((pc & 0x80000000) != 0)
                     npc = cs_get(0x341) & mask
                 elif csr_num in (0x100, 0x105): # WFI builder aliases: 0x100 (x10000073) and 0x105 (x10500073)
                     if irq_p:

@@ -210,10 +210,18 @@ module csrs (
         // trap: MPIE <- MIE, MIE <- 0; MPP preserved (userspace MPP must survive)
         st_mstatus <= (after_mstatus & ~32'h0000_0088) |
                       (((after_mstatus & 32'h0000_0008) != 0) ? 32'h0000_0080 : 32'h0);
+`ifdef LINUX_MPP
+      else if (mret_en)
+        // Linux-build accommodation (explicit -DLINUX_MPP only): high-PC mrets clear MPP.
+        st_mstatus <= (after_mstatus & ~32'h0000_1888) |
+                      (((after_mstatus & 32'h0000_0080) != 0) ? 32'h0000_0008 : 32'h0) |
+                      (cs_pc[31] ? 32'h0 : MSTATUS_MPP);
+`else
       else if (mret_en)
         // mret: MIE <- MPIE only. MPP is read-only M-mode until L5; mret does not clear it.
         st_mstatus <= (after_mstatus & ~32'h0000_0088) |
                       (((after_mstatus & 32'h0000_0080) != 0) ? 32'h0000_0008 : 32'h0);
+`endif
       else
         st_mstatus <= mstatus_wr;
       if (cs_write_en) begin

@@ -124,6 +124,10 @@ build/t20_amo_illegal.o: tests/t20_amo_illegal.S | build
 	$(CC) $(T20_CCFLAGS) -c $< -o build/t20_amo_illegal.rvo
 	$(OC) -O elf32-littleriscv build/t20_amo_illegal.rvo $@
 
+build/t23_mret_mpp.o: tests/t23_mret_mpp.S | build
+	$(CC) $(CCFLAGS) -c $< -o build/t23_mret_mpp.rvo
+	$(OC) -O elf32-littleriscv build/t23_mret_mpp.rvo $@
+
 build/%.elf: build/%.o tests/link.ld | build
 	$(CC) $(CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
 
@@ -370,11 +374,11 @@ linux/gate.txt: linux/configs/gate-symbols.map linux | build
 	@mkdir -p linux
 	@python3 tools/linux_gate.py linux/configs/gate-symbols.map linux/gate.txt
 build/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir build/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 --top-module run_linux --Mdir build/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C build/vlt_linux -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
 
 build/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir build/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir build/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C build/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
 
 linux_sim_dbg: build/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb | linux
@@ -511,6 +515,11 @@ all_tests:
 	@echo "== [6/6] doom (31 frames) =="
 	$(MAKE) doom
 	@echo "ALL TESTS DONE"
+
+mpp_ret_test: build/t23_mret_mpp.bin
+	@python3 iss/iss.py --high --linux-mpp --quiet --pass build/t23_mret_mpp.bin || { echo "MPP HIGH-PC LINUX_MPP RET TEST FAILED"; exit 1; }
+	@! python3 iss/iss.py --high --quiet --pass build/t23_mret_mpp.bin || { echo "MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
+	@echo "TEST PASSED (mret MPP: high PC clear under LINUX_MPP; standard keeps MPP)"
 
 lint:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
