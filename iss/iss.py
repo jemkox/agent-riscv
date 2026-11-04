@@ -52,9 +52,9 @@ def main(argv):
     def trap_mstatus():   # MPIE <- MIE, MIE <- 0
         m = cs_get(0x300)
         cs[0x300] = ((m & ~0x88) | (0x80 if (m & 8) else 0) | 0x1800) & mask
-    def clint_off(ea):    # slot offset inside the CLINT page or None
-        if (ea & 0xFFFFF000) != 0x02000000: return None
-        return ea & 0xFFF
+    def clint_off(ea):    # slot offset inside the 64 KiB CLINT window or None
+        if (ea & 0xFFFF0000) != 0x02000000: return None
+        return ea & 0xFFFF
     CLW = 0xFFFFFFFFFFFFFFFF
     msip = 0
     mtime = 0
@@ -164,7 +164,7 @@ def main(argv):
                 illegal = True
             elif ea & 3:
                 cause = 4; illegal = True
-            elif (ea & 0xFFFFF000) in (0x02000000, 0x10000000):
+            elif (ea & 0xFFFF0000) == 0x02000000 or (ea & 0xFFFFF000) == 0x10000000:
                 illegal = True
             elif f5 == 0x02 and rs2f == 0:  # LR.W
                 wv = rw(ea)
@@ -198,7 +198,9 @@ def main(argv):
             clw = clint_off(ea)
             if clw is not None:
                 v32 = ({0:msip,0x800:(mtpcmp & mask),0x804:(mtpcmp>>32)&mask,
-                        0x808:(mtime & mask),0x80c:(mtime>>32)&mask}.get(clw, 0))
+                        0x808:(mtime & mask),0x80c:(mtime>>32)&mask,
+                        0x4000:(mtpcmp & mask),0x4004:(mtpcmp>>32)&mask,
+                        0xBFF8:(mtime & mask),0xBFFC:(mtime>>32)&mask}.get(clw, 0))
                 if   f3 == 2: ldrd = v32
                 elif f3 in (1,5):
                     v = (v32 >> (16*((ea>>1)&1))) & 0xFFFF; ldrd = sx(v,16) if f3==1 else v
@@ -258,7 +260,7 @@ def main(argv):
                         continue
                     mret_mstatus()
                     npc = cs_get(0x341) & mask
-                elif csr_num == 0x100: # WFI: nop when no IRQ pending (pending trapped)
+                elif csr_num in (0x100, 0x105): # WFI builder aliases: nop unless IRQ pending
                     if irq_p:
                         pc = do_irq(); steps += 1
                         continue
@@ -320,10 +322,10 @@ def main(argv):
             if off is None and ea == res_a: res_v = False   # matching store drops the reservation
             if off is not None:
                 if off == 0x0:     msip = v & 1
-                elif off == 0x800: mtpcmp = (mtpcmp & ~mask) | (v & mask)
-                elif off == 0x804: mtpcmp = (mtpcmp & mask) | ((v & mask) << 32)
-                elif off == 0x808: mtime = (mtime & ~mask) | (v & mask)
-                elif off == 0x80c: mtime = (mtime & mask) | ((v & mask) << 32)
+                elif off in (0x800, 0x4000): mtpcmp = (mtpcmp & ~mask) | (v & mask)
+                elif off in (0x804, 0x4004): mtpcmp = (mtpcmp & mask) | ((v & mask) << 32)
+                elif off in (0x808, 0xBFF8): mtime = (mtime & ~mask) | (v & mask)
+                elif off in (0x80c, 0xBFFC): mtime = (mtime & mask) | ((v & mask) << 32)
             elif wid == 8: w8(ea, v)
             elif wid == 16: w16(ea, v)
             else: w32(ea, v)

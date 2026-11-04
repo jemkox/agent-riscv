@@ -1196,3 +1196,20 @@ DOOM CPU: DONE
 | 400M boot | stack-corruption panic at cyc~6,084,537 / [0.258329], no prompt |
 | store ring | printed at `__stack_chk_fail`: `stores=400` |
 | all_tests | ALL TESTS DONE |
+
+## review fixes: 3ba5188 (2026-11-04)
+- CLINT/ISS parity: `iss/iss.py` now matches the widened Linux CLINT window `(ea & 0xFFFF0000) == 0x02000000` and services alias slots `0x4000/0x4004` (`mtimecmp`) and `0xBFF8/0xBFFC` (`mtime`). `rtl/top_pipe.sv` CLINT atomic MMIO check now uses the same 64 KiB mask; UART remains the 4 KiB page.
+- WFI parity: ISS now accepts both RTL WFI builder aliases `0x100` and `0x105` in the SYSTEM f3=0 branch; README documents that both are builder conventions (non-spec) and trap if an IRQ is pending.
+- Linux kernel reproducibility inputs committed: `linux/configs/qemu_riscv32_nommu_virt_defconfig`, `linux/configs/board/qemu/riscv32-virt/linux-nommu.config`, and `linux-isa-min.config`. Added `linux_rebuild_kernel` Makefile target to regenerate `linux/vmlinux.bin` from the Buildroot output tree and print sha256.
+- Linux L3 gate no longer hardcodes milestone PCs in the runner/gate. `linux/configs/System.map` is committed, `tools/linux_gate.py` derives `linux/gate.txt`, and `tb/run_linux.cpp` loads named gate PCs (`start_kernel`, `kernel_init`, `kernel_init_freeable`, `wait_for_initramfs`, `run_init_process`, plus optional `__stack_chk_fail` debug).
+- Tightened `RVTEST_FAIL` macros in `env/riscv_test.h` and `env/mi/riscv_test.h` to force `gp=3` (`li gp,1; slli gp,gp,1; ori gp,gp,1`) so a FAIL path cannot accidentally satisfy the ISS `gp == 1` pass check.
+- Verified after review fixes: `hdl make lint` clean, `hdl make all_tests` prints `ALL TESTS DONE` with `ALL PASS`, `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, `ALL M7 PASS`; `hdl make linux_sim` passes L3 with `cycles=3648358 insns=3376075 prompt=0`.
+- Measured `linux/vmlinux.bin` sha256 used by L3: `30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea`.
+
+### Metrics (review fixes, measured this session)
+| item | value |
+|---|---|
+| lint | clean |
+| all_tests | ALL TESTS DONE |
+| linux_sim | TEST PASSED, cycles=3,648,358, insns=3,376,075, prompt=0 |
+| vmlinux.bin sha256 | 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea |

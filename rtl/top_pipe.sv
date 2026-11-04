@@ -254,7 +254,7 @@ module top_pipe (
   localparam logic [31:0] UART_MMIO_PAGE = 32'h1000_0000;
 `endif
   assign amo_mmio_bad = ce_amo &&
-      (((a_ex & 32'hFFFF_F000) == 32'h0200_0000) ||
+      (((a_ex & 32'hFFFF_0000) == 32'h0200_0000) ||
        ((a_ex & 32'hFFFF_F000) == UART_MMIO_PAGE));
   assign ce_ex_ill = ce_ill | amo_mmio_bad;
 `endif

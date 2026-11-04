@@ -40,6 +40,7 @@ code_begin:
   csrw 0x3ff,t0
 
 #define RVTEST_FAIL \
+  li gp,1; \
   slli gp,gp,1; \
   ori gp,gp,1; \
   li t0,1; \

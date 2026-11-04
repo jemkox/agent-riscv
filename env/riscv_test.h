@@ -12,5 +12,5 @@
 #define RVTEST_DATA_BEGIN .data
 #define RVTEST_DATA_END
 #define RVTEST_PASS li gp,1; csrrw x0,0x3ff,gp
-#define RVTEST_FAIL slli gp,TESTNUM,1; ori gp,gp,1; csrrw x0,0x3ff,gp
+#define RVTEST_FAIL li gp,1; slli gp,gp,1; ori gp,gp,1; csrrw x0,0x3ff,gp
 #endif

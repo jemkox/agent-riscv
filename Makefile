@@ -349,6 +349,9 @@ freertos: need_freertos build/vlt_bench/run_bench build/bench/freertos.hex
 
 # --- Linux platform: 64MB RAM, UART 16550 at 0x1000_0000, CLINT at 0x0200_0000 ---
 LINUX_KERNEL_BIN ?= ../../build-linux/nommu/images/vmlinux.bin
+BR_ROOT ?= ../../downloads/buildroot-2025.02.19
+BR_OUT ?= ../../build-linux/nommu
+BR_DEFCONFIG ?= linux/configs/qemu_riscv32_nommu_virt_defconfig
 linux:
 	@mkdir -p linux build/linux
 linux/linux.dtb: rtl/linux.dts linux | build
@@ -356,6 +359,15 @@ linux/linux.dtb: rtl/linux.dts linux | build
 	@dtc -I dts -O dtb -o linux/linux.dtb rtl/linux.dts
 linux/vmlinux.bin: linux | build
 	@if [ ! -f linux/vmlinux.bin ]; then cp $(LINUX_KERNEL_BIN) linux/vmlinux.bin; fi
+linux_rebuild_kernel: linux | $(BR_OUT)
+	$(MAKE) -C $(BR_ROOT) O=$(BR_OUT) defconfig BR2_DEFCONFIG=$(CURDIR)/$(BR_DEFCONFIG)
+	$(MAKE) -C $(BR_ROOT) O=$(BR_OUT) linux
+	@mkdir -p linux
+	@cp $(BR_OUT)/images/vmlinux.bin linux/vmlinux.bin
+	@sha256sum linux/vmlinux.bin
+linux/gate.txt: linux/configs/System.map linux | build
+	@mkdir -p linux
+	@python3 tools/linux_gate.py linux/configs/System.map linux/gate.txt
 build/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
 	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir build/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C build/vlt_linux -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
@@ -367,14 +379,14 @@ build/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
 linux_sim_dbg: build/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb | linux
 	@mkdir -p build/linux/logs; ./build/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee build/linux/logs/boot_dbg.out
 
-linux_sim: build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb | linux
+linux_sim: build/vlt_linux/run_linux linux/gate.txt linux/vmlinux.bin linux/linux.dtb | linux
 	@mkdir -p build/linux/logs; ./build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 6000000 platform | tee build/linux/logs/boot.out
 	@grep -q "^#STOP platform" build/linux/logs/boot.out || { echo "LINUX L3 PLATFORM BOOT TEST FAILED" >&2; exit 1; }
-	@grep -q "pc=80474b30" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: start_kernel not reached" >&2; exit 1; }
-	@grep -q "pc=8046cfc4" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init not reached" >&2; exit 1; }
-	@grep -q "pc=804753d0" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init_freeable not reached" >&2; exit 1; }
-	@grep -q "pc=80001068" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: wait_for_initramfs not reached" >&2; exit 1; }
-	@grep -q "pc=804635e0" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: run_init_process not reached" >&2; exit 1; }
+	@grep -q "#GATE start_kernel " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: start_kernel not reached" >&2; exit 1; }
+	@grep -q "#GATE kernel_init " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init not reached" >&2; exit 1; }
+	@grep -q "#GATE kernel_init_freeable " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init_freeable not reached" >&2; exit 1; }
+	@grep -q "#GATE wait_for_initramfs " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: wait_for_initramfs not reached" >&2; exit 1; }
+	@grep -q "#GATE run_init_process " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: run_init_process not reached" >&2; exit 1; }
 	@grep -q "^#LINUX" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: runner did not finish" >&2; exit 1; }
 	@echo "TEST PASSED (L3 platform boot: Linux reaches init_freeable; BusyBox prompt not reached yet)"
 

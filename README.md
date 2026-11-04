@@ -293,7 +293,10 @@ else's part:
   CLINT device, `mip`/`WFI` and M-mode interrupts exist only in the simulation
   CPU; the FPGA top (`fpga_pipe_top`) has no CLINT and no interrupts (under
   `ifdef FPGA` WFI never executes and the FPGA SYSTEM decoder keeps its Fmax
-  shape where csr 0x100 is illegal).
+  shape where csr 0x100 is illegal). WFI is a builder convention (not a spec
+  requirement in this project): simulation accepts f3=0 SYSTEM encodings for
+  `0x100` (x10000073) and `0x105` (x10500073) and retires them as IRQ-wait
+  no-ops when no IRQ is pending; a pending IRQ traps before retirement.
 - The formal proof covers pipeline invariants, not full ISA equivalence.
 - The FPGA build truncates the 64-bit counters to 32 bits.
 

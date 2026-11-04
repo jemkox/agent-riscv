@@ -107,6 +107,24 @@ int main(int argc, char **argv) {
             prompt_seen = true;
     };
 
+    struct Gate { std::string name; uint32_t pc; bool seen; };
+    std::vector<Gate> gates;
+    {
+        FILE *gf = fopen("linux/gate.txt", "r");
+        if (gf) {
+            char nm[64];
+            unsigned long long pcv;
+            while (fscanf(gf, "%63s %llx", nm, &pcv) == 2)
+                gates.push_back({nm, (uint32_t)pcv, false});
+            fclose(gf);
+        }
+    }
+    auto gate_seen = [&](const char *name) {
+        for (const auto &g : gates)
+            if (g.name == name) return g.seen;
+        return false;
+    };
+
     while (cyc < max_cycles) {
         uint32_t rx_ready = 0, rx_byte = 0;
         if (!model->uart_rx_pending) {
@@ -139,42 +157,10 @@ int main(int argc, char **argv) {
         if (model->uart_tx_valid) feed_output(model->uart_tx_out & 0xFFu);
         {
             uint32_t epc = model->ex_pc;
-            static const uint32_t ev_pcs[] = {
-                0x8046cf18u, 0x80001068u, 0x80476808u, 0x8047ba00u, 0x80032534u,
-                0x80032564u, 0x80032384u, 0x80032274u, 0x80032358u, 0x80032134u,
-                0x80041420u, 0x80041834u, 0x80041458u, 0x8046e900u, 0x80473290u,
-                0x8046df7cu, 0x8046e18cu, 0x8003c95cu, 0x8046cedcu, 0x8046bbbcu,
-                0x8046bbccu, 0x8046bbdcu, 0x80298cc4u, 0x80065234u, 0x800655bcu,
-                0x80066094u, 0x800784f4u, 0x8047511cu, 0x804753d0u, 0x80475354u,
-                0x804862d8u, 0x80475f50u, 0x804635e0u, 0x804636b8u, 0x800cd204u,
-                0x80474b30u,                 0x8048dc08u, 0x80059a14u, 0x800d6fa8u, 0x800d7154u,
-                0x8046cfc4u, 0x80002a74u, 0x80145cd8u, 0x804773ccu,
-                0x804777fcu, 0x80476918u,                 0x8046cfecu, 0x8046d000u,
-                0x8046d01cu, 0x804755b8u, 0x804755bcu, 0x804755c0u,
-                0x8046d028u, 0x8046d030u, 0x8046d048u, 0x8046d04cu,
-                0x8046d070u, 0x8046d07cu, 0x8046d0bcu, 0x804755b4u,
-                0x80486314u, 0x80486334u, 0x80486340u, 0x80486348u,
-                0x8046c9d4u, 0x8048634cu, 0x80486360u, 0x8047126cu,
-                0x80470f78u, 0x80473ba0u, 0x800431c4u
-            };
-            static const uint32_t cnt_pcs[] = {
-                0x8046bbccu, 0x8003c9d0u, 0x8003c99cu, 0x8046cedcu, 0x8046bbbcu,
-                0x8046bbdcu, 0x80298cc4u, 0x80473290u, 0x8046df7cu, 0x8046e18cu,
-                0x8046e900u, 0x80041be8u, 0x80032134u, 0x80032384u, 0x80041420u,
-                0x80041834u, 0x80041458u, 0x80065234u, 0x800655bcu, 0x80066094u,
-                static_cast<uint32_t>(0x80465fdc), 0x800d6fa8u, 0x800d7154u, 0x800d71b4u, 0x800d5f20u,
-                0x800ee2b0u, 0x800d1418u, 0x800d1468u, 0x8010acc8u, 0x800d1b08u,
-                0x80486310u, 0x80486324u, 0x804773ccu, 0x804777fcu,
-                0x80476918u, 0x80486780u, 0x8048623cu, 0x800bd384u,
-                0x8047126cu, 0x800431c4u, 0x80470f78u
-            };
-            static bool ev_done[96] = {};
-            static uint32_t cnt_n[96] = {};
-            const unsigned ev_count = (unsigned)(sizeof(ev_pcs)/sizeof(ev_pcs[0]));
-            for (unsigned ei = 0; ei < ev_count; ++ei) {
-                if (epc == ev_pcs[ei] && !ev_done[ei]) {
-                    ev_done[ei] = true;
-                    if (epc == 0x8046c9d4u) {
+            for (auto &g : gates) {
+                if (epc == g.pc && !g.seen) {
+                    g.seen = true;
+                    if (g.name == "__stack_chk_fail") {
                         printf("#STACK_CHK_FAIL pc=%08x cyc=%llu stores=%u\n",
                                (unsigned)epc, (unsigned long long)cyc,
                                (unsigned)store_ring.size());
@@ -182,25 +168,13 @@ int main(int argc, char **argv) {
                             printf("#STORE pc=%08x ea=%08x sd=%08x\n",
                                    s[0], s[1], s[2]);
                     }
-                    printf("#EV %u pc=%08x cyc=%llu\n", ei, (unsigned)epc,
-                           (unsigned long long)cyc);
+                    printf("#GATE %s cyc=%llu pc=%08x\n",
+                           g.name.c_str(), (unsigned long long)cyc, (unsigned)epc);
                     for (auto t : trace)
                         printf("#EVT %08x %08x %u %08x %08x\n", t.pc, t.insn, t.rd, t.wv, t.ea);
                 }
             }
-            const unsigned cnt_count = (unsigned)(sizeof(cnt_pcs)/sizeof(cnt_pcs[0]));
-            for (unsigned ri = 0; ri < cnt_count; ++ri) {
-            if (epc == cnt_pcs[ri]) {
-                ++cnt_n[ri];
-                if (cnt_n[ri] <= 5u || (cnt_n[ri] % 1000u) == 0u) {
-                    printf("#PC %08x n=%u cyc=%llu rd=%u wv=%08x\n",
-                           (unsigned)cnt_pcs[ri], (unsigned)cnt_n[ri],
-                           (unsigned long long)cyc, (unsigned)model->ex_rd,
-                           (unsigned)model->ex_wv);
-                }
-            }
-            if (platform_stop && epc == 0x804753d0u) platform_seen = true;
-        }
+            if (platform_stop && gate_seen("kernel_init_freeable")) platform_seen = true;
         }
         if (trace.size() == 200 && cyc && (cyc % 5000000u == 0u)) {
             printf("#SNAP cycles=%llu\n", (unsigned long long)cyc);
