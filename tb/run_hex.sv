@@ -57,7 +57,8 @@ module run_hex ();
 `ifdef TBHEX
     $readmemh(`TBHEX, prog);
 `else
-    $readmemh("build/p.hex", prog);  // relative: run from the project folder
+    $display("ERROR: TBHEX is not defined. Verilator builds pass -DTBHEX=\"$(B)/p.hex\"; Icarus builds pass the explicit $(B)/<test>.hex path.");
+    exit(-1);
 `endif
     // load phase: CPU frozen under reset, loader port pokes RAM
     reset = 1;

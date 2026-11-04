@@ -1257,3 +1257,21 @@ NETLIST_BASELINE LUT4=3046 FLOPS=1082 explained: FPGA RF retime retained plus im
 - Baseline serial `hdl make all_tests`: 1m26.7s (locale comma: `1m26,654s`), measured in this tree before parallel changes.
 - `all_tests` now runs suites concurrently with `tools/run_all_tests_parallel.py`. Each suite gets its own build root under `$(B)/all_tests_parallel/<suite>` (Makefile targets were parameterized with `B ?= build` and `$(B)/...` paths), and the captured suite logs are printed in the original suite order after all jobs finish.
 - Wall time after parallelization: 27.802s (`time hdl make all_tests`), final `ALL TESTS DONE`. Speedup: `86.65 / 27.80 = 3.12x`.
+
+## review fixes: 108eb48 (2026-11-04)
+- Restored the FPGA gate include paths after the `B ?= build` parameterization: the four gates now use `-I$(B)/fpga_m`, `-I$(B)/fpga_subw`, `-I$(B)/fpga_control`, and `-I$(B)/fpga_csr` instead of the literal `-I/fpga_*` include directories.
+- Added those four FPGA gates to `all_tests` as suite `[8/8] fpga_gates` (one parallel job running `fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate`), fixed the parallel suite labels from `[x/6]`/`[x/7]` to the real `[x/8]` count, replaced `X if False else Y` with a real `if` failure branch, and capped the pool to `min(8, jobs)`.
+- Kernel reproducibility: the pinned Linux inputs `linux/vmlinux.bin` and `linux/linux.dtb` are now actually committed, their `.gitignore` exclusions were removed, and `PROGRESS.md` was corrected from the false release-asset-only claim. Measured pins: kernel `30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea`, DTB `3672def1854be758ea1eba698aa98dc063eb23d9e47b47bb8fb9c4dd8cd028ca`.
+- Optional TBHEX hardening: `tb/run_hex.sv` now errors when `TBHEX` is not defined instead of silently using a stale `build/p.hex` default; Verilator/Icarus targets pass explicit `$(B)`-relative hex paths.
+- Fresh-clone gate check after this review-fix commit: `git clone -q . ../rv32cpu-gates-check2 && hdl make -C ../rv32cpu-gates-check2 fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate` printed `TEST PASSED (31 instrs)`, `TEST PASSED (50 instrs)`, `TEST PASSED (18 instrs)`, and `TEST PASSED (10 instrs)`.
+- Re-measured current-tree gates: `hdl make all_tests` ended `ALL TESTS DONE` in 27.988s with the FPGA gate suite included; `hdl make test` ended `ALL PASS`; `hdl make lint` is clean; `hdl make freertos` printed `FREERTOS PASS` with `cycles=1124012 insns=899607 IPC=0.800 halt=1`; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=0` regenerated `build/cpu_full.bin` with `3046 LUT4 / 1082 flops`, `17.38 MHz` post-synth and `16.93 MHz` final route, PASS at 13 MHz; `hdl make fpga` retained `23.96/23.05 MHz PASS at 20 MHz`.
+
+### Metrics (108eb48 review fixes, measured this session)
+| item | value |
+|---|---|
+| all_tests with FPGA gates | ALL TESTS DONE, 27.988s wall, labels `[1/8]`..`[8/8]`, max_workers capped |
+| fresh clone FPGA gates | mgate `TEST PASSED (31 instrs)`, subw `TEST PASSED (50 instrs)`, control `TEST PASSED (18 instrs)`, CSR `TEST PASSED (10 instrs)` |
+| Linux committed inputs | `linux/vmlinux.bin` sha256 `30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea`, `linux/linux.dtb` sha256 `3672def1854be758ea1eba698aa98dc063eb23d9e47b47bb8fb9c4dd8cd028ca` |
+| freertos current tree | `FREERTOS PASS`, cycles=1,124,012, insns=899,607, IPC=0.800 |
+| fpga_full current seed0/seed4 | 3046 LUT4 / 1082 flops / 17.38/16.93 MHz PASS at 13 MHz, netlist check OK |
+| fpga small current | 23.96/23.05 MHz PASS at 20 MHz |

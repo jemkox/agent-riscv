@@ -29,10 +29,11 @@ keeps its own license:
               modified to use this project's file layer.
 - bench/coremark/  CoreMark port files from EEMBC's barebones template,
               Apache 2.0, see bench/coremark/LICENSE.md.
-- Linux kernel image used by the Linux milestones (`linux/vmlinux.bin`, `linux/linux.dtb`,
-  generated initramfs/rootfs, and `linux/gate.txt`) is not committed in git. It is generated
-  from the committed Buildroot 2025.02.19 recipe/config (`make linux_rebuild_kernel`) and
-  distributed as a GitHub Release asset. The kernel is GPLv2 Linux 6.12.27; BusyBox (GPL) and
+- Linux kernel image used by the Linux milestones: `linux/vmlinux.bin` and `linux/linux.dtb` are
+  committed in this checkout as the pinned reproducible inputs; generated initramfs/rootfs and
+  `linux/gate.txt` remain build outputs. The same pinned image can also be regenerated from the
+  committed Buildroot 2025.02.19 recipe/config (`make linux_rebuild_kernel`) and updated by its
+  SHA-256 (`KERNEL_SHA256`) if a future checkout avoids committing the binary. The kernel is GPLv2 Linux 6.12.27; BusyBox (GPL) and
   uClibc-ng (LGPL) may also be included in the initramfs. Upstream source locations: kernel
   https://www.kernel.org/, BusyBox https://git.busybox.net/busybox, uClibc-ng https://github.com/frc00d1/uclibc-ng,
   Buildroot https://git.busybox.net/buildroot.
