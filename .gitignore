@@ -7,3 +7,6 @@ start-agent.sh
 __pycache__/
 *.pyc
 deps/
+linux/
+tmp-stage/
+console=ttyS0

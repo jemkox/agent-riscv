@@ -14,6 +14,7 @@ module run_mmio ();
   logic [31:0] lwa = 0, lwd = 0;
   logic [31:0] ex_pc, ex_insn, ex_wv;
   logic [31:0] ex_sa, ex_sd;
+  logic [31:0] ex_ea;
   logic [4:0]  ex_rd;
   logic [3:0]  ex_sbe;
   logic        ex_st;
@@ -30,7 +31,7 @@ module run_mmio ();
 `endif
          .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
          .ex_wben(wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
-         .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_sbe(ex_sbe),
+         .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_ea(ex_ea), .ex_sbe(ex_sbe),
          .rv_valid(rv_valid), .bp_branches(bp_branches),
          .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
 

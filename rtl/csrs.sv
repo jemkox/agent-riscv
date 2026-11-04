@@ -183,7 +183,7 @@ module csrs (
 
   always_ff @(posedge clk) begin
     if (reset) begin
-      st_mstatus <= 32'h0000_1800;   // MPP is fixed M-mode
+      st_mstatus <= 32'h0000_1800;   // MPP fixed M-mode; MIE follows the test/kernel sequence
       st_mtvec <= 32'h0;
       st_mepc <= 32'h0;
       st_mcause <= 32'h0;

@@ -25,6 +25,7 @@ module run_doom (
   output logic        ex_st,
   output logic [31:0] ex_sa,
   output logic [31:0] ex_sd,
+  output logic [31:0] ex_ea,
   output logic [3:0]  ex_sbe,
   output logic        rv_valid,
   output logic [31:0] bp_branches,
@@ -38,7 +39,7 @@ module run_doom (
              .mst_cnt(mst_cnt), .st_cnt(st_cnt),
              .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
              .ex_wben(ex_wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
-             .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_sbe(ex_sbe),
+             .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_ea(ex_ea), .ex_sbe(ex_sbe),
              .rv_valid(rv_valid), .bp_branches(bp_branches),
              .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
 endmodule

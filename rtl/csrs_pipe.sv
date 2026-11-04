@@ -26,6 +26,7 @@ module csrs_pipe (
   input  logic [31:0] idex_ea,
   input  logic [31:0] idex_sd_raw,
   input  logic        clint_commit,
+  input  logic        wfi_tick,
   output logic        idex_ld,
   output logic        idex_st,
   output logic        idex_trap,
@@ -41,7 +42,8 @@ module csrs_pipe (
   output logic [31:0] cs_mtvec,
   output logic        halt_out,
   output logic [31:0] clint_ld_data,
-  output logic        irq_pending
+  output logic        irq_pending,
+  output logic        timer_ready
 );
   logic        trap_en, mret_active, mret_en, irq_due;
   logic [31:0] trap_cause, irq_cause;
@@ -49,6 +51,9 @@ module csrs_pipe (
   logic [31:0] insn_cause;
 `ifndef FPGA
   logic [31:0] clint_mip;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [63:0] clint_mt, clint_cmp;
+  /* verilator lint_on UNUSEDSIGNAL */
 `endif
 
   csrs CSRS(.clk(clk), .reset(reset), .halt_in(halt),
@@ -67,12 +72,14 @@ module csrs_pipe (
             .mepc_next(mepc_next), .halt_out(halt_out));
 
   clint_dev CL(.clk(clk), .reset(reset), .halt_in(halt),
-            .retire_en(exmem_valid && !halt && !reset),
+            .retire_en((exmem_valid && !halt && !reset) || wfi_tick),
             .commit(clint_commit), .ea(idex_ea), .wdata(idex_sd_raw),
             .mstatus_in(mstatus_next), .mie_in(mie_next),
-            .ld_data(clint_ld_data), .pending(irq_pending), .cause(irq_cause)
+            .ld_data(clint_ld_data), .pending(irq_pending), .timer_ready(timer_ready), .cause(irq_cause)
 `ifndef FPGA
             ,.mip_out(clint_mip)
+            ,.mt_out(clint_mt)
+            ,.cmp_out(clint_cmp)
 `endif
             );
 
@@ -102,4 +109,20 @@ module csrs_pipe (
     mret_pc = mepc_next;   // a csrw mepc right before the mret must count
     cs_mtvec = mtvec_next; // mtvec write retiring this cycle is visible
   end
+`ifdef LINUX_DEBUG
+  always_comb begin
+    if (timer_flush)
+      $display("DBG TIMERFLUSH pc=%08x cause=%08x mepc? mstat=%08x mip=%08x mt=%016x cmp=%016x",
+               idex_pc, irq_cause, mstatus_next, clint_mip, clint_mt, clint_cmp);
+    if (mret_flush)
+      $display("DBG MRETFLUSH pc=%08x mstat=%08x mt=%016x cmp=%016x mip=%08x",
+               idex_pc, mstatus_next, clint_mt, clint_cmp, clint_mip);
+    if (idex_pc == 32'h8046bbdc)
+      $display("DBG IRQHAND pc=%08x mstat=%08x mie=%08x mip=%08x mt=%016x cmp=%016x",
+               idex_pc, mstatus_next, mie_next, clint_mip, clint_mt, clint_cmp);
+    if (idex_pc == 32'h80298cc4)
+      $display("DBG TIMERIRQ pc=%08x mstat=%08x mie=%08x mip=%08x mt=%016x cmp=%016x",
+               idex_pc, mstatus_next, mie_next, clint_mip, clint_mt, clint_cmp);
+  end
+`endif
 endmodule

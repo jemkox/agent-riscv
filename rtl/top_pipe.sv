@@ -38,6 +38,7 @@ module top_pipe (
   output logic        ex_st,
   output logic [31:0] ex_sa,
   output logic [31:0] ex_sd,
+  output logic [31:0] ex_ea,
   output logic [3:0]  ex_sbe,
   output logic        rv_valid,
   output logic [31:0] bp_branches,
@@ -57,6 +58,7 @@ module top_pipe (
   logic [31:0] cs_old, cs_mtvec, idex_cs_old;
   logic [31:0] clint_ld;
   logic clint_commit, irq_pend, ce_wfi;
+  logic timer_ready, wfi_ready, wfi_wait, wfi_tick;
   logic ce_amo, ce_lr, ce_sc, amo_sc_ok, exmem_sc_ok;
   logic [4:0] ce_amo5;
   logic [31:0] amo_new, exmem_amo_new;
@@ -81,6 +83,19 @@ module top_pipe (
   logic        read_a, read_b, ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr, ce_lui, ce_auipc, ce_opi, ce_op;
   logic        ce_sys, ce_fence, ce_ill, ce_m, ceif_ill, ceif_m, ce_csr, exmem_csr_en, exmem_csr_wen;
   logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out, mret_flush, ce_mret;
+`ifdef FPGA
+  assign wfi_ready = 1'b1;
+  assign wfi_wait  = 1'b0;
+  assign wfi_tick  = 1'b0;
+`elsif LINUX
+  assign wfi_ready = timer_ready;
+  assign wfi_wait  = idex_valid && ce_wfi && !wfi_ready;
+  assign wfi_tick  = wfi_wait && !halt && !reset;
+`else
+  assign wfi_ready = 1'b1;
+  assign wfi_wait  = 1'b0;
+  assign wfi_tick  = 1'b0;
+`endif
   /* verilator lint_off UNUSEDSIGNAL */
   logic        amo_mmio_bad, ce_ex_ill;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -144,7 +159,13 @@ module top_pipe (
              .amo_new(amo_new), .amo_sc_ok(amo_sc_ok),
 `endif
              .ld_raw(ldx_raw), .mem_ready(mem_ready),
-             .clint_commit(clint_commit), .clint_ld_in(clint_ld));
+              .clint_commit(clint_commit), .clint_ld_in(clint_ld)
+`ifdef LINUX
+              , .uart_rx_ready(uart_rx_ready), .uart_rx_in(uart_rx_in),
+              .uart_tx_valid(uart_tx_valid), .uart_tx_out(uart_tx_out),
+              .uart_rx_pending(uart_rx_pending), .uart_tx_ready(uart_tx_ready)
+`endif
+);
   /* verilator lint_off PINCONNECTEMPTY */
   ctrl   CE(.alu_op(ce_alu_op), .f3(ce_f3), .op7(), .rs1(ce_rs1), .rs2(ce_rs2), .rd(ce_rd),
             .a_sel(), .b_sel(ce_bsel), .is_ld(ce_ld), .is_st(ce_st), .is_br(ce_br),
@@ -300,7 +321,7 @@ module top_pipe (
 `ifdef FPGA
     m_stall = (idex_m_go && (!idex_m_done || !fetch_ready)) || mem_pend;
 `else
-    m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend;
+    m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend || wfi_wait;
 `endif
   end
 
@@ -340,6 +361,7 @@ module top_pipe (
             .idex_csr_en(idex_csr_en), .idex_csr_wen(idex_csr_wen),
             .idex_ea(idex_ea), .idex_sd_raw(idex_sd_raw),
             .clint_commit(clint_commit), .clint_ld_data(clint_ld), .irq_pending(irq_pend),
+            .timer_ready(timer_ready), .wfi_tick(wfi_tick),
             .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .mret_pc(mret_pc),
             .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_mtvec(cs_mtvec), .halt_out(halt_out));
 `ifdef FPGA
@@ -361,7 +383,11 @@ module top_pipe (
 `endif
   always_ff @(posedge clk) begin
     if (reset) begin
+`ifdef LINUX
+      pc_if <= 32'h8000_0000;
+`else
       pc_if <= 32'h0;
+`endif
       halt <= 1'b0;
       ifid_valid <= 1'b0; idex_valid <= 1'b0; exmem_valid <= 1'b0; mwb_valid <= 1'b0;
       idex_m_done <= 1'b1;
@@ -481,6 +507,7 @@ module top_pipe (
   assign ex_st    = mwb_valid && mwb_st;
   assign ex_sa    = ex_st ? mwb_sa : 32'h0;
   assign ex_sd    = ex_st ? mwb_sd : 32'h0;
+  assign ex_ea    = mwb_valid ? mwb_sa : 32'h0;
   assign ex_sbe   = ex_st ? mwb_sbe : 4'h0;
   assign rv_valid = mwb_valid && !reset;
 endmodule

@@ -54,7 +54,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),build/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),build/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate all_tests play play_test doom_mem doom_probe doom_elf fpga_full ua build/vlt/run_hex build/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate all_tests play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -346,6 +346,40 @@ build/bench/freertos.hex: build/bench/freertos.bin
 freertos: need_freertos build/vlt_bench/run_bench build/bench/freertos.hex
 	@./build/vlt_bench/run_bench build/bench/freertos.hex 400000000 | tee build/bench/freertos.out
 	@grep -q "^FREERTOS PASS" build/bench/freertos.out || { echo "FREERTOS TEST FAILED" >&2; exit 1; }
+
+# --- Linux platform: 64MB RAM, UART 16550 at 0x1000_0000, CLINT at 0x0200_0000 ---
+LINUX_KERNEL_BIN ?= ../../build-linux/nommu/images/vmlinux.bin
+linux:
+	@mkdir -p linux build/linux
+linux/linux.dtb: rtl/linux.dts linux | build
+	@mkdir -p linux
+	@dtc -I dts -O dtb -o linux/linux.dtb rtl/linux.dts
+linux/vmlinux.bin: linux | build
+	@if [ ! -f linux/vmlinux.bin ]; then cp $(LINUX_KERNEL_BIN) linux/vmlinux.bin; fi
+build/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir build/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	$(MAKE) -C build/vlt_linux -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
+
+build/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir build/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	$(MAKE) -C build/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
+
+linux_sim_dbg: build/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb | linux
+	@mkdir -p build/linux/logs; ./build/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee build/linux/logs/boot_dbg.out
+
+linux_sim: build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb | linux
+	@mkdir -p build/linux/logs; ./build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 6000000 platform | tee build/linux/logs/boot.out
+	@grep -q "^#STOP platform" build/linux/logs/boot.out || { echo "LINUX L3 PLATFORM BOOT TEST FAILED" >&2; exit 1; }
+	@grep -q "pc=80474b30" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: start_kernel not reached" >&2; exit 1; }
+	@grep -q "pc=8046cfc4" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init not reached" >&2; exit 1; }
+	@grep -q "pc=804753d0" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: kernel_init_freeable not reached" >&2; exit 1; }
+	@grep -q "pc=80001068" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: wait_for_initramfs not reached" >&2; exit 1; }
+	@grep -q "pc=804635e0" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: run_init_process not reached" >&2; exit 1; }
+	@grep -q "^#LINUX" build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: runner did not finish" >&2; exit 1; }
+	@echo "TEST PASSED (L3 platform boot: Linux reaches init_freeable; BusyBox prompt not reached yet)"
+
+linux_shell: build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb | linux
+	@mkdir -p build/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | ./build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 2000000000 > build/linux/logs/shell.out; sed -n '1,120p' build/linux/logs/shell.out; grep -q LINUX_SIM_DONE build/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED" >&2; exit 1; }
 
 # --- M10b Doom probe: crt0 + picolibc stdio over the fd-table fsys layer ---
 build/doom:

@@ -51,7 +51,8 @@ module ctrl (
   assign is_wfi   = 1'b0;           // FPGA never executes WFI (no OS on the card;
                                      // keeps SYSTEM f3=0 decode shape for Fmax seed4)
 `else
-  assign is_wfi   = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h100);
+  assign is_wfi   = (opc == 7'b1110011 && i[14:12] == 3'b000 &&
+                     ((i[31:20] == 12'h100) || (i[31:20] == 12'h105)));
 `endif
 `ifndef FPGA
   logic amo5_ok;
@@ -157,7 +158,8 @@ module ctrl (
 `else
             is_sys = (i[31:20] == 12'h000) || (i[31:20] == 12'h001);
             if (!((i[31:20] == 12'h000) || (i[31:20] == 12'h001) ||
-                   (i[31:20] == 12'h302) || (i[31:20] == 12'h100))) is_ill = 1;
+                   (i[31:20] == 12'h302) || (i[31:20] == 12'h100) ||
+                   (i[31:20] == 12'h105))) is_ill = 1;
 `endif
           end
           3'b001: is_csr = 1;

@@ -54,7 +54,7 @@ module cache32 (
   output logic        uart_tx_valid,
   output logic [7:0]  uart_tx_out,
   output logic        uart_rx_pending,
-  output logic        uart_tx_ready,
+  output logic        uart_tx_ready
 `endif
 );
 `ifdef CACHE_LAT
@@ -77,9 +77,15 @@ module cache32 (
   localparam int IC_LINES   = 1024;   // 16 KB I-cache (P1)
   localparam int DC_LINES   = 1024;   // 16 KB D-cache (P1)
 `else
+`ifdef LINUX
+  localparam int BACK_WORDS = 16 * 1024 * 1024;  // 64 MB for the Linux runner
+  localparam int IC_LINES   = 1024;
+  localparam int DC_LINES   = 1024;
+`else
   localparam int BACK_WORDS = 65536;
   localparam int IC_LINES   = 1024;
   localparam int DC_LINES   = 1024;
+`endif
 `endif
 `endif
 `endif
@@ -126,6 +132,12 @@ module cache32 (
   logic [31:0] ld_norm;
 `ifdef DOOM_BIG
   logic key_load, key_store;
+`endif
+`ifdef LINUX
+  logic plic_match, plic_store, plic_load;
+  logic uart_load_data, uart_store_data, uart_status_load;
+  logic [7:0] uart_byte = 8'h0;
+  logic uart_pend = 1'b0;
 `endif
 `ifdef DOOM_BIG
   localparam logic [31:0] UART_ADDR = 32'h1FF0_0000; /* above the WAD blob */
@@ -174,16 +186,31 @@ module cache32 (
     ic_hit = (ic_ep[i_idx] == epoch) && (ic_tag[i_idx] == i_tag);
     dc_hit = (dc_ep[d_idx] == epoch) && (dc_tag[d_idx] == d_tag);
     dreq = idex_valid && (idex_ld || idex_st) && !reset && !halt && !lwe;
+`ifdef LINUX
+    uart_store = dreq && idex_st && ((ea & 32'hFFFFF000) == 32'h1000_0000);
+    uart_load  = dreq && idex_ld && ((ea & 32'hFFFFF000) == 32'h1000_0000);
+`else
     uart_store = dreq && idex_st && (ea == UART_ADDR);
     uart_load  = dreq && idex_ld && (ea == UART_ADDR);
-    clint_match = dreq && ((ea & 32'hFFFFF000) == 32'h0200_0000);
+`endif
+    clint_match = dreq && ((ea & 32'hFFFF_0000) == 32'h0200_0000);
     clint_store = clint_match && idex_st;
     clint_load  = clint_match && idex_ld;
+`ifdef LINUX
+    plic_match  = dreq && ((ea & 32'hFFFFF000) == 32'h0C00_0000);
+    plic_store  = plic_match && idex_st;
+    plic_load   = plic_match && idex_ld;
+`endif
 `ifdef DOOM_BIG
     key_load   = dreq && idex_ld && (ea == KEY_ADDR);
     key_store  = dreq && idex_st && (ea == KEY_ADDR);
 `endif
     dc_cross_ready = dreq && (d_off > 12);
+`ifdef LINUX
+    uart_load_data   = uart_load && ((ea & 32'hFFF) == 32'h000);
+    uart_status_load = uart_load && ((ea & 32'hFFF) == 32'h005);
+    uart_store_data  = uart_store && ((ea & 32'hFFF) == 32'h000);
+`endif
 
     ic_p_ready = ic_pending && (ic_ptag == i_tag) && (ic_count >= READY_AT);
     dc_p_ready = dc_pending && (dc_ptag == d_tag) && (dc_count >= READY_AT);
@@ -191,6 +218,9 @@ module cache32 (
     ic_ready_now = ic_hit || ic_p_ready || (LAT == 1);
     dc_ready_now = dc_hit || dc_p_ready || dc_cross_ready ||
                    uart_store || uart_load || clint_match ||
+`ifdef LINUX
+                   plic_store || plic_load ||
+`endif
 `ifdef DOOM_BIG
                    key_load || key_store ||
 `endif
@@ -205,15 +235,17 @@ module cache32 (
     fetch_ready = (reset || halt) ? 1'b1 : ic_ready_now;
     fetch_insn  = ic_ready_now ? (ic_hit ? rb_ic(pc_if) : rbwb(pc_if)) : 32'h0;
     mem_ready   = (reset || halt) ? 1'b1 : (!dreq || dc_ready_now);
-    ld_norm = (uart_load ? 32'h0 :
-`ifdef DOOM_BIG
-              (key_load ? key_in :
+    ld_norm = ((dc_hit && (d_off <= 12)) ? rb_dc(ea) : rbwb(ea));
+`ifdef LINUX
+    if (uart_load) begin
+      if (uart_status_load) ld_norm = (32'h60 | (uart_pend ? 32'h1 : 32'h0));
+      else if (uart_load_data) ld_norm = (uart_pend ? {24'h0,uart_byte} : 32'h0);
+      else ld_norm = 32'h0;
+    end else if (plic_load) ld_norm = 32'h0;
 `endif
-               ((dc_hit && (d_off <= 12)) ? rb_dc(ea) : rbwb(ea))
 `ifdef DOOM_BIG
-              )
+    if (key_load) ld_norm = key_in;
 `endif
-             );
 `ifdef FPGA
     ld_raw = dc_ready_now ? (clint_load ? clint_ld_in : ld_norm) : 32'h0;
 `else
@@ -223,6 +255,12 @@ module cache32 (
     clint_commit = clint_store && dc_ready_now;  end
 `ifdef DOOM_BIG
   assign key_hit = key_load && dc_ready_now;
+`endif
+`ifdef LINUX
+  assign uart_tx_valid = uart_store_data && dc_ready_now;
+  assign uart_tx_out = sd_raw[7:0];
+  assign uart_tx_ready = 1'b1;
+  assign uart_rx_pending = uart_pend;
 `endif
 
   always_ff @(posedge clk) begin
@@ -251,6 +289,13 @@ module cache32 (
       ic_pending <= 1'b0;
       dc_pending <= 1'b0;
     end else if (!halt) begin
+`ifdef LINUX
+      if (uart_load_data && dc_ready_now) uart_pend <= 1'b0;
+      else if (uart_rx_ready && !uart_pend) begin
+        uart_pend <= 1'b1;
+        uart_byte <= uart_rx_in;
+      end
+`endif
       if (ic_ready_now) begin
         if (!ic_hit) begin
           for (int w = 0; w < LINE_BYTES/4; w++)
@@ -278,6 +323,9 @@ module cache32 (
           if (!(uart_store || uart_load || clint_store
 `ifdef DOOM_BIG
                || key_store
+`endif
+`ifdef LINUX
+               || plic_store || plic_load
 `endif
               )) begin
             if (!dc_hit) begin

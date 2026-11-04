@@ -1163,3 +1163,22 @@ DOOM CPU: DONE
 - Added `tests/t22_fpga_control.S` (18 instructions) and `hdl make fpga_control_gate`: taken conditional branches, `jal`, branch-after-load, and a load-use stall immediately before a branch. Built with `-DFPGA -DFPGA_MPROG` through `rtl/fpga_pipe_top.sv`, the latched `SB_RAM40_4K` stub, compared with ISS. Measured: `TEST PASSED: halted after 18 retired instrs`, `#SUMMARY INSN=18 CYCLES=36 HALT=1`, and `tools/cmp.py` reported no mismatch.
 - Fixed the FreeRTOS L2.2 review sentence: report `1,124,012` cycles only for the current-tree `deps/FreeRTOS-Kernel` input, and `1,124,204` cycles (insns `899,606`) for the offline fallback `../../downloads/FreeRTOS-Kernel` fresh sibling clone (`../rv32cpu-check6`); insns counts per tree are recorded because ELF layout changes.
 - Re-measured after the gate addition: `hdl make test fpga_control_gate fpga_subw_gate fpga_mgate fpga_test lint` ended with `ALL PASS` and the directed FPGA gates `TEST PASSED (18 instrs)`, `TEST PASSED (50 instrs)`, and `TEST PASSED (31 instrs)`; `hdl make fpga_control_gate` separately printed `TEST PASSED: halted after 18 retired instrs` and `#SUMMARY INSN=18 CYCLES=36 HALT=1`.
+
+## L3: Linux platform testbench (2026-11-04)
+- Added `rtl/linux.dts` -> `linux/linux.dtb` for this machine: 64 MB RAM at `0x8000_0000`, CLINT at `0x0200_0000`, NS16550 UART at `0x1000_0000`, minimal PLIC at `0x0c00_0000`; bootargs now `console=ttyS0 earlycon=ns16550,mmio,0x10000000 initramfs_async=0`.
+- Added `tb/run_linux.sv`, `tb/run_linux.cpp`, Makefile targets `linux`, `linux/linux.dtb`, `linux/vmlinux.bin`, `build/vlt_linux/run_linux`, `linux_sim`, `linux_sim_dbg`, `linux_shell`. The C++ runner loads `vmlinux.bin` at `0x8000_0000`, DTB at `0x83e0_0000`, feeds stdin to the UART, prints stdout, retires with PC/insn/rd/wv/ea, prints event milestones/counters, and has a new `platform` stop mode.
+- `linux_sim` is now an L3 gate, not an L4 shell gate: it stops at `kernel_init_freeable` (`0x804753d0`) and checks `start_kernel`, `kernel_init`, `wait_for_initramfs`, `run_init_process`, `kernel_init_freeable`. The external Buildroot no-MMU kernel binary is referenced as `LINUX_KERNEL_BIN ?= ../../build-linux/nommu/images/vmlinux.bin`; generated `linux/`, `tmp-stage/`, and the stray `console=ttyS0` kernel image are ignored/not committed.
+- Measured L3 boot: `hdl make linux_sim` stopped at `#STOP platform cyc=3648358`, `#LINUX cycles=3648358 insns=3376075 prompt=0 done=0 halt=0`, and printed `TEST PASSED (L3 platform boot: Linux reaches init_freeable; BusyBox prompt not reached yet)`. Event milestones: `start_kernel` 176007, `run_init_process` 302024, `initramfs_async_setup` 2451358, timer handler 3202968, serial/PLINK init events 3244946-3282622, `down_write` 3387192, `up_write` 3387285, `wait_for_initramfs` 3472452, `rest_init` 3580730, `kernel_init` 3648317, `kernel_init_freeable` 3648358.
+- Measured longer boot (same DTB, 20 M cycles): reaches `down_write` at 3,387,192 and `up_write` at 3,387,285 successfully, then enters `rwsem_down_write_slowpath` at 8,039,562 for lock word `0x8080e044`, then idle/WFI; final `prompt=0`. So the honest current state is: the platform boots past early kernel drivers/initramfs setup but hangs/waits after driver/init locking, not BusyBox prompt yet.
+- Re-measured after L3 code changes: `all_tests` -> `ALL TESTS DONE`, `ua` -> `ALL UA PASS`, coremark `COREMARK PASS` (`3.193 CoreMark/MHz` unchanged), freertos `FREERTOS PASS` cycles=1124012, `lint` clean, `fpga_full FPGA_FREQ=13 FPGA_SEED=4` PASS (`build/cpu_full.bin`, `Max frequency ... PASS at 13.00 MHz`).
+- Next: L4 make the Linux boot reach BusyBox prompt. Current suspect: the CPU/cache LR/SC reservation path loses a reservation across an IRQ/MRET and/or the VFS rwsem lock state becomes nonzero; need inspect `lr.w`/`sc.w`/`amoadd.w` around `0x8080e044` and/or `wait_for_initramfs`/initramfs sequencing with `initramfs_async=0`.
+### Metrics (L3, measured this session)
+| item | value |
+|---|---|
+| linux_sim L3 | TEST PASSED (platform boot), stop `kernel_init_freeable`, cycles=3,648,358, insns=3,376,075, prompt=0 |
+| boot far | 20M-cycle run: slowpath at 8,039,562, then idle, prompt=0 |
+| all_tests | ALL TESTS DONE |
+| ua | ALL UA PASS |
+| coremark | 3.193 CoreMark/MHz, 156,610,941 cycles / 500 it |
+| freertos | PASS, cycles=1,124,012 |
+| fpga_full | PASS at 13 MHz, seed 4, `build/cpu_full.bin` |
