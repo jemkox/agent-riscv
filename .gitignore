@@ -7,7 +7,13 @@ start-agent.sh
 __pycache__/
 *.pyc
 deps/
+# Linux binaries/DTBs/initramfs/gate outputs: generated Buildroot outputs are release assets, not git history.
 linux/linux.dtb
 linux/vmlinux.bin
+linux/gate.txt
+linux/Image
+linux/vmlinux
+linux/initramfs*.cpio
+linux/rootfs*.ext*
 tmp-stage/
 console=ttyS0

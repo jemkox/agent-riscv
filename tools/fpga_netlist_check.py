@@ -24,31 +24,30 @@ def check_json(netlist_path, progress_path):
     required = ("st_mepc", "st_mtvec", "st_mcause", "st_mie")
     missing = []
     for req in required:
-        hit = False
-        for name, cell in cells.items():
-            if req in name and cell.get("type", "").startswith("SB_DFF"):
-                hit = True
-                break
-        if not hit:
+        dff = [(name, cell) for name, cell in cells.items()
+               if req in name and cell.get("type", "").startswith("SB_DFF")]
+        if not dff:
             missing.append(req)
+        for name, cell in dff:
+            conns = cell.get("connections", {})
+            d = conns.get("D")
+            q = conns.get("Q")
+            if not d or not q:
+                fail(f"fpga_full netlist check FAILED: trap CSR flop {name} has no D/Q connection")
+            if d == q:
+                fail(f"fpga_full netlist check FAILED: trap CSR flop {name} D-input is identity/preserved-only")
     text = open(progress_path).read()
     base_lut4 = base_flops = 0
     explained = False
     for line in text.splitlines():
-        ml = re.search(r'([0-9][0-9,]*)\s*LUT4', line)
-        if not ml:
+        mb = re.search(r'NETLIST_BASELINE\s+LUT4=([0-9][0-9,]*)\s+FLOPS=([0-9][0-9,]*)', line)
+        if not mb:
             continue
-        base_lut4 = parse_int(ml.group(1))
-        mf = re.search(r'([0-9][0-9,]*)\s*flops', line)
-        if mf:
-            base_flops = parse_int(mf.group(1))
+        base_lut4 = parse_int(mb.group(1))
+        base_flops = parse_int(mb.group(2))
         explained = "explained" in line or "explanation" in line
-    if base_lut4 == 0:
-        fail("fpga_full netlist check FAILED: no LUT4 baseline found in PROGRESS.md")
-    if base_lut4 == 0:
-        fail("fpga_full netlist check FAILED: no LUT4 baseline found in PROGRESS.md")
-    if base_flops == 0:
-        base_flops = flops
+    if base_lut4 == 0 or base_flops == 0:
+        fail("fpga_full netlist check FAILED: missing tagged NETLIST_BASELINE LUT4=... FLOPS=... in PROGRESS.md")
     lut_drop = base_lut4 and (lut4 < base_lut4 * 9 // 10)
     flop_drop = base_flops and (flops < base_flops * 9 // 10)
     if missing:

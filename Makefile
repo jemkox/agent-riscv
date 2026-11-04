@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -54,7 +54,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),build/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),build/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell build/vlt/run_hex build/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -381,11 +381,13 @@ build/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
 	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir build/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C build/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
 
-linux_sim_dbg: build/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb | linux
+linux_sim_dbg: build/vlt_linux_dbg/run_linux | linux
+	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
 	@mkdir -p build/linux/logs; ./build/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee build/linux/logs/boot_dbg.out
 
-linux_sim: build/vlt_linux/run_linux linux/gate.txt linux/vmlinux.bin linux/linux.dtb | linux
-	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX L3 TEST FAILED: kernel sha256 mismatch" >&2; exit 1; }
+linux_sim: build/vlt_linux/run_linux linux/gate.txt | linux
+	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
+	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX L3 TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256)); rebuild with make linux_rebuild_kernel or download the pinned image from the GitHub Release asset" >&2; exit 1; }
 	@mkdir -p build/linux/logs; ./build/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 6000000 platform | tee build/linux/logs/boot.out
 	@grep -q "^#STOP platform" build/linux/logs/boot.out || { echo "LINUX L3 PLATFORM BOOT TEST FAILED" >&2; exit 1; }
 	@grep -q "#GATE start_kernel " build/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: start_kernel not reached" >&2; exit 1; }
@@ -645,6 +647,20 @@ fpga_control_gate: build/vlt_fpga_control/fpga_controltop build/t22_fpga_control
 	@./build/vlt_fpga_control/fpga_controltop > build/fpga_control/t22_fpga_control.rtl.log; grep -q "TEST PASSED" build/fpga_control/t22_fpga_control.rtl.log
 	@python3 iss/iss.py --quiet --log build/fpga_control/t22_fpga_control.iss.log build/t22_fpga_control.bin > /dev/null
 	@python3 tools/cmp.py build/fpga_control/t22_fpga_control.rtl.log build/fpga_control/t22_fpga_control.iss.log
+
+build/fpga_csr:
+	@mkdir -p build/fpga_csr
+
+build/fpga_csr/fpga_m_prog_init.sv: build/t24_fpga_csr_writes.hex | build/fpga_csr
+	@python3 tools/gen_fpga_rom.py build/t24_fpga_csr_writes.hex build/fpga_csr/fpga_m_prog_init.sv
+
+build/vlt_fpga_csr/fpga_csr_top: $(FPGA_PIPE_RTL) build/fpga_csr/fpga_m_prog_init.sv tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv | build/fpga_csr
+	verilator --binary --Wall --timing -O2 -DFPGA -DFPGA_MPROG -Ibuild/fpga_csr --Mdir build/vlt_fpga_csr -o fpga_csr_top $(FPGA_PIPE_RTL) tb/fpga_pipe_tb.sv tb/sb_prims_sim.sv
+
+fpga_csr_gate: build/vlt_fpga_csr/fpga_csr_top build/t24_fpga_csr_writes.bin | build/fpga_csr
+	@./build/vlt_fpga_csr/fpga_csr_top > build/fpga_csr/t24_fpga_csr_writes.rtl.log; grep -q "TEST PASSED" build/fpga_csr/t24_fpga_csr_writes.rtl.log
+	@python3 iss/iss.py --quiet --log build/fpga_csr/t24_fpga_csr_writes.iss.log build/t24_fpga_csr_writes.bin > /dev/null
+	@python3 tools/cmp.py build/fpga_csr/t24_fpga_csr_writes.rtl.log build/fpga_csr/t24_fpga_csr_writes.iss.log
 
 synth:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
