@@ -1182,3 +1182,17 @@ DOOM CPU: DONE
 | coremark | 3.193 CoreMark/MHz, 156,610,941 cycles / 500 it |
 | freertos | PASS, cycles=1,124,012 |
 | fpga_full | PASS at 13 MHz, seed 4, `build/cpu_full.bin` |
+
+## L4 boot-debug work in progress (2026-11-04)
+- `rtl/cache32.sv`: added a Linux-build RAM window check (`ram_ok = (ea >> 26) == 6'h20` and `ic_ram_ok = pc_if[31:26] == 6'h20`) so Linux RAM is exactly `0x8000_0000..0x83ff_ffff`; unmapped loads return 0 and unmapped stores/cache fills are dropped. This prevents low `tp`-relative scratch writes from aliasing kernel RAM.
+- `tb/run_linux.cpp`: added a retired-store ring (`#STORE pc ea sd`) and printed it when `__stack_chk_fail` (`0x8046c9d4`) retires. Measured on a 400M-cycle direct boot: `#STACK_CHK_FAIL pc=8046c9d4 cyc=6084537 stores=400`, but the boot output still panics at `[    0.258329] Kernel panic - not syncing: stack-protector: Kernel stack is corrupted in: vsnprintf+0x580/0x588`.
+- Current uncommitted boot-debug code also includes the MPP/high-PC mret workaround: kernel PCs clear saved MPP so Linux can use the user resume path; test ROM `mret` at low PCs preserve MPP; CSR read/writeback and store-ring logging are still under investigation.
+- Verified after these boot-debug changes: `hdl make lint` clean, `hdl make all_tests` prints `ALL TESTS DONE` with `ALL PASS`, `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, `ALL M7 PASS`; Doom `frames=31 cycles=123801143`; `hdl make linux_sim` still passes L3 with `cycles=3648358 insns=3376075 prompt=0`.
+
+### Metrics (L4 boot-debug, measured this session)
+| item | value |
+|---|---|
+| linux_sim L3 | TEST PASSED, cycles=3,648,358, insns=3,376,075, prompt=0 |
+| 400M boot | stack-corruption panic at cyc~6,084,537 / [0.258329], no prompt |
+| store ring | printed at `__stack_chk_fail`: `stores=400` |
+| all_tests | ALL TESTS DONE |

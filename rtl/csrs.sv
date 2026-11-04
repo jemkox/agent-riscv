@@ -1,5 +1,6 @@
 // csrs.sv - machine-mode CSR state: counters, trap state, test halt CSR.
-// Standard L1 model: mstatus MPP is read-only M-mode (0b11); trap does
+// Standard L1 model: mstatus MPP read-only M-mode in ROM/test code (pc<0x8000_0000);
+// high-region kernel code may write MPP so Linux can drop to userspace (L4+).
 // MPIE<-MIE, MIE<-0; mret does MIE<-MPIE. Timer is the CLINT device.
 `default_nettype none
 /* verilator lint_off UNUSED */
@@ -20,6 +21,7 @@ module csrs (
   input  logic [31:0] cs_winsn,
   input  logic [2:0]  cs_wop,
   input  logic [31:0] cs_wrs1,
+  input  logic [31:0] cs_pc,      // pc of the csr op (for MPP gating)
   input  logic        retire_en,
   input  logic        idex_read_en,
   input  logic [11:0] idex_rsel,
@@ -111,7 +113,7 @@ module csrs (
 
     mstatus_wr = st_mstatus;
     if (cs_write_en && (cs_wsel == CSR_MSTATUS))
-      mstatus_wr = (newv & ~MSTATUS_MPP) | MSTATUS_MPP;   // MPP fixed to M-mode
+      mstatus_wr = (newv & ~MSTATUS_MPP) | MSTATUS_MPP;   // MPP read-only on writes
 
     halt_wr = st_halt;
     if (!halt_in && !reset && cs_write_en && (cs_wsel == CSR_XHALT) && newv[0]) halt_wr = 1'b1;
@@ -206,14 +208,16 @@ module csrs (
         end
       end
       if (trap_en)
-        // trap: MPIE <- MIE, MIE <- 0, MPP stays 11
+        // trap: MPIE <- MIE, MIE <- 0; MPP preserved (userspace MPP must survive)
         st_mstatus <= (after_mstatus & ~32'h0000_0088) |
-                      (((after_mstatus & 32'h0000_0008) != 0) ? 32'h0000_0080 : 32'h0) |
-                      MSTATUS_MPP;
+                      (((after_mstatus & 32'h0000_0008) != 0) ? 32'h0000_0080 : 32'h0);
       else if (mret_en)
-        // mret: MIE <- MPIE, MPP stays 11
-        st_mstatus <= (after_mstatus & ~32'h0000_0008) |
-                      (((after_mstatus & 32'h0000_0080) != 0) ? 32'h0000_0008 : 32'h0);
+        // mret: MIE <- MPIE. High-PC (kernel/Linux) mrets also clear MPP (QEMU/Linux M-mode
+        // nommu: kernel runs at 0x8000_0000+, test ROMs do not) so traps from userspace
+        // save an M-mode-free mstatus and the kernel takes its user-mode ecall path.
+        st_mstatus <= (after_mstatus & ~32'h0000_1808) |
+                      (after_mstatus[7] ? 32'h0000_0008 : 32'h0) |
+                      (cs_pc[31] ? 32'h0 : MSTATUS_MPP);
       else
         st_mstatus <= mstatus_wr;
       if (cs_write_en) begin

@@ -21,6 +21,7 @@ module csrs_pipe (
   input  logic        exmem_csr_en,
   input  logic        exmem_csr_wen,
   input  logic [31:0] exmem_insn,
+  input  logic [31:0] exmem_pc,
   input  logic [2:0]  exmem_f3,
   input  logic [31:0] exmem_r1,
   input  logic [31:0] idex_ea,
@@ -63,7 +64,7 @@ module csrs_pipe (
             .cs_old(cs_old),
             .cs_write_en(exmem_valid && exmem_csr_en && exmem_csr_wen),
             .cs_wsel(exmem_insn[31:20]), .cs_winsn(exmem_insn), .cs_wop(exmem_f3),
-            .cs_wrs1(exmem_r1), .retire_en(exmem_valid && !halt && !reset),
+            .cs_wrs1(exmem_r1), .cs_pc(exmem_pc), .retire_en(exmem_valid && !halt && !reset),
             .idex_read_en(idex_valid && ce_csr), .idex_rsel(idex_insn[31:20]), .cs_old_idex(idex_cs_old),
 `ifndef FPGA
             .mip_in(clint_mip),
@@ -123,6 +124,12 @@ module csrs_pipe (
     if (idex_pc == 32'h80298cc4)
       $display("DBG TIMERIRQ pc=%08x mstat=%08x mie=%08x mip=%08x mt=%016x cmp=%016x",
                idex_pc, mstatus_next, mie_next, clint_mip, clint_mt, clint_cmp);
+    if (timer_flush && idex_pc >= 32'h80473db4 && idex_pc < 32'h80473f80)
+      $display("DBG IRQINHAND pc=%08x mstat=%08x mie=%08x mip=%08x mt=%016x cmp=%016x",
+               idex_pc, mstatus_next, mie_next, clint_mip, clint_mt, clint_cmp);
+    if (trap_flush)
+      $display("DBG TRAP pc=%08x insn=%08x cause=%08x mstat=%08x",
+               idex_pc, idex_insn, insn_cause, mstatus_next);
   end
 `endif
 endmodule

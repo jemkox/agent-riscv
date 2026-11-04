@@ -99,6 +99,18 @@ module cache32 (
   localparam int LINE_BYTES = 16;
   localparam int LINE_SHIFT = 4;
 
+  // L4 Linux platform: RAM is exactly 64 MB at 0x8000_0000; anything else is
+  // unmapped (QEMU-style: loads read 0, stores are dropped) so tp-relative
+  // low-address scratch writes cannot alias kernel RAM.
+`ifdef LINUX
+  logic ram_ok, ic_ram_ok;
+  assign ram_ok    = ((ea >> 26) == 6'h20);
+  assign ic_ram_ok = (pc_if[31:26] == 6'h20);
+`else
+  localparam bit ram_ok = 1;
+  localparam bit ic_ram_ok = 1;
+`endif
+
   // P2 speed: backing + cache lines are WORD arrays (VlUnpacked<uint32_t>):
   // 1-2 word ops instead of 4-16 byte ops per access; byte semantics kept via
   // rbwb/rb_ic/rb_dc word merge + lane-masked RMW stores. Byte order little
@@ -300,7 +312,11 @@ module cache32 (
         if (!ic_hit) begin
           for (int w = 0; w < LINE_BYTES/4; w++)
             icw[i_idx*4+w] =
+`ifdef LINUX
+              ic_ram_ok ? rw[((((pc_if & 32'hFFFFFFF0) >> 2) + w)) & (BACK_WORDS - 1)] : 32'h0;
+`else
               rw[((((pc_if & 32'hFFFFFFF0) >> 2) + w)) & (BACK_WORDS - 1)];
+`endif
           ic_ep[i_idx] = epoch;
           ic_tag[i_idx] = i_tag;
         end
@@ -331,11 +347,15 @@ module cache32 (
             if (!dc_hit) begin
               for (int w = 0; w < LINE_BYTES/4; w++)
                 dcw[d_idx*4+w] =
+`ifdef LINUX
+                  ram_ok ? rw[((((ea & 32'hFFFFFFF0) >> 2)) + w) & (BACK_WORDS - 1)] : 32'h0;
+`else
                   rw[((((ea & 32'hFFFFFFF0) >> 2)) + w) & (BACK_WORDS - 1)];
+`endif
               dc_ep[d_idx] = epoch;
               dc_tag[d_idx] = d_tag;
             end
-            if (idex_st) begin
+            if (idex_st && ram_ok) begin
               w0  = (ea >> 2) & (BACK_WORDS - 1);
               sft = (ea & 3) * 8;
               nby = (ssz == 2'b00) ? 1 : (ssz == 2'b01) ? 2 : 4;
@@ -374,9 +394,9 @@ module cache32 (
             end
 `ifndef FPGA
             if (idex_st) begin
-              if (ea == res_a) res_v <= 1'b0;   // matching store clears the LR reservation
+              if (ea == res_a && ram_ok) res_v <= 1'b0;   // matching store clears the LR reservation
             end
-            if (amo_done_now) begin
+            if (amo_done_now && ram_ok) begin
 `ifdef SCDBG
               $display("DBG AMO ea=%08x v=%0d lr=%0d sc=%0d ok=%0d", ea, amo_v, amo_lr, amo_sc, amo_ok_now);
 `endif
@@ -386,7 +406,7 @@ module cache32 (
 `ifdef SCDBG
                 $display("DBG SC ea=%08x res_v=%0d res_a=%08x ok=%0d", ea, res_v, res_a, amo_ok_now);
 `endif
-                res_v <= 1'b0;                   // SC loses the reservation either way
+                res_v <= 1'b0;  // SC loses the reservation either way
                 if (amo_ok_now) begin
                   w0 = (ea >> 2) & (BACK_WORDS - 1);
                   rw[w0] <= amo_new;

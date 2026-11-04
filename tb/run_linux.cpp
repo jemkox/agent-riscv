@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 #include <deque>
+#include <array>
 #include <unistd.h>
 #include <cerrno>
 #include "Vrun_linux.h"
@@ -94,12 +95,13 @@ int main(int argc, char **argv) {
     std::string tail;
     struct TraceEntry { uint32_t pc, insn, rd, wv, ea; };
     std::deque<TraceEntry> trace;
+    std::deque<std::array<uint32_t, 3>> store_ring;
     bool prompt_seen = false, done_seen = false, platform_seen = false;
     auto feed_output = [&](uint32_t ch) {
         std::putchar((char)ch);
         std::fflush(stdout);
         tail.push_back((char)ch);
-        if (tail.size() > 512) tail.erase(0, tail.size() - 512);
+        if (tail.size() > 8192) tail.erase(0, tail.size() - 8192);
         if (tail.find("LINUX_SIM_DONE") != std::string::npos) done_seen = true;
         if (tail.find("~ #") != std::string::npos || tail.find("~ $") != std::string::npos)
             prompt_seen = true;
@@ -129,6 +131,10 @@ int main(int argc, char **argv) {
             trace.push_back({model->ex_pc, model->ex_insn, model->ex_rd, model->ex_wv,
                              model->ex_ea});
             if (trace.size() > 200) trace.pop_front();
+            if (model->ex_st) {
+                store_ring.push_back({model->ex_pc, model->ex_ea, model->ex_sd});
+                if (store_ring.size() > 400) store_ring.pop_front();
+            }
         }
         if (model->uart_tx_valid) feed_output(model->uart_tx_out & 0xFFu);
         {
@@ -168,6 +174,14 @@ int main(int argc, char **argv) {
             for (unsigned ei = 0; ei < ev_count; ++ei) {
                 if (epc == ev_pcs[ei] && !ev_done[ei]) {
                     ev_done[ei] = true;
+                    if (epc == 0x8046c9d4u) {
+                        printf("#STACK_CHK_FAIL pc=%08x cyc=%llu stores=%u\n",
+                               (unsigned)epc, (unsigned long long)cyc,
+                               (unsigned)store_ring.size());
+                        for (const auto &s : store_ring)
+                            printf("#STORE pc=%08x ea=%08x sd=%08x\n",
+                                   s[0], s[1], s[2]);
+                    }
                     printf("#EV %u pc=%08x cyc=%llu\n", ei, (unsigned)epc,
                            (unsigned long long)cyc);
                     for (auto t : trace)
@@ -202,6 +216,9 @@ int main(int argc, char **argv) {
     }
 
     if (!done_seen && !prompt_seen) {
+        printf("#TAIL %zu bytes\n", tail.size());
+        for (char ch : tail) putchar((unsigned char)ch);
+        printf("\n");
         for (auto t : trace) printf("#TRACE %08x %08x %u %08x %08x\n", t.pc, t.insn, t.rd, t.wv, t.ea);
     }
     printf("#LINUX cycles=%llu insns=%llu prompt=%d done=%d halt=%d dtb=%08x\n",

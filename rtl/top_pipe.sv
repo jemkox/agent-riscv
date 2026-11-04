@@ -58,6 +58,7 @@ module top_pipe (
   logic [31:0] cs_old, cs_mtvec, idex_cs_old;
   logic [31:0] clint_ld;
   logic clint_commit, irq_pend, ce_wfi;
+  logic mem_kill_now;
   logic timer_ready, wfi_ready, wfi_wait, wfi_tick;
   logic ce_amo, ce_lr, ce_sc, amo_sc_ok, exmem_sc_ok;
   logic [4:0] ce_amo5;
@@ -96,6 +97,8 @@ module top_pipe (
   assign wfi_wait  = 1'b0;
   assign wfi_tick  = 1'b0;
 `endif
+  assign mem_kill_now = irq_pend && !stall;
+
   /* verilator lint_off UNUSEDSIGNAL */
   logic        amo_mmio_bad, ce_ex_ill;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -150,12 +153,12 @@ module top_pipe (
              .pc_if(pc_if), .fetch_insn(fetch_insn), .fetch_ready(fetch_ready),
              // No memory access while a load-use stall holds this instruction: its address/data operands
              // are not valid yet, and a store would write a wrong address (it is redone after the stall).
-             .idex_valid(idex_valid && !stall), .idex_ld(idex_ld), .idex_st(idex_st),
+             .idex_valid(idex_valid && !stall && !mem_kill_now), .idex_ld(idex_ld), .idex_st(idex_st),
              .ea(idex_ea), .sd_raw(idex_sd_raw), .ssz(idex_ssz),
 `ifndef FPGA
-             .amo_v(idex_valid && ce_amo && !ce_ex_ill && !stall),
-             .amo_lr(ce_lr && idex_valid && !ce_ex_ill && !stall),
-             .amo_sc(ce_sc && idex_valid && !ce_ex_ill && !stall), .amo5(ce_amo5),
+             .amo_v(idex_valid && ce_amo && !ce_ex_ill && !stall && !mem_kill_now),
+             .amo_lr(ce_lr && idex_valid && !ce_ex_ill && !stall && !mem_kill_now),
+             .amo_sc(ce_sc && idex_valid && !ce_ex_ill && !stall && !mem_kill_now), .amo5(ce_amo5),
              .amo_new(amo_new), .amo_sc_ok(amo_sc_ok),
 `endif
              .ld_raw(ldx_raw), .mem_ready(mem_ready),
@@ -356,7 +359,7 @@ module top_pipe (
             .ce_sys(ce_sys), .ce_ill(ce_ex_ill), .ce_fetch_bad(idex_fetch_bad), .ce_mret(ce_mret), .ce_csr(ce_csr), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
             .ld_ok(ld_ok), .st_ok(st_ok), .stall(stall), .m_stall(m_stall),
             .exmem_valid(exmem_valid), .exmem_csr_en(exmem_csr_en), .exmem_csr_wen(exmem_csr_wen),
-            .exmem_insn(exmem_insn), .exmem_f3(exmem_f3), .exmem_r1(exmem_r1),
+            .exmem_insn(exmem_insn), .exmem_pc(exmem_pc), .exmem_f3(exmem_f3), .exmem_r1(exmem_r1),
             .idex_ld(idex_ld), .idex_st(idex_st), .idex_trap(idex_trap), .idex_stop(idex_stop),
             .idex_csr_en(idex_csr_en), .idex_csr_wen(idex_csr_wen),
             .idex_ea(idex_ea), .idex_sd_raw(idex_sd_raw),
