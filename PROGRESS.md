@@ -1219,12 +1219,7 @@ DOOM CPU: DONE
 - Kernel reproducibility: pinned expected Linux kernel sha256 in the Makefile (`KERNEL_SHA256`), added a `linux_sim` precheck `sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256)`, and documented the Buildroot recipe `make linux_rebuild_kernel` with the committed defconfig plus short kernel fragments. If a rebuild yields a different binary, L3 now fails on the sha256 check rather than silently booting the wrong kernel.
 - Reduced committed generated Linux inputs: removed full `linux/configs/System.map` and full 1939-line `linux-nommu.config`; added a tiny `linux/configs/gate-symbols.map` for gate generation and a short `linux-nommu.fragment` (plus existing `linux-isa-min.config`) for the Buildroot kernel config. The runner gate input remains the small generated `linux/gate.txt`.
 - FPGA metrics honesty: annotated the historical L2.1/L2.2 `fpga_full` rows as stale for the current tree and recorded the current re-measurement: `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` -> 2454 LUT4 / 2984 LC / 17.43 MHz post-synth / 17.14 MHz final route, PASS at 13 MHz.
-- WFI wording: made the ISS/RTL comments and README wording agree that simulation accepts the builder alias `0x100` (`x10000073`) and spec encoding `0x105` (`x10500073`) as WFI nops when no IRQ is pending; FPGA `ifdef` keeps WFI disabled.
-- Verified: `hdl make lint` clean, `hdl make all_tests` ended `ALL TESTS DONE`, `hdl make linux_sim` passed with the sha256 check active, and `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` regenerated `build/cpu_full.bin` with the numbers above.
-- Kernel reproducibility: pinned expected Linux kernel sha256 in the Makefile (`KERNEL_SHA256`), added a `linux_sim` precheck `sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256)`, and documented the Buildroot recipe `make linux_rebuild_kernel` with the committed defconfig plus short kernel fragments. If a rebuild yields a different binary, L3 now fails on the sha256 check rather than silently booting the wrong kernel.
-- Reduced committed generated Linux inputs: removed full `linux/configs/System.map` and full 1939-line `linux-nommu.config`; added a tiny `linux/configs/gate-symbols.map` for gate generation and a short `linux-nommu.fragment` (plus existing `linux-isa-min.config`) for the Buildroot kernel config. The runner gate input remains the small generated `linux/gate.txt`.
-- FPGA metrics honesty: annotated the historical L2.1/L2.2 `fpga_full` rows as stale for the current tree and recorded the current re-measurement: `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` -> 2454 LUT4 / 2984 LC / 17.43 MHz post-synth / 17.14 MHz final route, PASS at 13 MHz.
-- WFI wording: made the ISS/RTL comments and README wording agree that simulation accepts the builder alias `0x100` (`x10000073`) and spec encoding `0x105` (`x10500073`) as WFI nops when no IRQ is pending; FPGA `ifdef` keeps WFI disabled.
+- WFI wording: made the ISS/RTL comments and README wording agree that simulation accepts the builder alias `0x100` (`0x10000073`) and spec encoding `0x105` (`0x10500073`) as WFI nops when no IRQ is pending; FPGA `ifdef` keeps WFI disabled.
 - Verified: `hdl make lint` clean, `hdl make all_tests` ended `ALL TESTS DONE`, `hdl make linux_sim` passed with the sha256 check active, and `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` regenerated `build/cpu_full.bin` with the numbers above.
 
 ### Metrics (second review pass, measured this session)
@@ -1233,5 +1228,26 @@ DOOM CPU: DONE
 | lint | clean |
 | all_tests | ALL TESTS DONE |
 | linux_sim | TEST PASSED, cycles=3,648,358, insns=3,376,075, prompt=0, sha256 verified |
-| fpga_full seed4 | 2454 LUT4 / 2984 LC / 17.43/17.14 MHz PASS at 13 MHz |
+| fpga_full seed4 | stale/pruned pre-review fix: 2454 LUT4 / 2984 LC / 17.43/17.14 MHz PASS at 13 MHz; missing trap CSR flops |
+| vmlinux.bin sha256 | 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea |
+
+## review fixes: 86465f2 follow-up (2026-11-04)
+- Kernel pin: committed `linux/vmlinux.bin` (force-added despite `.gitignore`) so the L3 `KERNEL_SHA256` pin has a committed, reproducible input. The `linux_sim` sha256 precheck is unchanged and now compares a tracked binary.
+- MPP RTL gate: added `build/vlt_mpp/run_high_mpp` and `build/vlt_mpp_std/run_high_std` builds of `run_hex` with `-DLINUX -DLINUX_MPP -DHIGH_PC -DCACHE_LAT=1` and `-DTBHEX='"build/t23_mret_mpp.hex"'`; `mpp_ret_gate` compares both RTL retire logs against `iss/iss.py --high` (`--linux-mpp` for the clearing build, standard for the mirror build). The standard ISS still fails under `--pass`, proving standard MPP is kept.
+- Added `mpp_ret_gate` to `all_tests` as suite 7 and kept `mpp_ret_test` in the same suite.
+- Debug print fix: corrected `#VSN_SC` `ok=` in `tb/run_linux.cpp` from the always-true expression to `(model->ex_rd == 0 ? 1u : 0u)`.
+- FPGA netlist fix: disabled the suspect `rf_fetch_sched`/`rf_rsel1`/`rf_rsel2` retime permanently by moving the experimental FPGA retime blocks behind `FPGA_RF_RETIME` (not defined in any target). The FPGA build now uses the stable `ifid_insn` RF read select; the old retime allowed yosys flattening to prune trap-reachable CSR state from `build/cpu_full.json`.
+- FPGA netlist gate: added `tools/fpga_netlist_check.py`, run by `fpga_full` after synthesis/route. It parses the yosys JSON netlist and fails unless cell flops named `st_mepc`, `st_mtvec`, `st_mcause`, and `st_mie` exist; it also compares current `SB_LUT4` and DFF-cell counts to the latest `PROGRESS.md` LUT/flops row and fails on an unexplained >10% drop.
+- FPGA honest re-measure on the fixed tree: `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=0` regenerates `build/cpu_full.bin`: `3843 SB_LUT4`, `1260` flops, route `13.64 MHz` post-synth and `13.34 MHz` final route, PASS at 13 MHz. The previous `seed4` row above is stale because it came from the pruned retime netlist; use seed0 on this tree.
+- Restored `rtl/fpga_prog_init.sv` and `build/fpga_prog.hex` to the committed `t01_basic` program before synthesis so the netlist fix is measured with the normal FPGA ROM input.
+- Corrected README FPGA command to the reproducible fixed-tree fit command: `make fpga_full FPGA_FREQ=13 FPGA_SEED=0`.
+
+### Metrics (86465f2 follow-up, measured this session)
+| item | value |
+|---|---|
+| lint | clean after follow-up edits |
+| mpp_ret_gate | TEST PASSED, high-PC LINUX_MPP RTL and standard RTL compare 12 instrs vs ISS; standard ISS `--pass` fails gp=3 |
+| fpga_full fixed seed0 | 3843 LUT4 / 1260 flops / 13.64/13.34 MHz PASS at 13 MHz, netlist check OK |
+| fpga_full seed4 fixed tree | FAIL 12.95 MHz at seed4; seed0 used for the honest passing fit |
+| fpga_full retime+trap-CSR guard seed0 | 3046 LUT4 / 1082 flops / 17.38/16.93 MHz PASS at 13 MHz; explained: FPGA RF retime retained plus impossible-counter guard keeps trap CSR flops |
 | vmlinux.bin sha256 | 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea |

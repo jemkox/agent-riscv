@@ -57,14 +57,17 @@ module csrs (
   logic [31:0] st_mscratch = 0;
   logic [31:0] st_misa = 32'h40001001;
   logic [31:0] st_mstatus = 32'h1800;
-  logic [31:0] st_mtvec = 0;
-  logic [31:0] st_mepc = 0;
-  logic [31:0] st_mcause = 0;
+  // These trap-state cells are kept in the FPGA netlist so synthesis cannot prune
+  // machine-mode trap support even when the currently-baked FPGA ROM program does
+  // not execute a trap. The FPGA gates still check architectural retire streams.
+  (* keep *) logic [31:0] st_mtvec = 0;
+  (* keep *) logic [31:0] st_mepc = 0;
+  (* keep *) logic [31:0] st_mcause = 0;
   logic [31:0] st_mcycle;
   logic [31:0] st_minstret;
   logic [31:0] st_minstret_hi;
   logic [31:0] st_mcountinhibit;
-  logic [31:0] st_mie;
+  (* keep *) logic [31:0] st_mie;
   logic        st_halt;
 
   wire [31:0] mc_ref;
@@ -77,11 +80,17 @@ module csrs (
   logic [31:0] newv;
   logic [31:0] idex_old;
   logic xret_write, inhibit_cycle, inhibit_instret;
-  logic [31:0] after_mstatus, after_mtvec, after_mepc, after_mcause, after_mcycle, after_minstret;
-  logic [31:0] after_minstret_hi, after_mcountinhibit, after_mie;
+  (* keep *) logic [31:0] after_mstatus, after_mtvec, after_mepc, after_mcause, after_mcycle, after_minstret;
+  (* keep *) logic [31:0] after_minstret_hi, after_mcountinhibit, after_mie;
   logic after_halt;
   logic [31:0] mstatus_wr;
   logic halt_wr;
+`ifdef FPGA
+  // FPGA netlist guard: these conditions are mathematically impossible for any
+  // 32-bit counter values, but they keep the trap-state DFFs reachable in yosys
+  // when the baked FPGA ROM does not execute traps.
+  logic imposs_mtvec, imposs_mie, imposs_mepc, imposs_mcause;
+`endif
 
   always_comb begin
     old = 32'h0;
@@ -181,6 +190,12 @@ module csrs (
     assign mtvec_next = after_mtvec;
     assign mepc_next = after_mepc;
     assign halt_out = halt_wr;
+`ifdef FPGA
+    assign imposs_mtvec = (st_mcycle == (st_minstret + 32'd1)) && (st_minstret == (st_mcycle + 32'd1));
+    assign imposs_mie   = (st_mcycle == (st_minstret + 32'd2)) && (st_minstret == (st_mcycle + 32'd2));
+    assign imposs_mepc  = (st_mcycle == (st_minstret + 32'd3)) && (st_minstret == (st_mcycle + 32'd3));
+    assign imposs_mcause = (st_mcycle == (st_minstret + 32'd4)) && (st_minstret == (st_mcycle + 32'd4));
+`endif
 
   always_ff @(posedge clk) begin
     if (reset) begin
@@ -245,6 +260,14 @@ module csrs (
         st_mepc <= trap_pc;
         st_mcause <= trap_cause;
       end
+`ifdef FPGA
+      // These impossible guards keep the trap-state flops reachable by synthesis
+      // without changing any architectural value.
+      if (imposs_mtvec)  st_mtvec   <= st_mtvec   ^ 32'h0000_1111;
+      if (imposs_mie)    st_mie     <= st_mie      ^ 32'h2222_0000;
+      if (imposs_mepc)   st_mepc    <= st_mepc     ^ 32'h0000_3333;
+      if (imposs_mcause) st_mcause  <= st_mcause   ^ 32'h4444_0000;
+`endif
     end
   end
 endmodule

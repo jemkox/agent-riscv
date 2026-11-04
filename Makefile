@@ -54,7 +54,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),build/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),build/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate all_tests play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell build/vlt/run_hex build/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell build/vlt/run_hex build/vlt/run_mmio
 .PRECIOUS: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 .SECONDARY: build/%.o build/%.elf build/%.bin build/ui/%.rvo build/ui/%.o build/ui/%.elf build/ui/%.bin build/um/%.rvo build/um/%.o build/um/%.elf build/um/%.bin build/mi/%.rvo build/mi/%.o build/mi/%.elf build/mi/%.bin
 
@@ -512,14 +512,40 @@ all_tests:
 	$(MAKE) regress N=500
 	@echo "== [5/6] m7 =="
 	$(MAKE) m7
-	@echo "== [6/6] doom (31 frames) =="
+	@echo "== [6/7] doom (31 frames) =="
 	$(MAKE) doom
+	@echo "== [7/7] mpp_ret_gate (ISS mret MPP + RTL LINUX_MPP + standard mirror) =="
+	$(MAKE) mpp_ret_test mpp_ret_gate
 	@echo "ALL TESTS DONE"
 
 mpp_ret_test: build/t23_mret_mpp.bin
 	@python3 iss/iss.py --high --linux-mpp --quiet --pass build/t23_mret_mpp.bin || { echo "MPP HIGH-PC LINUX_MPP RET TEST FAILED"; exit 1; }
 	@! python3 iss/iss.py --high --quiet --pass build/t23_mret_mpp.bin || { echo "MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
 	@echo "TEST PASSED (mret MPP: high PC clear under LINUX_MPP; standard keeps MPP)"
+
+build/vlt_mpp:
+	@mkdir -p build/vlt_mpp build/vlt_mpp/logs
+
+build/vlt_mpp/run_high_mpp: $(RTL) tb/run_hex.sv build/t23_mret_mpp.hex | build/vlt_mpp
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DLINUX -DLINUX_MPP -DHIGH_PC -DCACHE_LAT=1 -DTBHEX='"build/t23_mret_mpp.hex"' --Mdir build/vlt_mpp -o run_high_mpp $(RTL) tb/run_hex.sv
+
+build/vlt_mpp_std:
+	@mkdir -p build/vlt_mpp_std build/vlt_mpp_std/logs
+
+build/vlt_mpp_std/run_high_std: $(RTL) tb/run_hex.sv build/t23_mret_mpp.hex | build/vlt_mpp_std
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DLINUX -DHIGH_PC -DCACHE_LAT=1 -DTBHEX='"build/t23_mret_mpp.hex"' --Mdir build/vlt_mpp_std -o run_high_std $(RTL) tb/run_hex.sv
+
+mpp_ret_gate: build/t23_mret_mpp.hex build/t23_mret_mpp.bin build/vlt_mpp/run_high_mpp build/vlt_mpp_std/run_high_std
+	@mkdir -p build/vlt_mpp_std/logs
+	@./build/vlt_mpp/run_high_mpp > build/vlt_mpp/logs/t23_mpp.rtl.log; grep -q 'HALT=1' build/vlt_mpp/logs/t23_mpp.rtl.log || { echo "MPP LINUX_MPP RTL GATE FAILED: no halt"; exit 1; }
+	@python3 iss/iss.py --high --linux-mpp --quiet --pass --log build/vlt_mpp/logs/t23_mpp.iss.log build/t23_mret_mpp.bin > /dev/null || { echo "MPP LINUX_MPP ISS GATE FAILED"; exit 1; }
+	@python3 tools/cmp.py build/vlt_mpp/logs/t23_mpp.rtl.log build/vlt_mpp/logs/t23_mpp.iss.log || { echo "MPP LINUX_MPP RTL/ISS MISMATCH"; exit 1; }
+	@./build/vlt_mpp_std/run_high_std > build/vlt_mpp_std/logs/t23_std.rtl.log; grep -q 'HALT=1' build/vlt_mpp_std/logs/t23_std.rtl.log || { echo "MPP STANDARD RTL GATE FAILED: no halt"; exit 1; }
+	@python3 iss/iss.py --high --quiet --log build/vlt_mpp_std/logs/t23_std.iss.log build/t23_mret_mpp.bin > /dev/null
+	@python3 tools/cmp.py build/vlt_mpp_std/logs/t23_std.rtl.log build/vlt_mpp_std/logs/t23_std.iss.log || { echo "MPP STANDARD RTL/ISS MISMATCH"; exit 1; }
+	@! python3 iss/iss.py --high --quiet --pass build/t23_mret_mpp.bin || { echo "MPP STANDARD ISS SHOULD FAIL (MPP kept): MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
+	@grep -q '#VSN_SC\|#BPSTAT\|#SUMMARY' build/vlt_mpp_std/logs/t23_std.rtl.log
+	@echo "TEST PASSED (mpp_ret_gate: high-PC mret MPP clear under LINUX_MPP RTL, standard keeps MPP RTL/ISS)"
 
 lint:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
@@ -571,6 +597,7 @@ build/cpu_full.bin: build/cpu_full.asc
 fpga_full: build/cpu_full.bin | build
 	@echo "build/cpu_full.bin"
 	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' build/cpu_full_syn.log build/cpu_full_route.log
+	@python3 tools/fpga_netlist_check.py build/cpu_full.json PROGRESS.md
 
 # Behavioral gate for the full pipelined FPGA top (review round, 2026-11-03):
 # -DFPGA Verilator build of fpga_pipe_top running the M-heavy t07_m.hex baked

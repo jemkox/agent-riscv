@@ -192,10 +192,10 @@ int main(int argc, char **argv) {
                            (unsigned long long)cyc, (unsigned)model->ex_wv);
                 }
                 if (p == 0x80473ef4u) {
-                    printf("#VSN_SC cyc=%llu pc=%08x ea=%08x val=%08x ok=%u\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_ea, (unsigned)model->ex_sd,
-                           (unsigned)(model->ex_rd == 0 ? 1u : 1u));
+            printf("#VSN_SC cyc=%llu pc=%08x ea=%08x val=%08x ok=%u\n",
+                   (unsigned long long)cyc, (unsigned)p,
+                   (unsigned)model->ex_ea, (unsigned)model->ex_sd,
+                   (unsigned)(model->ex_rd == 0 ? 1u : 0u));
                 }
                 if (p == 0x80473dc0u || p == 0x80473dc4u) {
                     printf("#HND_SP_ST cyc=%llu pc=%08x ea=%08x val=%08x\n",

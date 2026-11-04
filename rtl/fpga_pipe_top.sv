@@ -22,6 +22,9 @@ module fpga_pipe_top (
   logic        dummy_wben, dummy_rv;
   logic [31:0] dummy_pc, dummy_insn, dummy_wv;
   logic [4:0]  dummy_rd;
+  /* verilator lint_off UNUSED */
+  logic [31:0] dummy_ea;
+  /* verilator lint_on UNUSED */
   /* verilator lint_off UNUSEDSIGNAL */
   logic [31:0] dummy_branches, dummy_taken, dummy_misps;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -46,6 +49,7 @@ module fpga_pipe_top (
     .ex_st(ex_st),
     .ex_sa(ex_sa),
     .ex_sd(ex_sd),
+    .ex_ea(dummy_ea),
     .ex_sbe(ex_sbe),
     .rv_valid(dummy_rv),
     .bp_branches(dummy_branches),

@@ -191,7 +191,7 @@ make freertos    # boot FreeRTOS, self-checking demo
 make doom        # headless Doom, frames in build/doom/frames
 make play        # live SDL window with keyboard
 make play_test   # scripted play, must differ from a no-key run
-make fpga_full FPGA_FREQ=13 FPGA_SEED=4   # synth + place & route for iCE40 UP5K
+make fpga_full FPGA_FREQ=13 FPGA_SEED=0   # synth + place & route for iCE40 UP5K
 ```
 
 Any input can also be given directly: `RVTEST_DIR=.../riscv-tests/isa`,

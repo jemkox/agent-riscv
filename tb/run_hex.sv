@@ -15,6 +15,13 @@ module run_hex ();
   logic [31:0] ex_sa, ex_sd;
   /* verilator lint_off UNUSED */
   logic [31:0] ex_ea;
+  logic [31:0] linux_dtb_addr = 32'h83e0_0000;
+  logic uart_rx_ready = 0;
+  logic [7:0] uart_rx_in = 0;
+  logic uart_tx_valid = 0;
+  logic [7:0] uart_tx_out = 0;
+  logic uart_rx_pending = 0;
+  logic uart_tx_ready = 0;
   /* verilator lint_on UNUSED */
   logic [4:0]  ex_rd;
   logic [3:0]  ex_sbe;
@@ -22,12 +29,25 @@ module run_hex ();
   logic        rv_valid;
   logic [31:0] bp_branches, bp_taken_preds, bp_mispreds;
 
+`ifdef LINUX
+  `TOP T(.clk(clk), .reset(reset), .lwe(lwe), .lwa(lwa), .lwd(lwd),
+         .linux_dtb_addr(linux_dtb_addr),
+         .uart_rx_ready(uart_rx_ready), .uart_rx_in(uart_rx_in),
+         .uart_tx_valid(uart_tx_valid), .uart_tx_out(uart_tx_out),
+         .uart_rx_pending(uart_rx_pending), .uart_tx_ready(uart_tx_ready),
+         .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
+         .ex_wben(wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
+         .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_ea(ex_ea), .ex_sbe(ex_sbe),
+         .rv_valid(rv_valid), .bp_branches(bp_branches),
+         .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
+`else
   `TOP T(.clk(clk), .reset(reset), .lwe(lwe), .lwa(lwa), .lwd(lwd),
          .halt(halt), .ex_pc(ex_pc), .ex_insn(ex_insn),
          .ex_wben(wben), .ex_rd(ex_rd), .ex_wv(ex_wv),
          .ex_st(ex_st), .ex_sa(ex_sa), .ex_sd(ex_sd), .ex_ea(ex_ea), .ex_sbe(ex_sbe),
          .rv_valid(rv_valid), .bp_branches(bp_branches),
          .bp_taken_preds(bp_taken_preds), .bp_mispreds(bp_mispreds));
+`endif
 
   logic [31:0] prog [0:4095];
   int n, done, cycles;
@@ -42,7 +62,11 @@ module run_hex ();
     // load phase: CPU frozen under reset, loader port pokes RAM
     reset = 1;
     for (n = 0; n < 4096; n++) begin
+`ifdef HIGH_PC
+      lwa = 32'h8000_0000 + (n << 2); lwd = prog[n]; lwe = 1;
+`else
       lwa = n << 2; lwd = prog[n]; lwe = 1;
+`endif
       #1;
       clk = 1; #1;
       clk = 0; #1;
@@ -50,7 +74,7 @@ module run_hex ();
     lwe = 0;
     lwa = 0; lwd = 0;
     #1;
-    clk = 1; #1;              // one reset commit: pc=0, rf clear
+    clk = 1; #1;              // one reset commit: pc=0 (or pc=0x80000000 under LINUX), rf clear
     clk = 0; #1;
     reset = 0;
     #1;
