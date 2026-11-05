@@ -56,10 +56,13 @@ module top_pipe (
   logic [31:0] idex_ea, idex_sd_raw, idex_sd_log, idex_wbval, ldx_raw, ldx_ex, alu_res, md_result, exmem_r1 = 0;
   /* verilator lint_off UNUSED */
   logic [31:0] cs_old, cs_mtvec, idex_cs_old;
+  /* verilator lint_off UNUSED */
   logic [31:0] clint_ld;
   logic clint_commit, irq_pend, ce_wfi;
   logic mem_kill_now;
+  /* verilator lint_off UNUSED */
   logic timer_ready, wfi_ready, wfi_wait, wfi_tick;
+  /* verilator lint_on UNUSED */
   logic ce_amo, ce_lr, ce_sc, amo_sc_ok, exmem_sc_ok;
   logic [4:0] ce_amo5;
   logic [31:0] amo_new, exmem_amo_new;

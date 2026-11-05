@@ -386,7 +386,7 @@ $(B)/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
 
 $(B)/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
 	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir $(B)/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
-	$(MAKE) -C $(B)/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
+	$(MAKE) -C $(B)/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3 -DLINUX_DEBUG" run_linux -j 4
 
 linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi

@@ -116,6 +116,9 @@ int main(int argc, char **argv) {
     std::string tail;
     struct TraceEntry { uint32_t pc, insn, rd, wv, ea; };
     std::deque<TraceEntry> trace;
+#ifdef LINUX_DEBUG
+    FILE *rtf = fopen("build/linux/cpu_retire.bin", "wb");
+#endif
     std::deque<std::array<uint32_t, 3>> store_ring;
     bool prompt_seen = false, done_seen = false, platform_seen = false;
     uint32_t watch_addr = 0, watch_val = 0;
@@ -285,6 +288,15 @@ int main(int argc, char **argv) {
         model->eval();
         if (model->rv_valid) {
             insns++;
+#ifdef LINUX_DEBUG
+            if (rtf) {
+                uint32_t rec[8] = {(uint32_t)cyc, (uint32_t)model->ex_pc,
+                                   (uint32_t)model->ex_insn, (uint32_t)model->ex_rd,
+                                   (uint32_t)model->ex_wv, (uint32_t)(model->ex_st ? 1 : 0),
+                                   (uint32_t)model->ex_ea, (uint32_t)model->ex_sd};
+                fwrite(rec, sizeof(rec), 1, rtf);
+            }
+#endif
             trace.push_back({model->ex_pc, model->ex_insn, model->ex_rd, model->ex_wv,
                              model->ex_ea});
             if (trace.size() > 200) trace.pop_front();
@@ -345,6 +357,21 @@ int main(int argc, char **argv) {
                            (unsigned long long)cyc, (unsigned)p,
                            (unsigned)model->ex_ea, (unsigned)model->ex_wv);
                 }
+                if (p == 0x80473db4u || p == 0x80473dbcu) {
+                    printf("#HND_CSW cyc=%llu pc=%08x rd=%u wv=%08x ea=%08x\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_rd, (unsigned)model->ex_wv,
+                           (unsigned)model->ex_ea);
+                }
+                if (p == 0x80473db8u) {
+                    printf("#HND_BR cyc=%llu pc=%08x\n", (unsigned long long)cyc, (unsigned)p);
+                }
+                if (p == 0x80473e7cu) {
+                    printf("#HND_CLR cyc=%llu pc=%08x rd=%u wv=%08x ea=%08x\n",
+                           (unsigned long long)cyc, (unsigned)p,
+                           (unsigned)model->ex_rd, (unsigned)model->ex_wv,
+                           (unsigned)model->ex_ea);
+                }
             }
         }
         if (model->uart_tx_valid) feed_output(model->uart_tx_out & 0xFFu);
@@ -382,6 +409,9 @@ int main(int argc, char **argv) {
         cyc++;
     }
 
+#ifdef LINUX_DEBUG
+    if (rtf) fclose(rtf);
+#endif
     if (!done_seen && !prompt_seen) {
         printf("#TAIL %zu bytes\n", tail.size());
         for (char ch : tail) putchar((unsigned char)ch);

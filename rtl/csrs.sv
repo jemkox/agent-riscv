@@ -83,6 +83,7 @@ module csrs (
   (* keep *) logic [31:0] after_mstatus, after_mtvec, after_mepc, after_mcause, after_mcycle, after_minstret;
   (* keep *) logic [31:0] after_minstret_hi, after_mcountinhibit, after_mie;
   logic after_halt;
+  logic [31:0] after_mscratch;
   logic [31:0] mstatus_wr;
   logic halt_wr;
 `ifdef FPGA
@@ -135,6 +136,7 @@ module csrs (
     after_mcause = st_mcause;
     after_mie = st_mie;
     after_halt = st_halt;
+    after_mscratch = st_mscratch;
     xret_write = cs_write_en &&
       (cs_wsel == CSR_MINSTRT || cs_wsel == CSR_MINSTRT_H ||
        cs_wsel == CSR_INSTRET || cs_wsel == CSR_INSTRET_H);
@@ -156,6 +158,7 @@ module csrs (
       else if (cs_wsel == CSR_MEPC) after_mepc = newv;
       else if (cs_wsel == CSR_MCAUSE) after_mcause = newv;
       else if (cs_wsel == CSR_MIE) after_mie = newv;
+      else if (cs_wsel == CSR_MSCRATCH) after_mscratch = newv;
       else if (cs_wsel == CSR_XHALT) after_halt = newv[0] ? 1'b1 : after_halt;
       if (cs_wsel == CSR_MCOUNTHI) after_mcountinhibit = newv & 32'h7;
       else begin
@@ -170,7 +173,7 @@ module csrs (
             | (idex_rsel == CSR_MTVEC    ? after_mtvec : 32'h0)
             | (idex_rsel == CSR_MEPC     ? after_mepc : 32'h0)
             | (idex_rsel == CSR_MCAUSE   ? after_mcause : 32'h0)
-            | (idex_rsel == CSR_MSCRATCH ? st_mscratch : 32'h0)
+            | (idex_rsel == CSR_MSCRATCH ? after_mscratch : 32'h0)
             | (idex_rsel == CSR_MISA     ? st_misa : 32'h0)
             | (idex_rsel == CSR_MIE      ? after_mie : 32'h0)
 `ifndef FPGA
@@ -195,6 +198,16 @@ module csrs (
     assign imposs_mie   = (st_mcycle == (st_minstret + 32'd2)) && (st_minstret == (st_mcycle + 32'd2));
     assign imposs_mepc  = (st_mcycle == (st_minstret + 32'd3)) && (st_minstret == (st_mcycle + 32'd3));
     assign imposs_mcause = (st_mcycle == (st_minstret + 32'd4)) && (st_minstret == (st_mcycle + 32'd4));
+`endif
+`ifdef LINUX_DEBUG
+  // Linux boot debug: every mscratch write/read with its pc + operands.
+  always_comb begin
+    if (cs_write_en && (cs_wsel == CSR_MSCRATCH))
+      $display("DBG MSCR_WR pc=%08x wop=%03b old=%08x rs1=%08x new=%08x",
+               cs_pc, cs_wop, old, cs_wrs1, newv);
+    if (idex_read_en && (idex_rsel == CSR_MSCRATCH))
+      $display("DBG MSCR_RD idex_after=%08x st=%08x", after_mscratch, st_mscratch);
+  end
 `endif
 
   always_ff @(posedge clk) begin
