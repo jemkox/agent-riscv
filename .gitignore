@@ -11,8 +11,13 @@ deps/*
 # Linux binaries/DTBs/initramfs/gate outputs: generated Buildroot outputs are release assets, not git history.
 linux/gate.txt
 linux/Image
-linux/vmlinux
+linux/vmlinux*
+linux/vmlinux_*.tmp
+linux/*.dtb
+linux/*.dtbo
+linux/rootfs*.cpio
 linux/initramfs*.cpio
 linux/rootfs*.ext*
+linux/linux_*.bin
 tmp-stage/
 console=ttyS0
