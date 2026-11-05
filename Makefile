@@ -62,7 +62,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -410,6 +410,17 @@ $(B)/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
 linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
 	@mkdir -p $(B)/linux/logs; ./$(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee $(B)/linux/logs/boot_dbg.out
+
+# Independent retire-trace replay checker. Run it after linux_sim_dbg (or after
+# linux_dbg_initrd by editing the kernel/dtb inputs/log); it must use the same
+# vmlinux.bin, dtb and dtb_addr that produced build/linux/cpu_retire.bin. The
+# runner prints the load address as `dtb=xxxxxxxx` in its final #LINUX line.
+linux_trace_check: linux_sim_dbg
+	@mkdir -p $(B)/linux/logs
+	@DTB=`grep -o 'dtb=[0-9a-f]\{8\}' $(B)/linux/logs/boot_dbg.out | tail -n 1 | cut -d= -f 2`; \
+	 [ -n "$$DTB" ] || { echo "linux_trace_check: no dtb=xxxxxxxx address found in $(B)/linux/logs/boot_dbg.out" >&2; exit 1; }; \
+	 echo "linux_trace_check: using kernel linux/vmlinux.bin, dtb linux/linux.dtb, dtb_addr $$DTB"; \
+	 python3 tools/trace_replay_check.py build/linux/cpu_retire.bin linux/vmlinux.bin linux/linux.dtb "$$DTB" 30 | tee $(B)/linux/logs/trace_replay_check.out
 
 linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux $(B)/linux/logs
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi

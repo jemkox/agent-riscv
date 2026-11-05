@@ -1426,3 +1426,8 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 - Verified `hdl make -s all_tests` on the current source/test tree ended `ALL TESTS DONE` with all suites passing: base/regress/m7/UI/UM/MI/Doom 31 frames, `mpp_ret_gate`, and FPGA gates.
 - Measured Linux boot artifact `build/linux/logs/shell.out` now reaches `[    7.853748] Run /init as init process` instead of the earlier stack-protector panic; BusyBox/login stdout and `LINUX_SIM_DONE` are still missing.
 - Remaining open post-/init timer issue: after `/init`, `build/linux/logs/shell.out` repeatedly reports the handler path starting at `pc=80473db4` (`#HND_CSW`, `#HND_SP_ST`, `#VSN_SC ok=1`) but never emits BusyBox/login output.
+
+## Linux replay-checker housekeeping (2026-11-05)
+- Copied the independent replay checker unchanged into `tools/trace_replay_check.py`. It replays `build/linux/cpu_retire.bin` records against its own register/memory/CSR model and reports wrong results; the kernel/DTB arguments and `dtb_addr` must match the run that produced the trace. The Makefile target `linux_trace_check` runs after `linux_sim_dbg` and parses the final `dtb=` address from `build/linux/logs/boot_dbg.out`.
+- Housekeeping: `linux/vmlinux.bin` and generated Linux DTBs are now untracked/ignored (`.gitignore` now covers `linux/vmlinux*`, `linux/*.dtb`, `linux/rootfs*.cpio`). The reproducibility answer is the Makefile rebuild recipe plus pinned kernel/rootfs SHA-256 checks, not committing Buildroot images.
+- Caveat: `build/linux/cpu_retire.bin` is exactly 8 GiB, so it has already hit the common 8 GiB file-size limit and is truncated. Future retire traces should keep the needed window (start/end PC or record range) rather than logging the whole boot.
