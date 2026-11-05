@@ -56,6 +56,15 @@ def main(argv):
     for inst in insts.values():
         if inst.get("type") in ("SB_MUX2", "SB_OR_NOT"):
             print(f"forbidden primitive {inst.get('type')}"); ok = False
+    # Required trap-state DFF instances by (sub)name: the named (* keep *) CSRs
+    # must be real flops in the netlist, not pruned away by synthesis.
+    for need in ("st_mepc", "st_mtvec", "st_mcause", "st_mie"):
+        n = sum(1 for nm, inst in insts.items()
+                if need in nm and str(inst.get("type") or "").startswith("SB_DFF"))
+        if n == 0:
+            print(f"missing trap-CSR DFF instance {need} (named instances required)"); ok = False
+        else:
+            print(f"trap-CSR DFF {need}: {n} instance(s)")
     print(f"iCE40 primitives found: SB_LUT4 {lut4_now}, SB_DFF {flops_now}, SB_RAM40_4K {ram}, SB_MAC16 {dsp}")
     if tbhex is not None:
         try:

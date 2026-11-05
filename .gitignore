@@ -6,7 +6,8 @@ TODO.md
 start-agent.sh
 __pycache__/
 *.pyc
-deps/
+deps/*
+!deps/FreeRTOS-Kernel/
 # Linux binaries/DTBs/initramfs/gate outputs: generated Buildroot outputs are release assets, not git history.
 linux/gate.txt
 linux/Image
