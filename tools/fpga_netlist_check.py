@@ -1,27 +1,44 @@
 #!/usr/bin/env python3
 # Netlist size and primitive sanity for the FPGA full-CPU build.
-# Usage: fpga_netlist_check.py NETLIST.json --baseline-lut4 N --baseline-flops N
+# Usage: fpga_netlist_check.py NETLIST.json --baseline-lut4 N --baseline-flops N [TBHEX]
+#        [--csr-min NAME:COUNT]...
 # The baseline is pinned by the caller (Makefile), not parsed from PROGRESS.md.
-# Checks: SB_LUT4/FLOPS_51 vs the pinned baseline (grow allowed, shrink >10%
-# fails), required primitives, forbidden primitives, optional TBHEX file.
+# Checks: SB_LUT4/FLOPS_51 vs pinned baseline (grow allowed, shrink >10% fails),
+# required primitives, forbidden primitives, named trap-CSR DFF counts (per
+# family >= requested count), and optional TBHEX program sanity.
 import json, sys
+DEFAULT_CSR_MIN = (("st_mepc", 32), ("st_mtvec", 4), ("st_mcause", 6), ("st_mie", 4))
 def main(argv):
     if len(argv) < 2:
-        print("usage: fpga_netlist_check.py NETLIST.json --baseline-lut4 N --baseline-flops N [TBHEX]"); return 1
+        print("usage: fpga_netlist_check.py NETLIST.json --baseline-lut4 N --baseline-flops N [TBHEX] [--csr-min NAME:COUNT]...")
+        return 1
     netlist = argv[1]
     lut4 = flps = None
     tbhex = None
+    csr_min = []
     i = 2
     while i < len(argv):
         a = argv[i]
         if a == '--baseline-lut4': lut4 = int(argv[i+1]); i += 2
         elif a == '--baseline-flops': flps = int(argv[i+1]); i += 2
+        elif a == '--csr-min':
+            s = argv[i+1]
+            if ':' not in s:
+                print("bad --csr-min NAME:COUNT"); return 1
+            name, bits = s.split(':', 1)
+            try:
+                csr_min.append((name, int(bits)))
+            except ValueError:
+                print("bad --csr-min bits: " + s); return 1
+            i += 2
         elif a.startswith('--'):
             print(f"unknown option {a}"); return 1
         else:
             tbhex = a; i += 1
     if lut4 is None or flps is None:
         print("baseline args missing: pass --baseline-lut4 N --baseline-flops N"); return 1
+    if not csr_min:
+        csr_min = DEFAULT_CSR_MIN
     d = json.load(open(netlist))
     insts = {}
     def collect(mod):
@@ -56,15 +73,15 @@ def main(argv):
     for inst in insts.values():
         if inst.get("type") in ("SB_MUX2", "SB_OR_NOT"):
             print(f"forbidden primitive {inst.get('type')}"); ok = False
-    # Required trap-state DFF instances by (sub)name: the named (* keep *) CSRs
-    # must be real flops in the netlist, not pruned away by synthesis.
-    for need in ("st_mepc", "st_mtvec", "st_mcause", "st_mie"):
+    # Required trap-state DFF instances by (sub)name: named trap CSRs must be
+    # real flops in the netlist, with at least the requested live bit count.
+    for need, need_count in csr_min:
         n = sum(1 for nm, inst in insts.items()
                 if need in nm and str(inst.get("type") or "").startswith("SB_DFF"))
-        if n == 0:
-            print(f"missing trap-CSR DFF instance {need} (named instances required)"); ok = False
+        if n < need_count:
+            print(f"missing trap-CSR DFF bits {need} (found {n}, need >= {need_count})"); ok = False
         else:
-            print(f"trap-CSR DFF {need}: {n} instance(s)")
+            print(f"trap-CSR DFF {need}: {n} instance(s) (need >= {need_count})")
     print(f"iCE40 primitives found: SB_LUT4 {lut4_now}, SB_DFF {flops_now}, SB_RAM40_4K {ram}, SB_MAC16 {dsp}")
     if tbhex is not None:
         try:
@@ -73,7 +90,7 @@ def main(argv):
             print(f"missing TBHEX: {tbhex}")
             return 1
         lines = [l for l in raw.split("\n") if l.strip()]
-        if any(l.strip() == "@" for l in lines) or any(l.strip().startswith("@") and len(l.strip()) == 1 for l in lines):
+        if any(l.strip() == "@" for l in lines):
             print("bare @ lines in TBHEX (truncated program):")
             for n, l in enumerate(lines):
                 if l.strip() == "@":

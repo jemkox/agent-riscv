@@ -27,8 +27,12 @@ WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.w
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
 # Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
-FPGA_NETLIST_LUT4 ?= 3076
-FPGA_NETLIST_FLOPS ?= 1082
+FPGA_NETLIST_LUT4 ?= 3123
+FPGA_NETLIST_FLOPS ?= 1099
+# Pinned netlist for the documented fpga_csrtrap ROM (smaller, but it exercises
+# trap CSRs dynamically; see fpga_csrtrap_netlist target below).
+FPGA_CSRTRAP_NETLIST_LUT4 ?= 2176
+FPGA_CSRTRAP_NETLIST_FLOPS ?= 1020
 UI_DIR := $(RVTEST_DIR)/rv32ui
 UI_MACROS := $(RVTEST_DIR)/macros/scalar
 UM_DIR := $(RVTEST_DIR)/rv32um
@@ -58,7 +62,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -71,7 +75,7 @@ deps:
 	@if [ ! -d deps/riscv-tests ]; then git clone -q $(RISCV_TESTS_URL) deps/riscv-tests && git -C deps/riscv-tests checkout -q $(RISCV_TESTS_REV) && git -C deps/riscv-tests submodule -q update --init env; fi
 	@if [ ! -d deps/coremark ]; then git clone -q $(COREMARK_URL) deps/coremark && git -C deps/coremark checkout -q $(COREMARK_REV); fi
 	@if [ ! -d deps/FreeRTOS-Kernel ]; then git -c advice.detachedHead=false clone -q --depth 1 --branch $(FREERTOS_TAG) $(FREERTOS_URL) deps/FreeRTOS-Kernel; fi
-	@echo "deps: riscv-tests $$(git -C deps/riscv-tests rev-parse --short HEAD), coremark $$(git -C deps/coremark rev-parse --short HEAD), FreeRTOS $$(git -C deps/FreeRTOS-Kernel describe --tags)"
+	@echo "deps: riscv-tests $$(git -C deps/riscv-tests rev-parse --short HEAD), coremark $$(git -C deps/coremark rev-parse --short HEAD), FreeRTOS $(FREERTOS_TAG) (pinned; deps/FreeRTOS-Kernel/manifest.yml version)"
 	@[ -f deps/doom1.wad ] && echo "deps: doom1.wad present" || echo "deps: for Doom, copy the shareware doom1.wad (v1.9, sha1 $(WAD_SHA1)) to deps/doom1.wad"
 
 need_rvtests:
@@ -660,7 +664,25 @@ $(B)/cpu_full.bin: $(B)/cpu_full.asc
 fpga_full: $(B)/cpu_full.bin | $(B)
 	@echo "$(B)/cpu_full.bin"
 	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' $(B)/cpu_full_syn.log $(B)/cpu_full_route.log
-	@python3 tools/fpga_netlist_check.py $(B)/cpu_full.json --baseline-lut4 $(FPGA_NETLIST_LUT4) --baseline-flops $(FPGA_NETLIST_FLOPS)
+	@python3 tools/fpga_netlist_check.py $(B)/cpu_full.json --baseline-lut4 $(FPGA_NETLIST_LUT4) --baseline-flops $(FPGA_NETLIST_FLOPS) --csr-min st_mepc:32 --csr-min st_mtvec:4 --csr-min st_mcause:6 --csr-min st_mie:4
+
+$(B)/fpga_csrtrap:
+	@mkdir -p $(B)/fpga_csrtrap
+
+$(B)/fpga_csrtrap/fpga_prog_init.sv: $(B)/fpga_csrtrap.hex | $(B)/fpga_csrtrap
+	@python3 tools/gen_fpga_rom.py $< $@
+
+# The default cache32_fpga.sv includes rtl/fpga_prog_init.sv; copy it next to
+# the csrtrap ROM so the yosys include search finds this program, not t01.
+$(B)/fpga_csrtrap/cache32_fpga.sv: rtl/cache32_fpga.sv $(B)/fpga_csrtrap/fpga_prog_init.sv | $(B)/fpga_csrtrap
+	@cp $< $@
+
+$(B)/fpga_csrtrap/cpu_full.json: $(filter-out rtl/cache32_fpga.sv,$(FPGA_PIPE_RTL)) $(B)/fpga_csrtrap/cache32_fpga.sv $(B)/fpga_csrtrap/fpga_prog_init.sv | $(B)/fpga_csrtrap
+	@yosys -p 'read_verilog -sv -DFPGA $(filter-out rtl/cache32_fpga.sv,$(FPGA_PIPE_RTL)) $(B)/fpga_csrtrap/cache32_fpga.sv; synth_ice40 -dsp -top fpga_pipe_top -json $(B)/fpga_csrtrap/cpu_full.json; stat' > $(B)/fpga_csrtrap/cpu_full_syn.log
+
+fpga_csrtrap_netlist: $(B)/fpga_csrtrap/cpu_full.json | $(B)/fpga_csrtrap
+	@python3 tools/fpga_netlist_check.py $(B)/fpga_csrtrap/cpu_full.json --baseline-lut4 $(FPGA_CSRTRAP_NETLIST_LUT4) --baseline-flops $(FPGA_CSRTRAP_NETLIST_FLOPS) --csr-min st_mepc:32 --csr-min st_mtvec:6 --csr-min st_mcause:6 --csr-min st_mie:6
+	@echo "fpga_csrtrap_netlist: $(B)/fpga_csrtrap/cpu_full.json (see $(B)/fpga_csrtrap/cpu_full_syn.log)"
 
 # Behavioral gate for the full pipelined FPGA top (review round, 2026-11-03):
 # -DFPGA Verilator build of fpga_pipe_top running the M-heavy t07_m.hex baked

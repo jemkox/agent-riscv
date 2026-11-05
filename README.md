@@ -59,7 +59,7 @@ hardware.
 | CoreMark | **3.19 CoreMark/MHz** (EEMBC CoreMark 1.0, CRCs validated, GCC 13.2 `-O2`) |
 | Operating system | **FreeRTOS** V11.2.0 (own port): tasks, queue, mutex, preemption, software timers, 185 context switches in the demo |
 | DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
-| FPGA (iCE40 UP5K) | current tree, `make fpga_full FPGA_FREQ=13 FPGA_SEED=4`: netlist **3076 SB_LUT4 / 1082 SB_DFF flops**, 8 SB_RAM40_4K, 1 SB_MAC16; **17.00 MHz** after synthesis, **16.25 MHz** final route (PASS at 13 MHz) |
+| FPGA (iCE40 UP5K) | current tree, `make fpga_full FPGA_FREQ=13 FPGA_SEED=4`: netlist **3123 SB_LUT4 / 1099 SB_DFF flops**, 8 SB_RAM40_4K, 1 SB_MAC16; **17.43 MHz** after synthesis, **16.89 MHz** final route (PASS at 13 MHz); dedicated `fpga_csrtrap_netlist` ROM: **2176 SB_LUT4 / 1020 SB_DFF** |
 
 What that means in frames per second:
 
@@ -192,6 +192,7 @@ make doom        # headless Doom, frames in build/doom/frames
 make play        # live SDL window with keyboard
 make play_test   # scripted play, must differ from a no-key run
 make fpga_full FPGA_FREQ=13 FPGA_SEED=4   # synth + place & route for iCE40 UP5K
+make fpga_csrtrap_netlist                 # yosys + netlist checker for tests/fpga_csrtrap.S ROM
 make fpga_toy, fpga_toy_test              # LEGACY single-cycle toy proof top (fpga_top); not the full CPU
 ```
 
@@ -274,7 +275,7 @@ else's part:
 | **Builder agent** (local Qwen 3.8 Flash Next Coder) | The CPU: all RTL except about 35 lines (`rtl/`, about 2,700 lines today), the Python reference model, the random test generator, directed tests t01–t14, the testbenches, the FPGA flow, the Doom port's file layer and runner, and the `PROGRESS.md` log. 36 commits on its own, about 11,000 lines added over the build (excluding the vendored Doom source). |
 | **Reviewer agent** (same local model) | The three reports in [`agent/reviews/`](agent/reviews/). |
 | **Claude** (Anthropic), the co-authored commits | About 35 lines of RTL: the fixes for the two bugs Doom found and the three FreeRTOS found, plus tests t15–t17 and `mret` in the reference model. The FreeRTOS port and demo (`os/`, ~400 lines). Debugging fixes outside the CPU (Doom linker script, file layer, play-window keyboard timing). The agent harness scripts in `agent/`, written with me during setup (~1,600 lines). The CoreMark port (~1,300 lines, mostly EEMBC's own template files), the CI workflow, the installer, and this README and `docs/`. Some of these commits also carried the builder's own work. |
-| **Third-party code** | [doomgeneric](https://github.com/ozkl/doomgeneric) (`doom/src`), EEMBC CoreMark, FreeRTOS kernel (fetched by `make deps`, not in the repo), riscv-tests conventions (`env/`). |
+| **Third-party code** | [doomgeneric](https://github.com/ozkl/doomgeneric) (`doom/src`), EEMBC CoreMark, FreeRTOS kernel subset vendored under `deps/FreeRTOS-Kernel` (pinned V11.2.0, pruned to the files the build uses), riscv-tests conventions (`env/`). |
 
 ## What's next
 
