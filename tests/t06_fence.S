@@ -3,4 +3,4 @@
 _start:
   addi x1, x0, 1
   fence
-  addi x30,x0,1; csrrw x0,0x3ff,x30
+  addi x30,x0,1; li gp, 1; csrrw x0,0x3ff,x30

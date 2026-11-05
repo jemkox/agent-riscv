@@ -28,4 +28,4 @@ handler:
   sw t6,-2048(t5)            # push mtimecmp far away
   sw t6,-2044(t5)
   li t4,1
-  csrrw x0,0x3ff,t4
+  li gp, 1; csrrw x0,0x3ff,t4

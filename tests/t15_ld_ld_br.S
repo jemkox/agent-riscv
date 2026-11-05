@@ -31,6 +31,6 @@ ok2:
   lw x8, 4(x28)
   add x11, x8, x9       # ALU op on both: x11 = 0x2634
   addi x10, x10, 0
-  addi x30,x0,1; csrrw x0,0x3ff,x30
+  addi x30,x0,1; li gp, 1; csrrw x0,0x3ff,x30
 .data
 .word 0

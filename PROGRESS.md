@@ -1383,7 +1383,7 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 - Vendored pinned FreeRTOS kernel into the repo: `deps/FreeRTOS-Kernel` at tag V11.2.0 (`manifest.yml` version line; `examples/` and `.git` pruned, 784 files), `.gitignore` `deps/` -> `deps/*` + `!deps/FreeRTOS-Kernel/`; FreeRTOS gate rebuilt from the vendored tree.
 - Optional review item (speed up ISS to restore full `t99` coverage) not implemented; `t99` stays bounded at 256 iterations.
 
-### Metrics (9b60bbc review fixes, measured this session)
+### Metrics (stale tree at 9b60bbc; current tree metrics are in the rows below)
 | item | value |
 |---|---|
 | `fpga_full` seed4 | netlist 3076 `SB_LUT4` / 1082 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`; 17.00 MHz post-synth / 16.25 MHz final route PASS at 13 MHz; checker prints trap-CSR DFFs `st_mepc 32, st_mtvec 4, st_mcause 6, st_mie 4` |
@@ -1409,3 +1409,20 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 | `test` | 28 `TEST PASSED`, 0 failed |
 | `all_tests` | `ALL TESTS DONE` |
 | lint | `hdl make lint` clean after csrs checker changes |
+
+## Linux L4/L8 initrd CPU divergence tools (2026-11-05)
+- Added retire-log tools for Linux debug without changing the CPU design: `tools/find_ea.py` (first records with an `ea` address), `tools/find_sd.py` (records by store data), `tools/find_rd.py` (records by `rd`/write value), and `tools/dump_rec.py` (raw retire records).
+- Measured `hdl make linux_dbg_initrd` artifacts now exist: `build/linux/cpu_retire.bin` and `build/linux/logs/boot_dbg_initrd.out` from `build/vlt_linux_dbg/run_linux`; CPU still prints `un /init as init process` but no BusyBox/login stdout.
+- CPU first user PC record remains `pc=81104a3c`, record `82333370` in `tools/find_retire.py build/linux/cpu_retire.bin 81104a3c 1 12 82333214`.
+- Candidate linked-list pointer divergence observed from `find_ea.py` on `0x83f75318`: CPU stores/loads sequence includes `0`, `808f9080`, `808f9000`, `808f9080`, `808f9100`, `808f9180` around records 2.2M-28.6M. This is candidate evidence; Q trace alignment for these exact iterations is still unresolved.
+- `tools/rv32dis.py linux/vmlinux.bin 0x800d7610 0x800d7614 binary 0x80000000` decodes `0x800d7610` as `addi s3,a0,0`, so Q's `mv s3,a0` disasm is consistent with the CPU PC/insn; the first observed register divergence near there is CPU `x10/a0=808f9180` vs Q trace context around `x10/a0=808f9000/808f9030`, but Q `in_asm` unique blocks require careful trace ordering.
+- Still blocked: `hdl make linux_shell` has no BusyBox/login stdout, no `LINUX_SIM_DONE`; required suites are not being rerun after this debug-tool-only investigation.
+- Next planned inspection: trace the first store/load path that updates the linked-list pointer page (candidate `0x83f75318`, `0x80835c2c`, `0x8080f4c0`) with `find_ea.py`/`find_sd.py`, compare against QEMU state dumps around the matching PC, then inspect `cache32`/load-use/store forwarding or Linux runner ELF/initrd loading once a concrete memory value mismatch is proven.
+
+## Linux L4 minimal M/U fix and `l4:` checkpoint (2026-11-05)
+- Replaced the temporary `LINUX_MPP` high-PC MRET workaround with a minimal current-privilege model: one `priv_m` bit in `rtl/csrs.sv`/ISS, WARL `mstatus.MPP` accepts only U (`00`) or M (`11`), trap saves current mode into `MPP` then enters M, and `mret` returns to saved `MPP` while leaving `MPP` in U.
+- `ecall` now uses the privilege-dependent cause: 11 from M, 8 from U. The Linux runner builds no longer define `-DLINUX_MPP`; the Linux WFI path follows the ISS NOP/timer model without adding extra CLINT ticks.
+- Added directed tests `tests/t24_priv_trap_m.S` and `tests/t25_priv_mret_umode.S`; Makefile `all_tests` now includes both. `t24` proves an M-mode trap saves `MPP=M`, returns through `mepc+4`, and leaves the following `ecall` at cause 11. `t25` proves `mret` with saved `MPP=0` enters U, U-mode `ecall` has cause 8, saved `MPP=U`, and the handler checks that path.
+- Verified `hdl make -s all_tests` on the current source/test tree ended `ALL TESTS DONE` with all suites passing: base/regress/m7/UI/UM/MI/Doom 31 frames, `mpp_ret_gate`, and FPGA gates.
+- Measured Linux boot artifact `build/linux/logs/shell.out` now reaches `[    7.853748] Run /init as init process` instead of the earlier stack-protector panic; BusyBox/login stdout and `LINUX_SIM_DONE` are still missing.
+- Remaining open post-/init timer issue: after `/init`, `build/linux/logs/shell.out` repeatedly reports the handler path starting at `pc=80473db4` (`#HND_CSW`, `#HND_SP_ST`, `#VSN_SC ok=1`) but never emits BusyBox/login output.

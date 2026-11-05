@@ -1,6 +1,7 @@
 // csrs.sv - machine-mode CSR state: counters, trap state, test halt CSR.
-// Standard L1 model: mstatus MPP is read-only M-mode until S/U support arrives (L5).
-// MPIE<-MIE, MIE<-0; mret does MIE<-MPIE. Timer is the CLINT device.
+// Standard L1/L4 model: minimal M/U privilege mode (1-bit current mode; mstatus.MPP
+// is saved privilege, WARL: only 00 or 11). Trap: MPP <- current mode, mode <- M.
+// mret: mode <- MPP, MPP <- U. MPIE<-MIE, MIE<-0; mret MIE<-MPIE. Timer is CLINT.
 `default_nettype none
 /* verilator lint_off UNUSED */
 module csrs (
@@ -32,7 +33,8 @@ module csrs (
   output logic [31:0] mie_next,
   output logic [31:0] mtvec_next,
   output logic [31:0] mepc_next,
-  output logic        halt_out
+  output logic        halt_out,
+  output logic        priv_m
 );
   localparam CSR_MSTATUS = 12'h300;
   localparam CSR_MTVEC   = 12'h305;
@@ -69,6 +71,7 @@ module csrs (
   logic [31:0] st_mcountinhibit;
   (* keep *) logic [31:0] st_mie;
   logic        st_halt;
+  logic        st_mode = 1'b1;   // current privilege: 1 = M, 0 = U (S/U remains L5)
 
   wire [31:0] mc_ref;
   wire [31:0] min_ref;
@@ -121,8 +124,13 @@ module csrs (
     else if (cs_wop == 3'b111) newv = old & ~{27'b0, cs_winsn[19:15]};
 
     mstatus_wr = st_mstatus;
-    if (cs_write_en && (cs_wsel == CSR_MSTATUS))
-      mstatus_wr = (newv & ~MSTATUS_MPP) | MSTATUS_MPP;   // MPP read-only on writes
+    if (cs_write_en && (cs_wsel == CSR_MSTATUS)) begin
+      if (((newv & MSTATUS_MPP) == 32'h0) ||
+          ((newv & MSTATUS_MPP) == MSTATUS_MPP))
+        mstatus_wr = (newv & ~MSTATUS_MPP) | (newv & MSTATUS_MPP);
+      else
+        mstatus_wr = (newv & ~MSTATUS_MPP) | MSTATUS_MPP;   // WARL illegal MPP -> M
+    end
 
     halt_wr = st_halt;
     if (!halt_in && !reset && cs_write_en && (cs_wsel == CSR_XHALT) && newv[0]) halt_wr = 1'b1;
@@ -193,6 +201,7 @@ module csrs (
     assign mtvec_next = after_mtvec;
     assign mepc_next = after_mepc;
     assign halt_out = halt_wr;
+    assign priv_m = st_mode;
 `ifdef FPGA
     assign imposs_mtvec = (st_mcycle == (st_minstret + 32'd1)) && (st_minstret == (st_mcycle + 32'd1));
     assign imposs_mie   = (st_mcycle == (st_minstret + 32'd2)) && (st_minstret == (st_mcycle + 32'd2));
@@ -212,7 +221,8 @@ module csrs (
 
   always_ff @(posedge clk) begin
     if (reset) begin
-      st_mstatus <= 32'h0000_1800;   // MPP fixed M-mode; MIE follows the test/kernel sequence
+      st_mstatus <= 32'h0000_1800;   // saved MPP starts M; MIE follows the test/kernel sequence
+      st_mode <= 1'b1;
       st_mtvec <= 32'h0;
       st_mepc <= 32'h0;
       st_mcause <= 32'h0;
@@ -234,23 +244,18 @@ module csrs (
 `endif
         end
       end
-      if (trap_en)
-        // trap: MPIE <- MIE, MIE <- 0; MPP preserved (userspace MPP must survive)
-        st_mstatus <= (after_mstatus & ~32'h0000_0088) |
+      if (trap_en) begin
+        // trap: MPIE <- old MIE, MIE <- 0, MPP <- current mode, current mode <- M.
+        st_mstatus <= (after_mstatus & ~(MSTATUS_MPP | 32'h0000_0088)) |
+                      (st_mode ? MSTATUS_MPP : 32'h0) |
                       (((after_mstatus & 32'h0000_0008) != 0) ? 32'h0000_0080 : 32'h0);
-`ifdef LINUX_MPP
-      else if (mret_en)
-        // Linux-build accommodation (explicit -DLINUX_MPP only): high-PC mrets clear MPP.
-        st_mstatus <= (after_mstatus & ~32'h0000_1888) |
-                      (((after_mstatus & 32'h0000_0080) != 0) ? 32'h0000_0008 : 32'h0) |
-                      (cs_pc[31] ? 32'h0 : MSTATUS_MPP);
-`else
-      else if (mret_en)
-        // mret: MIE <- MPIE only. MPP is read-only M-mode until L5; mret does not clear it.
-        st_mstatus <= (after_mstatus & ~32'h0000_0088) |
+        st_mode <= 1'b1;
+      end else if (mret_en) begin
+        // mret: MIE <- MPIE, MPP <- U, current mode <- old saved MPP.
+        st_mstatus <= (after_mstatus & ~(MSTATUS_MPP | 32'h0000_0088)) |
                       (((after_mstatus & 32'h0000_0080) != 0) ? 32'h0000_0008 : 32'h0);
-`endif
-      else
+        st_mode <= ((after_mstatus & MSTATUS_MPP) != 0);
+      end else
         st_mstatus <= mstatus_wr;
       if (cs_write_en) begin
         case (cs_wsel)

@@ -37,4 +37,4 @@ lp:
   addi x20, x20, 1
   addi x30, x30, -1
   bne x30, x0, lp
-  addi x30,x0,1; csrrw x0,0x3ff,x30
+  addi x30,x0,1; li gp, 1; csrrw x0,0x3ff,x30

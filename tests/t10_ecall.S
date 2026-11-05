@@ -17,4 +17,4 @@ handler:
   sw t6,8(t2)
   sw t3,12(t2)
   li t4,1
-  csrrw x0,0x3ff,t4
+  li gp, 1; csrrw x0,0x3ff,t4

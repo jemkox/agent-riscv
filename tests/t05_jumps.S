@@ -23,4 +23,4 @@ skip:
   beq x8, x8, d1
   addi x9, x0, 1
 d1:
-  addi x30,x0,1; csrrw x0,0x3ff,x30
+  addi x30,x0,1; li gp, 1; csrrw x0,0x3ff,x30

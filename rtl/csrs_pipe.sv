@@ -48,6 +48,7 @@ module csrs_pipe (
 );
   logic        trap_en, mret_active, mret_en, irq_due;
   logic [31:0] trap_cause, irq_cause;
+  logic        priv_m;
   logic [31:0] mstatus_next, mie_next, mtvec_next, mepc_next;
   logic [31:0] insn_cause;
 `ifndef FPGA
@@ -70,7 +71,7 @@ module csrs_pipe (
             .mip_in(clint_mip),
 `endif
             .mstatus_next(mstatus_next), .mie_next(mie_next), .mtvec_next(mtvec_next),
-            .mepc_next(mepc_next), .halt_out(halt_out));
+            .mepc_next(mepc_next), .halt_out(halt_out), .priv_m(priv_m));
 
   clint_dev CL(.clk(clk), .reset(reset), .halt_in(halt),
             .retire_en((exmem_valid && !halt && !reset) || wfi_tick),
@@ -95,7 +96,7 @@ module csrs_pipe (
       ((ce_f3 == 3'b010 || ce_f3 == 3'b011) && ce_rs1 != 5'd0) ||
       ((ce_f3 == 3'b110 || ce_f3 == 3'b111) && idex_insn[19:15] != 5'd0));
     if (idex_insn == 32'h0010_0073)      insn_cause = 32'd3;           // EBREAK
-    else if (idex_insn == 32'h0000_0073) insn_cause = 32'd11;          // ECALL (machine)
+    else if (idex_insn == 32'h0000_0073) insn_cause = priv_m ? 32'd11 : 32'd8; // ECALL: M 11, U 8
     else if (ce_fetch_bad)               insn_cause = 32'd0;           // misaligned fetch
     else                                 insn_cause = 32'd2;           // illegal
     irq_due = idex_valid && irq_pending;
@@ -111,13 +112,19 @@ module csrs_pipe (
     cs_mtvec = mtvec_next; // mtvec write retiring this cycle is visible
   end
 `ifdef LINUX_DEBUG
+  logic [63:0] dbg_ret = 64'h0;
+  always_ff @(posedge clk) begin
+    if (!reset && (exmem_valid && !halt)) dbg_ret <= dbg_ret + 64'h1;
+  end
   always_comb begin
     if (timer_flush)
-      $display("DBG TIMERFLUSH pc=%08x cause=%08x mepc? mstat=%08x mip=%08x mt=%016x cmp=%016x",
-               idex_pc, irq_cause, mstatus_next, clint_mip, clint_mt, clint_cmp);
+      $display("DBG TIMERFLUSH pc=%08x cause=%08x mepc? mstat=%08x mip=%08x mt=%016x cmp=%016x ret=%016x",
+               idex_pc, irq_cause, mstatus_next, clint_mip, clint_mt, clint_cmp, dbg_ret);
     if (mret_flush)
-      $display("DBG MRETFLUSH pc=%08x mstat=%08x mt=%016x cmp=%016x mip=%08x",
-               idex_pc, mstatus_next, clint_mt, clint_cmp, clint_mip);
+      $display("DBG MRETFLUSH pc=%08x mstat=%08x mepc=%08x mt=%016x cmp=%016x mip=%08x ret=%016x",
+               idex_pc, mstatus_next, mepc_next, clint_mt, clint_cmp, clint_mip, dbg_ret);
+    if (dbg_ret != 0 && dbg_ret[15:0] == 16'h0)
+      $display("DBG MTICK mt=%016x ret=%016x cmp=%016x", clint_mt, dbg_ret, clint_cmp);
     if (idex_pc == 32'h8046bbdc)
       $display("DBG IRQHAND pc=%08x mstat=%08x mie=%08x mip=%08x mt=%016x cmp=%016x",
                idex_pc, mstatus_next, mie_next, clint_mip, clint_mt, clint_cmp);

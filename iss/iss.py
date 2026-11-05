@@ -30,6 +30,7 @@ def main(argv):
     mask = 0xFFFFFFFF
     cs = {0x300:0x1800,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
           0x340:0,0x301:0x40001001,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0}
+    mode = 1   # current privilege: 1 = M, 0 = U (S/U remains L5)
     def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
         if n == 0xb02 or n == 0xc02: return cs[0xb02]
@@ -39,7 +40,10 @@ def main(argv):
         if n == 0x301:
             pass
         elif n == 0x300:
-            cs[n] = ((v & ~0x1800) | 0x1800) & mask   # MPP fixed M-mode
+            mpp = v & 0x1800
+            if mpp not in (0, 0x1800):
+                mpp = 0x1800
+            cs[n] = ((v & ~0x1800) | mpp) & mask       # WARL MPP: 00 (U) or 11 (M)
         elif n == 0x320:
             cs[n] = v & 0x7
         elif n == 0xc02:
@@ -48,15 +52,18 @@ def main(argv):
             cs[0xb82] = v & mask
         elif n in cs:
             cs[n] = v & mask
-    def mret_mstatus(high_pc=False):   # MIE <- MPIE; explicit Linux build clears MPP at high PCs
+    def mret_mstatus(high_pc=False):   # MIE <- MPIE, MPP <- U, mode <- saved MPP
+        nonlocal mode
         m = cs_get(0x300)
-        v = (m & ~0x8) | (0x8 if (m & 0x80) else 0)
-        if linux_mpp and high_pc:
-            v &= 0xFFFFE7FF
-        cs[0x300] = v & mask
-    def trap_mstatus():   # MPIE <- MIE, MIE <- 0; MPP preserved (M-mode CSR writes keep it fixed)
+        cs[0x300] = ((m & ~(0x88 | 0x1800)) | (0x8 if (m & 0x80) else 0)) & mask
+        mode = 1 if (m & 0x1800) else 0
+    def trap_mstatus():   # MPIE <- MIE, MIE <- 0, MPP <- current mode, mode <- M
+        nonlocal mode
         m = cs_get(0x300)
-        cs[0x300] = ((m & ~0x88) | (0x80 if (m & 8) else 0)) & mask
+        cs[0x300] = ((m & ~(0x88 | 0x1800)) |
+                     (0x1800 if mode else 0) |
+                     (0x80 if (m & 8) else 0)) & mask
+        mode = 1
     def clint_off(ea):    # slot offset inside the 64 KiB CLINT window or None
         if (ea & 0xFFFF0000) != 0x02000000: return None
         return ea & 0xFFFF
@@ -271,7 +278,7 @@ def main(argv):
                         continue
                     npc = (pc+4) & mask
                 elif csr_num == 0:
-                    pc = do_trap(11); steps += 1   # ECALL: machine ecall
+                    pc = do_trap(11 if mode else 8); steps += 1  # ECALL: M cause 11, U cause 8
                     continue
                 elif csr_num == 1:
                     pc = do_trap(3); steps += 1    # EBREAK

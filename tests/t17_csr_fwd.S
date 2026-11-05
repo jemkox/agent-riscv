@@ -25,4 +25,4 @@ _start:
   csrrs a3, mscratch, t5    # set-bits form with a loaded operand
   csrr a4, mscratch
   li t6, 1
-  csrrw x0, 0x3ff, t6
+  li gp, 1; csrrw x0, 0x3ff, t6

@@ -50,4 +50,4 @@ _start:
   lh x7, 0(x10)
   lhu x8, 0(x10)
   addi x9, x0, 1
-  csrrw x0, 0x3ff, x9
+  li gp, 1; csrrw x0, 0x3ff, x9

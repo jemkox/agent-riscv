@@ -29,4 +29,4 @@ after_load_use:
   addi x23, x0, 119
 skipped:
   addi x9, x0, 1
-  csrrw x0, 0x3ff, x9
+  li gp, 1; csrrw x0, 0x3ff, x9

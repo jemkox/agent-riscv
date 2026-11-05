@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -204,10 +204,10 @@ $(B)/sim_%.vvp: $(RTL) $(TB) | $(B)
 test: $(foreach t,$(TESTS),$(B)/$t.bin $(B)/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_BINS) $(UM_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ui $(B)/ui/logs $(B)/um $(B)/um/logs
 	@bad=0; mkdir -p $(B)/rand; \
 	for t in $(TESTS); do \
-	 cp $(B)/$$t.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/$$t.rtl.log; \
-	 python3 iss/iss.py --quiet --log $(B)/$$t.iss.log $(B)/$$t.bin > /dev/null; \
-	 python3 tools/cmp.py $(B)/$$t.rtl.log $(B)/$$t.iss.log || bad=$$((bad+1)); \
-	 done; \
+  cp $(B)/$$t.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/$$t.rtl.log; \
+  python3 iss/iss.py --quiet --pass --log $(B)/$$t.iss.log $(B)/$$t.bin > /dev/null || { echo "$$t: ISS pass marker not reached"; bad=$$((bad+1)); }; \
+  python3 tools/cmp.py $(B)/$$t.rtl.log $(B)/$$t.iss.log > /dev/null || bad=$$((bad+1)); \
+  done; \
 	 python3 iss/iss.py --quiet --pass $(B)/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass $(B)/t18_wfi.bin > /dev/null || { echo "t18_wfi: self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass $(B)/t19_amo.bin > /dev/null || { echo "t19_amo: atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
@@ -365,6 +365,8 @@ freertos: need_freertos $(B)/vlt_bench/run_bench $(B)/bench/freertos.hex
 # --- Linux platform: 64MB RAM, UART 16550 at 0x1000_0000, CLINT at 0x0200_0000 ---
 LINUX_KERNEL_BIN ?= ../../build-linux/nommu/images/vmlinux.bin
 KERNEL_SHA256 ?= 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea
+LINUX_ROOTFS_BIN ?= ../../build-linux/nommu/images/rootfs.cpio
+ROOTFS_SHA256 ?= 75a760b4d7a7db8c04866a368fd9bf70ae82fc143242c56b1b512b2a300a9ac5
 BR_ROOT ?= ../../downloads/buildroot-2025.02.19
 BR_OUT ?= ../../build-linux/nommu
 BR_DEFCONFIG ?= linux/configs/qemu_riscv32_nommu_virt_defconfig
@@ -372,6 +374,7 @@ LINUX_CKPT_FILE ?= $(B)/linux_ckpt.bin
 LINUX_CKPT_SAVE_CYCLE ?= 85000000
 LINUX_CKPT_LATER_CYCLE ?= 90000000
 LINUX_CKPT_HASH ?= $(shell sha256sum $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb | sha256sum | cut -d' ' -f1)
+LINUX_DBG_CYCLES ?= 150000000
 linux:
 	@mkdir -p linux $(B)/linux
 $(B)/linux/logs:
@@ -381,21 +384,27 @@ linux/linux.dtb: rtl/linux.dts linux | $(B)
 	@dtc -I dts -O dtb -o linux/linux.dtb rtl/linux.dts
 linux/vmlinux.bin: linux | $(B)
 	@if [ ! -f linux/vmlinux.bin ]; then cp $(LINUX_KERNEL_BIN) linux/vmlinux.bin; fi
+linux/rootfs.cpio: linux | $(B)
+	@if [ ! -f linux/rootfs.cpio ]; then cp $(LINUX_ROOTFS_BIN) linux/rootfs.cpio; fi
+linux/linux_initrd.dtb: linux/linux_initrd.dts linux | $(B)
+	@mkdir -p linux
+	@dtc -I dts -O dtb -o linux/linux_initrd.dtb linux/linux_initrd.dts
 linux_rebuild_kernel: linux | $(BR_OUT)
 	$(MAKE) -C $(BR_ROOT) O=$(BR_OUT) defconfig BR2_DEFCONFIG=$(CURDIR)/$(BR_DEFCONFIG)
 	$(MAKE) -C $(BR_ROOT) O=$(BR_OUT) linux
 	@mkdir -p linux
 	@cp $(BR_OUT)/images/vmlinux.bin linux/vmlinux.bin
-	@sha256sum linux/vmlinux.bin
+	@cp $(BR_OUT)/images/rootfs.cpio linux/rootfs.cpio
+	@sha256sum linux/vmlinux.bin linux/rootfs.cpio
 linux/gate.txt: linux/configs/gate-symbols.map linux | $(B)
 	@mkdir -p linux
 	@python3 tools/linux_gate.py linux/configs/gate-symbols.map linux/gate.txt
 $(B)/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
 
 $(B)/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir $(B)/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir $(B)/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3 -DLINUX_DEBUG" run_linux -j 4
 
 linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux
@@ -415,11 +424,18 @@ linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux $(B)/linux/logs
 	@grep -q "^#LINUX" $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: runner did not finish" >&2; exit 1; }
 	@echo "TEST PASSED (L3 platform boot: Linux reaches init_freeable; BusyBox prompt not reached yet)"
 
-linux_shell: $(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb | linux
-	@mkdir -p $(B)/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 2000000000 > $(B)/linux/logs/shell.out; sed -n '1,120p' $(B)/linux/logs/shell.out; grep -q LINUX_SIM_DONE $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED" >&2; exit 1; }
+linux_shell: $(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux_initrd.dtb linux/rootfs.cpio | linux
+	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX SHELL TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
+	@sha256sum linux/rootfs.cpio | grep -q $(ROOTFS_SHA256) || { echo "LINUX SHELL TEST FAILED: rootfs sha256 mismatch (expected $(ROOTFS_SHA256))" >&2; exit 1; }
+	@mkdir -p $(B)/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | env LINUX_INITRD=linux/rootfs.cpio ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux_initrd.dtb 2000000000 > $(B)/linux/logs/shell.out; sed -n '1,120p' $(B)/linux/logs/shell.out; grep -q LINUX_SIM_DONE $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED" >&2; exit 1; }
+
+linux_dbg_initrd: $(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux_initrd.dtb linux/rootfs.cpio
+	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX DEBUG INITRD FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
+	@sha256sum linux/rootfs.cpio | grep -q $(ROOTFS_SHA256) || { echo "LINUX DEBUG INITRD FAILED: rootfs sha256 mismatch (expected $(ROOTFS_SHA256))" >&2; exit 1; }
+	@mkdir -p $(B)/linux/logs; env LINUX_INITRD=linux/rootfs.cpio ./$(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux_initrd.dtb $(LINUX_DBG_CYCLES) prompt | tee $(B)/linux/logs/boot_dbg_initrd.out
 
 $(B)/vlt_linux_ckpt/run_linux_ckpt: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --savable --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_MPP -DLINUX_CKPT -CFLAGS -DLINUX_CKPT -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux_ckpt -o run_linux_ckpt $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	verilator --cc --exe --savable --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_CKPT -CFLAGS -DLINUX_CKPT -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux_ckpt -o run_linux_ckpt $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux_ckpt -f Vrun_linux.mk OPT_FAST="-O3" run_linux_ckpt -j 4
 
 linux_ckpt_hash: $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb
@@ -578,15 +594,14 @@ all_tests:
 	@BUILD_ROOT=$(B) python3 tools/run_all_tests_parallel.py
 
 mpp_ret_test: $(B)/t23_mret_mpp.bin
-	@python3 iss/iss.py --high --linux-mpp --quiet --pass $(B)/t23_mret_mpp.bin || { echo "MPP HIGH-PC LINUX_MPP RET TEST FAILED"; exit 1; }
-	@! python3 iss/iss.py --high --quiet --pass $(B)/t23_mret_mpp.bin || { echo "MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
-	@echo "TEST PASSED (mret MPP: high PC clear under LINUX_MPP; standard keeps MPP)"
+	@python3 iss/iss.py --high --quiet --pass $(B)/t23_mret_mpp.bin || { echo "MPP HIGH-PC MRET RET TEST FAILED"; exit 1; }
+	@echo "TEST PASSED (mret MPP: saved MPP restores the current mode; MPP leaves U after mret)"
 
 $(B)/vlt_mpp:
 	@mkdir -p $(B)/vlt_mpp $(B)/vlt_mpp/logs
 
 $(B)/vlt_mpp/run_high_mpp: $(RTL) tb/run_hex.sv $(B)/t23_mret_mpp.hex | $(B)/vlt_mpp
-	verilator --binary --Wall --timing -O2 -DTOPPIPE -DLINUX -DLINUX_MPP -DHIGH_PC -DCACHE_LAT=1 -DTBHEX='"$(B)/t23_mret_mpp.hex"' --Mdir $(B)/vlt_mpp -o run_high_mpp $(RTL) tb/run_hex.sv
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DLINUX -DHIGH_PC -DCACHE_LAT=1 -DTBHEX='"$(B)/t23_mret_mpp.hex"' --Mdir $(B)/vlt_mpp -o run_high_mpp $(RTL) tb/run_hex.sv
 
 $(B)/vlt_mpp_std:
 	@mkdir -p $(B)/vlt_mpp_std $(B)/vlt_mpp_std/logs
@@ -597,14 +612,12 @@ $(B)/vlt_mpp_std/run_high_std: $(RTL) tb/run_hex.sv $(B)/t23_mret_mpp.hex | $(B)
 mpp_ret_gate: $(B)/t23_mret_mpp.hex $(B)/t23_mret_mpp.bin $(B)/vlt_mpp/run_high_mpp $(B)/vlt_mpp_std/run_high_std
 	@mkdir -p $(B)/vlt_mpp_std/logs
 	@./$(B)/vlt_mpp/run_high_mpp > $(B)/vlt_mpp/logs/t23_mpp.rtl.log; grep -q 'HALT=1' $(B)/vlt_mpp/logs/t23_mpp.rtl.log || { echo "MPP LINUX_MPP RTL GATE FAILED: no halt"; exit 1; }
-	@python3 iss/iss.py --high --linux-mpp --quiet --pass --log $(B)/vlt_mpp/logs/t23_mpp.iss.log $(B)/t23_mret_mpp.bin > /dev/null || { echo "MPP LINUX_MPP ISS GATE FAILED"; exit 1; }
-	@python3 tools/cmp.py $(B)/vlt_mpp/logs/t23_mpp.rtl.log $(B)/vlt_mpp/logs/t23_mpp.iss.log || { echo "MPP LINUX_MPP RTL/ISS MISMATCH"; exit 1; }
+	@python3 iss/iss.py --high --quiet --pass --log $(B)/vlt_mpp/logs/t23_mpp.iss.log $(B)/t23_mret_mpp.bin > /dev/null || { echo "MPP HIGH-PC ISS GATE FAILED"; exit 1; }
+	@python3 tools/cmp.py $(B)/vlt_mpp/logs/t23_mpp.rtl.log $(B)/vlt_mpp/logs/t23_mpp.iss.log || { echo "MPP HIGH-PC RTL/ISS MISMATCH"; exit 1; }
 	@./$(B)/vlt_mpp_std/run_high_std > $(B)/vlt_mpp_std/logs/t23_std.rtl.log; grep -q 'HALT=1' $(B)/vlt_mpp_std/logs/t23_std.rtl.log || { echo "MPP STANDARD RTL GATE FAILED: no halt"; exit 1; }
-	@python3 iss/iss.py --high --quiet --log $(B)/vlt_mpp_std/logs/t23_std.iss.log $(B)/t23_mret_mpp.bin > /dev/null
+	@python3 iss/iss.py --high --quiet --pass --log $(B)/vlt_mpp_std/logs/t23_std.iss.log $(B)/t23_mret_mpp.bin > /dev/null || { echo "MPP STANDARD ISS GATE FAILED"; exit 1; }
 	@python3 tools/cmp.py $(B)/vlt_mpp_std/logs/t23_std.rtl.log $(B)/vlt_mpp_std/logs/t23_std.iss.log || { echo "MPP STANDARD RTL/ISS MISMATCH"; exit 1; }
-	@! python3 iss/iss.py --high --quiet --pass $(B)/t23_mret_mpp.bin || { echo "MPP STANDARD ISS SHOULD FAIL (MPP kept): MPP HIGH-PC STANDARD RET TEST FAILED"; exit 1; }
-	@grep -q '#VSN_SC\|#BPSTAT\|#SUMMARY' $(B)/vlt_mpp_std/logs/t23_std.rtl.log
-	@echo "TEST PASSED (mpp_ret_gate: high-PC mret MPP clear under LINUX_MPP RTL, standard keeps MPP RTL/ISS)"
+	@echo "TEST PASSED (mpp_ret_gate: high-PC RTL and ISS both follow the minimal U/M MRET model)"
 
 lint:
 	verilator --lint-only -Wall --timing -DTOPPIPE $(RTL) $(TB)
@@ -672,17 +685,14 @@ $(B)/fpga_csrtrap:
 $(B)/fpga_csrtrap/fpga_prog_init.sv: $(B)/fpga_csrtrap.hex | $(B)/fpga_csrtrap
 	@python3 tools/gen_fpga_rom.py $< $@
 
-# The default cache32_fpga.sv includes rtl/fpga_prog_init.sv; copy it next to
-# the csrtrap ROM so the yosys include search finds this program, not t01.
-$(B)/fpga_csrtrap/cache32_fpga.sv: rtl/cache32_fpga.sv $(B)/fpga_csrtrap/fpga_prog_init.sv | $(B)/fpga_csrtrap
-	@cp $< $@
-
-$(B)/fpga_csrtrap/cpu_full.json: $(filter-out rtl/cache32_fpga.sv,$(FPGA_PIPE_RTL)) $(B)/fpga_csrtrap/cache32_fpga.sv $(B)/fpga_csrtrap/fpga_prog_init.sv | $(B)/fpga_csrtrap
-	@yosys -p 'read_verilog -sv -DFPGA $(filter-out rtl/cache32_fpga.sv,$(FPGA_PIPE_RTL)) $(B)/fpga_csrtrap/cache32_fpga.sv; synth_ice40 -dsp -top fpga_pipe_top -json $(B)/fpga_csrtrap/cpu_full.json; stat' > $(B)/fpga_csrtrap/cpu_full_syn.log
+# The yosys read command searches $(B)/fpga_csrtrap first, then rtl/, so cache32_fpga.sv's
+# `include "fpga_prog_init.sv"` resolves to the csrtrap ROM rather than rtl/fpga_prog_init.sv.
+$(B)/fpga_csrtrap/cpu_full.json: $(FPGA_PIPE_RTL) $(B)/fpga_csrtrap/fpga_prog_init.sv | $(B)/fpga_csrtrap
+	@yosys -p 'read_verilog -sv -DFPGA -I$(B)/fpga_csrtrap -Irtl $(FPGA_PIPE_RTL); synth_ice40 -dsp -top fpga_pipe_top -json $(B)/fpga_csrtrap/cpu_full.json; stat' > $(B)/fpga_csrtrap/cpu_full_syn.log
 
 fpga_csrtrap_netlist: $(B)/fpga_csrtrap/cpu_full.json | $(B)/fpga_csrtrap
 	@python3 tools/fpga_netlist_check.py $(B)/fpga_csrtrap/cpu_full.json --baseline-lut4 $(FPGA_CSRTRAP_NETLIST_LUT4) --baseline-flops $(FPGA_CSRTRAP_NETLIST_FLOPS) --csr-min st_mepc:32 --csr-min st_mtvec:6 --csr-min st_mcause:6 --csr-min st_mie:6
-	@echo "fpga_csrtrap_netlist: $(B)/fpga_csrtrap/cpu_full.json (see $(B)/fpga_csrtrap/cpu_full_syn.log)"
+	@echo "fpga_csrtrap_netlist: $(B)/fpga_csrtrap/cpu_full.json (see $(B)/fpga_csrtrap/cpu_full_syn.log; cache32 include path is $(B)/fpga_csrtrap first, rtl second)"
 
 # Behavioral gate for the full pipelined FPGA top (review round, 2026-11-03):
 # -DFPGA Verilator build of fpga_pipe_top running the M-heavy t07_m.hex baked

@@ -22,6 +22,7 @@
 #endif
 
 static const uint32_t KERNEL_ADDR = 0x80000000u;
+static const uint32_t INITRD_ADDR = 0x82000000u;
 
 static bool load_bin(const char *path, std::vector<uint32_t> &out) {
     FILE *f = fopen(path, "rb");
@@ -61,6 +62,11 @@ int main(int argc, char **argv) {
     std::vector<uint32_t> kernel, dtb;
     if (!load_bin(argv[1], kernel)) { printf("cannot read %s\n", argv[1]); return 1; }
     if (!load_bin(argv[2], dtb)) { printf("cannot read %s\n", argv[2]); return 1; }
+    std::vector<uint32_t> initrd;
+    const char *initrd_path = getenv("LINUX_INITRD");
+    if (initrd_path && *initrd_path) {
+        if (!load_bin(initrd_path, initrd)) { printf("cannot read %s\n", initrd_path); return 1; }
+    }
     const uint64_t max_cycles = (argc > 3) ? strtoull(argv[3], nullptr, 10) : 1200000000ull;
     const bool prompt_stop = (argc > 4) && !std::strcmp(argv[4], "prompt");
     const bool platform_stop = (argc > 4) && !std::strcmp(argv[4], "platform");
@@ -107,6 +113,7 @@ int main(int argc, char **argv) {
         setc(0, 1, 0, 0, 0, 0, 0); model->eval();
         load_words(KERNEL_ADDR, kernel);
         load_words(dtb_addr, dtb);
+        if (!initrd.empty()) load_words(INITRD_ADDR, initrd);
 
         setc(1, 1, 0, 0, 0, 0, 0); model->eval();
         setc(0, 0, 0, 0, 0, 0, 0); model->eval();
@@ -118,17 +125,30 @@ int main(int argc, char **argv) {
     std::deque<TraceEntry> trace;
 #ifdef LINUX_DEBUG
     FILE *rtf = fopen("build/linux/cpu_retire.bin", "wb");
+    FILE *dbg_log = fopen("build/linux/debug_linux.log", "w");
 #endif
     std::deque<std::array<uint32_t, 3>> store_ring;
     bool prompt_seen = false, done_seen = false, platform_seen = false;
     uint32_t watch_addr = 0, watch_val = 0;
     auto feed_output = [&](uint32_t ch) {
+#ifdef LINUX_DEBUG
+        static uint32_t uart_tx_seen = 0;
+        if (uart_tx_seen < 200000u) {
+            ++uart_tx_seen;
+            if (dbg_log)
+                std::fprintf(dbg_log, "#UART_TX cyc=%llu ch=%02x ascii=%c\n",
+                             (unsigned long long)cyc, (unsigned)(ch & 0xFFu),
+                             (ch >= 32u && ch < 127u) ? (char)ch : '.');
+        }
+#endif
         std::putchar((char)ch);
         std::fflush(stdout);
         tail.push_back((char)ch);
         if (tail.size() > 8192) tail.erase(0, tail.size() - 8192);
         if (tail.find("LINUX_SIM_DONE") != std::string::npos) done_seen = true;
-        if (tail.find("~ #") != std::string::npos || tail.find("~ $") != std::string::npos)
+        if (tail.find("~ #") != std::string::npos || tail.find("~ $") != std::string::npos ||
+            tail.find("/ #") != std::string::npos || tail.find("/ $") != std::string::npos ||
+            tail.find("BusyBox") != std::string::npos || tail.find("login:") != std::string::npos)
             prompt_seen = true;
     };
 
@@ -303,6 +323,17 @@ int main(int argc, char **argv) {
             if (model->ex_st) {
                 store_ring.push_back({model->ex_pc, model->ex_ea, model->ex_sd});
                 if (store_ring.size() > 400) store_ring.pop_front();
+#ifdef LINUX_DEBUG
+                static uint32_t uart_store_seen = 0;
+                if (model->ex_ea == 0x10000000u) {
+                    ++uart_store_seen;
+                    if (dbg_log)
+                        std::fprintf(dbg_log, "#UART_ST cyc=%llu pc=%08x insn=%08x ea=%08x sd=%08x\n",
+                                     (unsigned long long)cyc, (unsigned)model->ex_pc,
+                                     (unsigned)model->ex_insn, (unsigned)model->ex_ea,
+                                     (unsigned)model->ex_sd);
+                }
+#endif
             }
             {
                 uint32_t p = model->ex_pc;
@@ -411,6 +442,7 @@ int main(int argc, char **argv) {
 
 #ifdef LINUX_DEBUG
     if (rtf) fclose(rtf);
+    if (dbg_log) fclose(dbg_log);
 #endif
     if (!done_seen && !prompt_seen) {
         printf("#TAIL %zu bytes\n", tail.size());

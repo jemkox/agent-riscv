@@ -10,4 +10,4 @@ _start:
   csrrs x2, mtvec, x0
   csrrs x3, mepc, x0
   csrrs x4, mcause, x0
-  csrrw x0, 0x3ff, x9
+  li gp, 1; csrrw x0, 0x3ff, x9

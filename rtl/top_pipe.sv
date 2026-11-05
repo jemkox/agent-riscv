@@ -99,9 +99,12 @@ module top_pipe (
   assign wfi_wait  = 1'b0;
   assign wfi_tick  = 1'b0;
 `elsif LINUX
-  assign wfi_ready = timer_ready;
-  assign wfi_wait  = idex_valid && ce_wfi && !wfi_ready;
-  assign wfi_tick  = wfi_wait && !halt && !reset;
+  // ISS executes WFI aliases 0x100/0x105 as a NOP unless an IRQ is pending; the
+  // pending IRQ itself is handled by timer_flush. WFI must not stall the
+  // pipeline or add extra CLINT mtime ticks.
+  assign wfi_ready = 1'b1;
+  assign wfi_wait  = 1'b0;
+  assign wfi_tick  = 1'b0;
 `else
   assign wfi_ready = 1'b1;
   assign wfi_wait  = 1'b0;
