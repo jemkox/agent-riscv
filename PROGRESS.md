@@ -1359,3 +1359,20 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
   - QEMU second timer: `pc=0x8021e920`
 - The kernel handler writes the next comparator from `mtime` too late relative to the interval: first handler `mt=0x2dc2ac cmp=0x2e5ee5`, interval `0x9c39`; CPU catches the next timer almost immediately because its CLINT `mtime` advances by retirements, and the bad nested trap corrupts the handler stack frame.
 - Next focus remains architecturally correct CLINT/mtime/tick semantics, not non-architectural tick scaling.
+
+## review fixes: 722ef31 (2026-11-05)
+- README FPGA table updated to the measured current tree: `make fpga_full FPGA_FREQ=13 FPGA_SEED=4` -> netlist 3076 `SB_LUT4` / 1082 `SB_DFF` flops, 8 `SB_RAM40_4K`, 1 `SB_MAC16`; 17.00 MHz after synthesis, 16.25 MHz final route (PASS at 13 MHz). The row annotates the command/seed.
+- Netlist baseline pinned as tool/Makefile args instead of parsed from `PROGRESS.md`: `tools/fpga_netlist_check.py NETLIST.json --baseline-lut4 N --baseline-flops N [TBHEX]`, Makefile vars `FPGA_NETLIST_LUT4 ?= 3076`, `FPGA_NETLIST_FLOPS ?= 1082`. `NETLIST_BASELINE` in `PROGRESS.md` remains only as a documentation tag.
+- Toy FPGA target renamed/labelled: `fpga_toy` + `fpga_toy_test` (single-cycle `fpga_top` proof card), with `fpga`/`fpga_test` kept as legacy aliases that print "toy proof top ... not the full CPU" so its LC/Fmax numbers cannot be confused with `fpga_full` results.
+- Narrowed `rtl/top_pipe.sv` UNUSED suppression per build: one `lint_off UNUSEDSIGNAL` covers only `ce_wfi`, `timer_ready`, `wfi_ready`, `wfi_wait` and the amo wire set (`ce_lr`, `ce_sc`, `amo_sc_ok`, `exmem_sc_ok`, `ce_amo5`, `amo_new`, `exmem_is_lr`, `exmem_is_sc`, `ceif_amo`); `ATOMIC` gets its own `lint_off UNUSEDPARAM`; everything else in that block (incl. `cs_old`, `cs_mtvec`, `idex_cs_old`, `clint_*`, `irq_pend`, `mem_kill_now`, `wfi_tick`) is lint-clean everywhere. Verified: default `hdl make lint` clean; ad-hoc `-DLINUX -DLINUX_MPP` lint clean; FPGA Verilator gate builds (`-DFPGA --Wall`) clean.
+- `t99_branchloop` widened with a second variant: 256-iteration low-PC loop plus a self-placed high-PC loop body at `0x80650000` (`sw zero,0(a5); addi a5,a5,4; blt a5,a6,H+0; jalr x0,0(ra)` encodings `0x0007a023/0x00478793/0xff07cce3/0x00008067`, data `0x80648000..0x80648400`, RAM aliases 0x4000 vs 0x2000 words so no collision), covering the Linux-body store+blt pattern at high PC; the old `0x393f8` range is now only an ISS-timeout comment.
+- Verified after these fixes: `hdl make lint` clean; `hdl make test` ALL PASS with `t99` `TEST PASSED (1566 instrs)`; FPGA gates `TEST PASSED (31/50/18/10 instrs)`; `hdl make all_tests` ends `ALL TESTS DONE`; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` printed `SB_LUT4 3076` vs pinned baseline 3076, `SB_DFF` 1082 vs 1082, `17.00 MHz` post-synth / `16.25 MHz` final route PASS at 13 MHz, netlist sanity passed.
+
+### Metrics (722ef31 review fixes, measured this session)
+| item | value |
+|---|---|
+| `fpga_full` current seed4 | SB_LUT4 3076, SB_DFF 1082, SB_RAM40_4K 8, SB_MAC16 1; 17.00 MHz post-synth / 16.25 MHz final route, PASS at 13 MHz |
+| netlist baseline | pinned via `--baseline-lut4 3076 --baseline-flops 1082` (Makefile args, not PROGRESS.md) |
+| `test` | ALL PASS; t99 1566 instrs (low PC + self-placed high PC 0x80650000 store+blt loop) |
+| FPGA gates | 31/50/18/10 instrs PASS (f_mgate/subw/control/csr) |
+| `all_tests` | ALL TESTS DONE |

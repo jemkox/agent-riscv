@@ -59,7 +59,7 @@ hardware.
 | CoreMark | **3.19 CoreMark/MHz** (EEMBC CoreMark 1.0, CRCs validated, GCC 13.2 `-O2`) |
 | Operating system | **FreeRTOS** V11.2.0 (own port): tasks, queue, mutex, preemption, software timers, 185 context switches in the demo |
 | DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
-| FPGA (iCE40 UP5K) | 4836 / 5280 logic cells, 8 BRAM, 1 DSP, **13.22 MHz** (nextpnr seed 4; 5 of 12 seeds meet 13 MHz) |
+| FPGA (iCE40 UP5K) | current tree, `make fpga_full FPGA_FREQ=13 FPGA_SEED=4`: netlist **3076 SB_LUT4 / 1082 SB_DFF flops**, 8 SB_RAM40_4K, 1 SB_MAC16; **17.00 MHz** after synthesis, **16.25 MHz** final route (PASS at 13 MHz) |
 
 What that means in frames per second:
 
@@ -191,7 +191,8 @@ make freertos    # boot FreeRTOS, self-checking demo
 make doom        # headless Doom, frames in build/doom/frames
 make play        # live SDL window with keyboard
 make play_test   # scripted play, must differ from a no-key run
-make fpga_full FPGA_FREQ=13 FPGA_SEED=0   # synth + place & route for iCE40 UP5K
+make fpga_full FPGA_FREQ=13 FPGA_SEED=4   # synth + place & route for iCE40 UP5K
+make fpga_toy, fpga_toy_test              # LEGACY single-cycle toy proof top (fpga_top); not the full CPU
 ```
 
 Any input can also be given directly: `RVTEST_DIR=.../riscv-tests/isa`,

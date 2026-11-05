@@ -26,6 +26,9 @@ FREERTOS_DIR ?= $(firstword $(wildcard deps/FreeRTOS-Kernel ../../downloads/Free
 WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.wad) deps/doom1.wad)
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
+# Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
+FPGA_NETLIST_LUT4 ?= 3076
+FPGA_NETLIST_FLOPS ?= 1082
 UI_DIR := $(RVTEST_DIR)/rv32ui
 UI_MACROS := $(RVTEST_DIR)/macros/scalar
 UM_DIR := $(RVTEST_DIR)/rv32um
@@ -55,7 +58,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -622,12 +625,20 @@ $(B)/cpu.asc: $(B)/cpu.json | $(B)
 $(B)/cpu.bin: $(B)/cpu.asc
 	icepack $(B)/cpu.asc $(B)/cpu.bin
 
-fpga_test: $(B)/vlt/fpga_run
+fpga_toy_test: $(B)/vlt/fpga_run
+	@echo "TOY proof test: single-cycle fpga_top card (not the full CPU); full-CPU tests are fpga_full + fpga_m/subw/control/csr gates."
 	@./$(B)/vlt/fpga_run > $(B)/fpga.out; grep -q "TEST PASSED" $(B)/fpga.out
 
-fpga: $(B)/cpu.bin | fpga_test
+fpga_test: | fpga_toy_test
+	@echo "fpga_test: legacy alias -> fpga_toy_test (toy proof top fpga_top, single-cycle)"
+
+fpga_toy: $(B)/cpu.bin | fpga_toy_test
+	@echo "LEGACY toy proof: single-cycle fpga_top card — its LC/Fmax numbers are NOT the full-CPU fpga_full results."
 	@echo "$(B)/cpu.bin"
 	@grep -H 'SB_LUT4 *[0-9]\|ICESTORM_RAM\|Max frequency' $(B)/cpu_syn.log $(B)/cpu_route.log
+
+fpga: | fpga_toy
+	@echo "fpga: legacy alias -> fpga_toy (toy proof top fpga_top; use fpga_full for full-CPU place/route)"
 
 $(B)/fpga_prog.hex: $(B)/t01_basic.hex | $(B)
 	@cp $(B)/t01_basic.hex $@
@@ -649,7 +660,7 @@ $(B)/cpu_full.bin: $(B)/cpu_full.asc
 fpga_full: $(B)/cpu_full.bin | $(B)
 	@echo "$(B)/cpu_full.bin"
 	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' $(B)/cpu_full_syn.log $(B)/cpu_full_route.log
-	@python3 tools/fpga_netlist_check.py $(B)/cpu_full.json PROGRESS.md
+	@python3 tools/fpga_netlist_check.py $(B)/cpu_full.json --baseline-lut4 $(FPGA_NETLIST_LUT4) --baseline-flops $(FPGA_NETLIST_FLOPS)
 
 # Behavioral gate for the full pipelined FPGA top (review round, 2026-11-03):
 # -DFPGA Verilator build of fpga_pipe_top running the M-heavy t07_m.hex baked

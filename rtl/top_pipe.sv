@@ -54,26 +54,36 @@ module top_pipe (
   logic [4:0]  exmem_rd = 0, mwb_rd = 0, ce_rs1, ce_rs2, ce_rd, ceif_rs1, ceif_rs2;
   logic [31:0] a_ex, b_ex, aluB_ex, br_tgt_ex, iimm, simm, bimm, uimm, jimm, fetch_insn, rf_r1, rf_r2;
   logic [31:0] idex_ea, idex_sd_raw, idex_sd_log, idex_wbval, ldx_raw, ldx_ex, alu_res, md_result, exmem_r1 = 0;
-  /* verilator lint_off UNUSED */
   logic [31:0] cs_old, cs_mtvec, idex_cs_old;
   logic [31:0] clint_ld;
-  logic clint_commit, irq_pend, ce_wfi;
+  logic clint_commit, irq_pend;
   logic mem_kill_now;
-  logic timer_ready, wfi_ready, wfi_wait, wfi_tick;
-  logic ce_amo, ce_lr, ce_sc, amo_sc_ok, exmem_sc_ok;
+  // UNUSED suppression is per-build: default (simulation) build warns only on
+  // ce_wfi/timer_ready/wfi_ready; FPGA also leaves wfi_wait and the amo_* wires
+  // unread; LINUX reads all of them.  Wrap only the signals that need it.
+  logic wfi_tick;
+  logic ce_amo;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic ce_wfi;
+  logic timer_ready, wfi_ready, wfi_wait;
+  logic ce_lr, ce_sc, amo_sc_ok, exmem_sc_ok;
   logic [4:0] ce_amo5;
-  logic [31:0] amo_new, exmem_amo_new;
-  logic exmem_is_amo, exmem_is_lr, exmem_is_sc, amo_log_wr;
+  logic [31:0] amo_new;
+  logic exmem_is_lr, exmem_is_sc;
   logic ceif_amo;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [31:0] exmem_amo_new;
+  logic exmem_is_amo, amo_log_wr;
 `ifdef FPGA
   logic idex_m_go;
 `endif
-`ifdef FPGA
+  /* verilator lint_off UNUSEDPARAM */
+  `ifdef FPGA
   localparam ATOMIC = 0;   // atomics are Linux-only hardware; fold them out of the card
-`else
+  `else
   localparam ATOMIC = 1;
-`endif
-  /* verilator lint_on UNUSED */
+  `endif
+  /* verilator lint_on UNUSEDPARAM */
   logic [3:0]  ce_alu_op, idex_sbe, idex_sbe_st, exmem_sbe = 0, mwb_sbe = 0;
   logic [1:0]  idex_ssz;
   logic [2:0]  ce_f3, exmem_f3 = 0, ce_m_op;
