@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -204,8 +204,11 @@ test: $(foreach t,$(TESTS),$(B)/$t.bin $(B)/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_
 	 python3 iss/iss.py --quiet --pass $(B)/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass $(B)/t18_wfi.bin > /dev/null || { echo "t18_wfi: self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass $(B)/t19_amo.bin > /dev/null || { echo "t19_amo: atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
-	 python3 iss/iss.py --quiet --pass $(B)/t20_amo_illegal.bin > /dev/null || { echo "t20_amo_illegal: illegal/reserved/MMIO atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
-	 for n in $(UI_NAMES); do \
+ 	 python3 iss/iss.py --quiet --pass $(B)/t20_amo_illegal.bin > /dev/null || { echo "t20_amo_illegal: illegal/reserved/MMIO atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
+ 	 for t in t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop; do \
+ 	 python3 iss/iss.py --quiet --pass $(B)/$$t.bin > /dev/null || { echo "$$t: gp self-check failed (gp!=1)"; bad=$$((bad+1)); }; \
+ 	 done; \
+ 	 for n in $(UI_NAMES); do \
 	 cp $(B)/ui/$$n.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/ui/logs/$$n.rtl.log; \
 	 python3 iss/iss.py --quiet --pass --log $(B)/ui/logs/$$n.iss.log $(B)/ui/$$n.bin > /dev/null; \
 	 python3 tools/cmp.py $(B)/ui/logs/$$n.rtl.log $(B)/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \

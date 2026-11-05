@@ -1247,7 +1247,7 @@ DOOM CPU: DONE
 |---|---|
 | lint | clean after follow-up edits |
 | mpp_ret_gate | TEST PASSED, high-PC LINUX_MPP RTL and standard RTL compare 12 instrs vs ISS; standard ISS `--pass` fails gp=3 |
-NETLIST_BASELINE LUT4=3046 FLOPS=1082 explained: FPGA RF retime retained plus impossible-counter guard
+NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding current tree
 | fpga_full retime+trap-CSR guard seed4 | 3046 LUT4 / 1082 flops / 17.38/16.93 MHz PASS at 13 MHz, netlist check OK |
 | fpga_full retime+trap-CSR guard seed0 | 3046 LUT4 / 1082 flops / 17.38/16.93 MHz PASS at 13 MHz; explained: FPGA RF retime retained plus impossible-counter guard keeps trap CSR flops |
 | vmlinux.bin sha256 | 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea |
@@ -1320,7 +1320,42 @@ NETLIST_BASELINE LUT4=3046 FLOPS=1082 explained: FPGA RF retime retained plus im
 | `all_tests` | ALL TESTS DONE, Doom included and gated on `frames=31 halt=0` |
 | freertos current tree | `FREERTOS PASS cycles=1124012 insns=899607 IPC=0.800 halt=1` |
 | freertos fresh/offline metadata | fresh/offline input: `cycles=1124204 insns=899606 IPC=0.800 halt=1` |
-| `fpga_full` current seed4 | 3046 LUT4 / 1082 flops / 17.90 MHz post-synth / 17.40 MHz final route, PASS at 13 MHz, netlist check OK |
+| `fpga_full` current seed4 | 3076 LUT4 / 1082 flops / 17.00 MHz post-synth / 16.25 MHz final route, PASS at 13 MHz, netlist check OK |
 | `fpga_full` seed0 metadata | old 17.38/16.93 row reproduced with `FPGA_SEED=0` |
 | checkpoint equivalence | `linux_ckpt_equiv` PASSED, tail files 691 lines each, state line equal at cyc=85,000,000 |
 | checkpoint speedup | current 41.598s full mark / 2.413s restore = 17.2x |
+
+## review fixes: 4c9c568 (2026-11-05)
+- Fixed `rtl/top_pipe.sv` so the `lint_off UNUSED` region ends after the atomics declarations and the `ATOMIC` localparam: removed the stray `lint_on UNUSED` before atomics and the duplicate `lint_off UNUSED` inside the region; `hdl make lint` is clean.
+- Hardened `tb/run_hex.sv` missing-`TBHEX` failure: Verilator builds use `$fatal(1, "ERROR: TBHEX is not defined.");`, Icarus keeps `$stop`, so a missing `-DTBHEX=...` cannot exit 0.
+- Wired `t99_branchloop`, `t100_csr_branch_fwd`, `t101_linux_csrrw_clear`, `t102_csr_dest_fwd`, and `t103_csr_dest_nop` into `TESTS`; all five now use `gp` as the ISS halt/self-check register with pass path `li gp,1; csrrw x0,0x3ff,gp` and fail path `li gp,3; csrrw x0,0x3ff,gp`, and the Makefile runs `iss/iss.py --quiet --pass` on each of them. Shrank `t99` loop from 0x393f8 bytes to 16 words (0x1000-0x1010), avoiding ISS timeout pressure.
+- Re-measured after these fixes:
+  - `hdl make lint` clean.
+  - `hdl make fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate` printed `TEST PASSED (31 instrs)`, `TEST PASSED (50 instrs)`, `TEST PASSED (18 instrs)`, `TEST PASSED (10 instrs)`.
+  - `hdl make all_tests` ended `ALL TESTS DONE` with `ALL PASS`, `ALL PASS` (CACHE_LAT=5), `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, regress `ALL PASS`, `ALL M7 PASS`, and the four FPGA gate passes. `mpp_ret_gate` still prints expected `FAIL: gp=3` for the standard MPP mirror, but that suite reports `TEST PASSED`/all_tests rc 0.
+  - `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` printed `SB_LUT4=3076 flops=1082`, `17.00 MHz (PASS at 13.00 MHz)` post-synth, `16.25 MHz (PASS at 13.00 MHz)` final route, netlist check OK.
+  - `hdl make freertos` with `deps/FreeRTOS-Kernel`: `FREERTOS PASS`, `#BENCH cycles=1124012 insns=899607 IPC=0.800 halt=1`, spinner A=86702, spinner B=87260.
+  - `hdl make freertos FREERTOS_DIR=../../downloads/FreeRTOS-Kernel B=build/freertos_dl`: `FREERTOS PASS`, `#BENCH cycles=1124204 insns=899606 IPC=0.800 halt=1`, spinner A=86702, spinner B=87260.
+
+### Metrics (4c9c568 review fixes, measured this session)
+| item | value |
+|---|---|
+| `all_tests` after wiring directed CSR gates | ALL TESTS DONE; `test`, CACHE_LAT=5 `test`, UI, UM, MI, regress N=500, M7, mpp_ret, FPGA gates pass; standard MPP mirror intentionally reports `FAIL: gp=3` |
+| new directed gates | `t99`, `t100`, `t101`, `t102`, `t103` included in `TESTS` and ISS `--pass` self-checks gp=1 |
+| `t99_branchloop` | loop range reduced to `0x1000..0x1010` |
+| TBHEX missing failure | Verilator `$fatal(1, "ERROR: TBHEX is not defined.")`; Icarus `$stop` only |
+| `fpga_full` current seed4 | 3076 LUT4 / 1082 flops / 17.00 MHz post-synth / 16.25 MHz final route, PASS at 13 MHz |
+| `NETLIST_BASELINE` current | LUT4=3076 FLOPS=1082 |
+| FreeRTOS current deps input | cycles=1124012, insns=899607, IPC=0.800, spinner A=86702, spinner B=87260 |
+| FreeRTOS offline/fresh input | cycles=1124204, insns=899606, IPC=0.800, spinner A=86702, spinner B=87260 |
+
+## linux L4 timer-placement investigation (2026-11-05)
+- The latest Linux patched comparison run still panics with stack-protector corruption:
+  - `#WATCH_BAD_LD cyc=6027445 pc=8045f088 ea=8081dd7c got=8081dd90 expected=5ceb468d`
+  - `#STACK_CHK_FAIL pc=8046c9d4 cyc=6027464 stores=400`
+  - `Kernel panic - not syncing: stack-protector: Kernel stack is corrupted in: vsnprintf+0x580/0x588`
+- Reverted/kept gates after the rejected CLINT early-pending and half-tick experiments pass; current first timer placement matches QEMU first timer epc `0x804582bc`, but the CPU second timer diverges from QEMU:
+  - CPU second timer: `pc=0x80048e70 mt=0x2e5eec cmp=0x2e5ee5`
+  - QEMU second timer: `pc=0x8021e920`
+- The kernel handler writes the next comparator from `mtime` too late relative to the interval: first handler `mt=0x2dc2ac cmp=0x2e5ee5`, interval `0x9c39`; CPU catches the next timer almost immediately because its CLINT `mtime` advances by retirements, and the bad nested trap corrupts the handler stack frame.
+- Next focus remains architecturally correct CLINT/mtime/tick semantics, not non-architectural tick scaling.
