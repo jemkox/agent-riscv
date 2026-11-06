@@ -54,7 +54,7 @@ module top_pipe (
   logic [4:0]  exmem_rd = 0, mwb_rd = 0, ce_rs1, ce_rs2, ce_rd, ceif_rs1, ceif_rs2;
   logic [31:0] a_ex, b_ex, aluB_ex, br_tgt_ex, iimm, simm, bimm, uimm, jimm, fetch_insn, rf_r1, rf_r2;
   logic [31:0] idex_ea, idex_sd_raw, idex_sd_log, idex_wbval, ldx_raw, ldx_ex, alu_res, md_result, exmem_r1 = 0;
-  logic [31:0] cs_old, cs_mtvec, idex_cs_old;
+  logic [31:0] cs_old, idex_cs_old, cs_trap_pc;
   logic [31:0] clint_ld;
   logic clint_commit, irq_pend;
   logic mem_kill_now;
@@ -92,8 +92,10 @@ module top_pipe (
   logic        ifid_valid = 0, idex_valid = 0, exmem_valid = 0, mwb_valid = 0;
   logic        exmem_ld = 0, exmem_st = 0, exmem_stop = 0, exmem_wben = 0, mwb_st = 0, mwb_stop = 0, mwb_wben = 0;
   logic        read_a, read_b, ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr, ce_lui, ce_auipc, ce_opi, ce_op;
-  logic        ce_sys, ce_fence, ce_ill, ce_m, ceif_ill, ceif_m, ce_csr, exmem_csr_en, exmem_csr_wen;
-  logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out, mret_flush, ce_mret;
+  logic        ce_sys, ce_fence, ce_ill, ce_m, ceif_ill, ceif_m, ce_csr, ce_sret, exmem_csr_en, exmem_csr_wen;
+  logic [1:0]  ce_csr_req;
+  logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out, mret_flush, sret_flush, ce_mret;
+  logic [31:0] cs_sepc;
 `ifdef FPGA
   assign wfi_ready = 1'b1;
   assign wfi_wait  = 1'b0;
@@ -131,7 +133,7 @@ module top_pipe (
   assign rf_r1_use = rf_r1;
   assign rf_r2_use = rf_r2;
   assign rf_fetch_sched = !halt && !mem_pend && !(stall || m_stall) &&
-                          !(trap_flush || timer_flush || mret_flush) &&
+                          !(trap_flush || timer_flush || mret_flush || sret_flush) &&
                           !flush && !conflict && fetch_ready;
   assign rf_rsel1 = rf_fetch_sched ? fetch_insn[19:15] : ifid_insn[19:15];
   assign rf_rsel2 = rf_fetch_sched ? fetch_insn[24:20] : ifid_insn[24:20];
@@ -187,8 +189,8 @@ module top_pipe (
             .a_sel(), .b_sel(ce_bsel), .is_ld(ce_ld), .is_st(ce_st), .is_br(ce_br),
             .is_jal(ce_jal), .is_jalr(ce_jalr), .is_lui(ce_lui), .is_auipc(ce_auipc),
             .is_opi(ce_opi), .is_op(ce_op),              .is_sys(ce_sys), .is_fence(ce_fence),
-             .is_m(ce_m), .m_op(ce_m_op),              .is_mret(ce_mret), .is_ill(ce_ill),
-             .is_csr(ce_csr), .csr_num(), .is_wfi(ce_wfi),
+              .is_m(ce_m), .m_op(ce_m_op),              .is_mret(ce_mret), .is_ill(ce_ill),
+              .is_sret(ce_sret), .is_csr(ce_csr), .csr_req(ce_csr_req), .csr_num(), .is_wfi(ce_wfi),
              .is_amo(ce_amo), .is_lr(ce_lr), .is_sc(ce_sc), .amo5(ce_amo5), .i(idex_insn));
 `ifdef FPGA
   mdiu_fpga MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(idex_m_go), .is_ill(1'b0),
@@ -210,7 +212,8 @@ module top_pipe (
               .is_br(ceif_br), .is_jal(), .is_jalr(ceif_jalr),
                .is_lui(), .is_auipc(), .is_opi(ceif_opi), .is_op(ceif_op),
                .is_sys(), .is_fence(), .is_m(ceif_m), .m_op(),
-                .is_mret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .is_wfi(),
+                .is_mret(), .is_sret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .csr_req(),
+                .is_wfi(),
                 .is_amo(ceif_amo), .is_lr(), .is_sc(), .amo5(), .csr_num(), .i(ifid_insn));
   /* verilator lint_on PINCONNECTEMPTY */
   ldst  LDST(.is_ld(ce_ld), .is_st(ce_st), .is_amo(ce_amo), .is_ill(ce_ill), .ld_ok(ld_ok), .st_ok(st_ok));
@@ -361,7 +364,7 @@ module top_pipe (
         endcase
       end
     end
-    flush = !stall && flush_ex && !trap_flush && !timer_flush && !mret_flush;
+    flush = !stall && flush_ex && !trap_flush && !timer_flush && !mret_flush && !sret_flush;
     conflict = !stall && !flush && idex_valid &&
                ((idex_st && (pc_if == idex_ea)) ||
                 (exmem_valid && exmem_st && (pc_if == exmem_ea)));
@@ -369,7 +372,7 @@ module top_pipe (
 
   csrs_pipe CSR1(.clk(clk), .reset(reset), .halt(halt),
             .idex_valid(idex_valid), .idex_insn(idex_insn), .idex_pc(idex_pc),
-            .ce_sys(ce_sys), .ce_ill(ce_ex_ill), .ce_fetch_bad(idex_fetch_bad), .ce_mret(ce_mret), .ce_csr(ce_csr), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
+            .ce_sys(ce_sys), .ce_ill(ce_ex_ill), .ce_fetch_bad(idex_fetch_bad), .ce_mret(ce_mret), .ce_sret(ce_sret), .ce_csr(ce_csr), .ce_csr_req(ce_csr_req), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
             .ld_ok(ld_ok), .st_ok(st_ok), .stall(stall), .m_stall(m_stall),
             .exmem_valid(exmem_valid), .exmem_csr_en(exmem_csr_en), .exmem_csr_wen(exmem_csr_wen),
             .exmem_insn(exmem_insn), .exmem_pc(exmem_pc), .exmem_f3(exmem_f3), .exmem_r1(exmem_r1),
@@ -378,8 +381,9 @@ module top_pipe (
             .idex_ea(idex_ea), .idex_sd_raw(idex_sd_raw),
             .clint_commit(clint_commit), .clint_ld_data(clint_ld), .irq_pending(irq_pend),
             .timer_ready(timer_ready), .wfi_tick(wfi_tick),
-            .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .mret_pc(mret_pc),
-            .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_mtvec(cs_mtvec), .halt_out(halt_out));
+            .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .sret_flush(sret_flush), .mret_pc(mret_pc),
+            .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_sepc(cs_sepc),
+            .cs_trap_pc(cs_trap_pc), .halt_out(halt_out));
 `ifdef FPGA
   assign exmem_is_amo = 1'b0; assign exmem_is_lr = 1'b0; assign exmem_is_sc = 1'b0;
   assign amo_log_wr   = 1'b0;
@@ -456,8 +460,8 @@ module top_pipe (
         idex_pc <= idex_pc; idex_insn <= idex_insn; idex_r1 <= a_ex; idex_r2 <= b_ex;
         ifid_valid <= ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
         ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
-      end else if (trap_flush || timer_flush || mret_flush) begin
-        exmem_valid <= mret_flush;
+      end else if (trap_flush || timer_flush || mret_flush || sret_flush) begin
+        exmem_valid <= mret_flush || sret_flush;
         exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= 5'd0;
         exmem_wben <= 1'b0; exmem_ld <= 1'b0; exmem_st <= 1'b0; exmem_stop <= 1'b0;
         exmem_f3 <= 3'b0; exmem_ea <= idex_ea; exmem_sd_log <= 32'h0; exmem_sbe <= 4'h0;
@@ -467,7 +471,7 @@ module top_pipe (
 `ifdef FPGA
         idex_m_go <= 1'b0;
 `endif
-        pc_if <= mret_flush ? mret_pc : cs_mtvec;
+        pc_if <= mret_flush ? mret_pc : (sret_flush ? cs_sepc : cs_trap_pc);
       end else if (flush) begin
         exmem_valid <= idex_valid;
         exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= ce_rd;

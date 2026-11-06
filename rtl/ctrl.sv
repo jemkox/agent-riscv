@@ -25,8 +25,10 @@ module ctrl (
   output logic         is_m,
   output logic [2:0]   m_op,        // 0 MUL, 1 MULH, 2 MULHSU, 3 MULHU, 4 DIV, 5 DIVU, 6 REM, 7 REMU
   output logic         is_mret,
+  output logic         is_sret,      // SRET (SYSTEM f3=0 imm=0x106)
   output logic         is_ill,
-  output logic         is_csr,      // Zicsr CSRRW/S/C and immediate forms
+  output logic         is_csr,
+  output logic [1:0]   csr_req,     // required privilege of the id CSR op
   output logic         is_wfi,      // WFI builder aliases: 0x100 (x10000073) and 0x105 (x10500073)
   output logic         is_amo,      // A: LR/SC/AMO*.w (simulation CPU only; FPGA: 0)
   output logic         is_lr,       // LR.W
@@ -47,6 +49,9 @@ module ctrl (
   assign is_op    = (opc == 7'b0110011);
   assign is_fence = (opc == 7'b0001111);
   assign is_mret  = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h302);
+  assign is_sret  = (opc == 7'b1110011 && i[14:12] == 3'b000 &&
+                     (i[31:20] == 12'h102 || i[31:20] == 12'h106));
+  assign csr_req  = (csr_num == 12'h3ff) ? 2'b00 : csr_num[9:8];
 `ifdef FPGA
   assign is_wfi   = 1'b0;           // FPGA never executes WFI (no OS on the card;
                                      // keeps SYSTEM f3=0 decode shape for Fmax seed4)
@@ -157,9 +162,10 @@ module ctrl (
             else is_ill = 1;
 `else
             is_sys = (i[31:20] == 12'h000) || (i[31:20] == 12'h001);
-            if (!((i[31:20] == 12'h000) || (i[31:20] == 12'h001) ||
-                   (i[31:20] == 12'h302) || (i[31:20] == 12'h100) ||
-                   (i[31:20] == 12'h105))) is_ill = 1;
+             if (!((i[31:20] == 12'h000) || (i[31:20] == 12'h001) ||
+                    (i[31:20] == 12'h302) || (i[31:20] == 12'h102) ||
+                    (i[31:20] == 12'h100) || (i[31:20] == 12'h105) ||
+                    (i[31:20] == 12'h106))) is_ill = 1;
 `endif
           end
           3'b001: is_csr = 1;

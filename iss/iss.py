@@ -28,42 +28,98 @@ def main(argv):
     LIM = 200000
     lines = []
     mask = 0xFFFFFFFF
+    # RV32 privilege modes (L5): M=3, S=1, U=0.  mstatus.MPP holds the saved
+    # privilege (2 bits at [11:10]); mstatus.SPP (bit 8) the supervisor's saved
+    # privilege for SRET.  Trap routing follows medeleg/mideleg so that U/S-mode
+    # traps go to the S handler (stvec/sepc/scause/stval/spp) when delegated, and
+    # machine-mode traps go to the M handler.  With medeleg=mideleg=0 and the
+    # CPU in M mode this is identical to the pre-L5 M/U model, so L1-L4 and the
+    # rv32mi suite behavior is unchanged; misa advertises S and U (bit18/bit20).
     cs = {0x300:0x1800,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
-          0x340:0,0x301:0x40001001,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0}
-    mode = 1   # current privilege: 1 = M, 0 = U (S/U remains L5)
+          0x340:0,0x301:0x40015001,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0,
+          0x302:0,0x303:0,0x306:0,
+          0x100:0,0x104:0,0x105:0,0x106:0,0x140:0,0x141:0,0x142:0,0x143:0,0x144:0,0x180:0,
+          0x32d:0,0x32e:0,0x32f:0}
+    priv = 3   # current privilege: 3 = M, 1 = S, 0 = U
+    SSTATUS_MASK = 0x80001922   # SD | MPP(12:11) | SPP | SPIE | SIE (rv32 encoding.h masks)
+    MPP_MASK = 0x1800; SPP_BIT = 0x100; MPIE_BIT = 0x80; SPIE_BIT = 0x20
+    MIE_BIT = 0x8; SIE_BIT = 0x2
+    TSR_BIT = 0x00400000; TVM_BIT = 0x00200000
     def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
+        if n == 0x100:   return cs[0x300] & SSTATUS_MASK   # sstatus = mstatus view
+        if n == 0x308 or n == 0x344:   return mip_bits()
+        if n == 0x32d:   return cs[0x300] & SPP_BIT
+        if n == 0x32e:   return cs[0x300] & 0x10
+        if n == 0x32f:   return cs[0x300] & SPIE_BIT
         if n == 0xb02 or n == 0xc02: return cs[0xb02]
         if n == 0xb82 or n == 0xc82: return cs[0xb82]
         return cs.get(n,0)
     def cs_set(n,v):
+        nonlocal mip_sw
         if n == 0x301:
             pass
+        elif n == 0x100:   # sstatus write: merge S-visible bits into mstatus
+            cur = cs[0x300]
+            cs[0x300] = (cs[0x300] & ~SSTATUS_MASK) | (v & SSTATUS_MASK)
         elif n == 0x300:
-            mpp = v & 0x1800
-            if mpp not in (0, 0x1800):
-                mpp = 0x1800
-            cs[n] = ((v & ~0x1800) | mpp) & mask       # WARL MPP: 00 (U) or 11 (M)
+            mpp = v & MPP_MASK
+            if mpp not in (0, 0x800, MPP_MASK):
+                mpp = MPP_MASK
+            cs[n] = ((v & ~MPP_MASK) | mpp) & mask
         elif n == 0x320:
             cs[n] = v & 0x7
+        elif n == 0x308 or n == 0x344:
+            mip_sw = v & 0xFFFFFF77
         elif n == 0xc02:
             cs[0xb02] = v & mask
         elif n == 0xc82:
             cs[0xb82] = v & mask
         elif n in cs:
             cs[n] = v & mask
-    def mret_mstatus(high_pc=False):   # MIE <- MPIE, MPP <- U, mode <- saved MPP
-        nonlocal mode
+    def csr_priv(n):
+        # machine-mode-only CSRs require M; supervisor CSRs require S; else U.
+        # 0x3ff is the test-halt extension: accessible in every mode.
+        if n == 0x3ff:
+            return 0
+        if 0x300 <= n <= 0x3ff or n in (0xb00,0xb80,0xb02,0xb82,0xc02,0xc82,0xf00):
+            return 3
+        if 0x100 <= n <= 0x1ff:
+            return 1
+        return 0
+    def mret_mstatus(high_pc=False):   # high/Linux model: MIE<-MPIE, MPP cleared, mode from saved MPP
+        nonlocal priv
         m = cs_get(0x300)
-        cs[0x300] = ((m & ~(0x88 | 0x1800)) | (0x8 if (m & 0x80) else 0)) & mask
-        mode = 1 if (m & 0x1800) else 0
-    def trap_mstatus():   # MPIE <- MIE, MIE <- 0, MPP <- current mode, mode <- M
-        nonlocal mode
+        mpp = (m & MPP_MASK) >> 11
+        if high_pc:
+            cs[0x300] = ((m & ~(MPIE_BIT | MIE_BIT | MPP_MASK)) |
+                         (MIE_BIT if (m & MPIE_BIT) else 0)) & mask
+        else:
+            cs[0x300] = ((m & ~(MPIE_BIT | MIE_BIT | MPP_MASK)) |
+                         (MIE_BIT if (m & MPIE_BIT) else 0) | (mpp << 11)) & mask
+        priv = 3 if mpp == 3 else (1 if mpp == 1 else 0)
+    def trap_mstatus():   # to M handler: MPIE<-MIE, MIE<-0, MPP<-priv, priv<-M
+        nonlocal priv
         m = cs_get(0x300)
-        cs[0x300] = ((m & ~(0x88 | 0x1800)) |
-                     (0x1800 if mode else 0) |
-                     (0x80 if (m & 8) else 0)) & mask
-        mode = 1
+        cs[0x300] = ((m & ~(MPIE_BIT | MIE_BIT | MPP_MASK)) |
+                     (MPP_MASK if priv == 3 else 0x800 if priv == 1 else 0) |
+                     (MPIE_BIT if (m & MIE_BIT) else 0)) & mask
+        priv = 3
+    def sret_mstatus():   # to S handler: SIE<-SPIE, SPP<-U, MPP<-returned priv, priv<-saved SPP
+        nonlocal priv
+        m = cs_get(0x300)
+        sp = 1 if (m & SPP_BIT) else 0
+        cs[0x300] = ((m & ~(SPIE_BIT | SIE_BIT | SPP_BIT | MPP_MASK)) |
+                     (SIE_BIT if (m & SPIE_BIT) else 0) | (sp << 11)) & mask
+        priv = sp
+    def trap_s():   # to S handler: SPIE<-SIE, SIE<-0, SPP<-priv, MPP<-priv, priv<-S
+        nonlocal priv
+        m = cs_get(0x300)
+        cs[0x300] = ((m & ~(SPIE_BIT | SIE_BIT | SPP_BIT | MPP_MASK)) |
+                     (SPP_BIT if priv != 3 else 0) |
+                     ((priv & 3) << 11) |
+                     (SPIE_BIT if (m & SIE_BIT) else 0)) & mask
+        priv = 1
     def clint_off(ea):    # slot offset inside the 64 KiB CLINT window or None
         if (ea & 0xFFFF0000) != 0x02000000: return None
         return ea & 0xFFFF
@@ -71,18 +127,39 @@ def main(argv):
     msip = 0
     mtime = 0
     mtpcmp = 0xFFFFFFFFFFFFFFFF
+    mip_sw = 0   # software-set pending bits; live MSI bit3 / MTI bit7 come from CLINT
     def mip_bits():
-        return ((1<<7) if mtime >= mtpcmp else 0) | ((1<<3) if (msip & 1) else 0)
+        return (((1 << 7) if mtime >= mtpcmp else 0) |
+                ((1 << 3) if (msip & 1) else 0) |
+                (mip_sw & 0xFFFFFF77))
     def irq_bits():
-        return (cs_get(0x304) & mip_bits()) if (cs_get(0x300) & 8) else 0
-    def do_trap(c):
-        cs[0x341] = pc & mask; cs[0x342] = c & mask; trap_mstatus()
-        return cs_get(0x305) & mask
+        b = cs_get(0x304) & mip_bits()
+        if priv == 3:
+            return b if (cs_get(0x300) & MIE_BIT) else 0
+        nd = b & ~cs.get(0x303,0)
+        dl = b & cs.get(0x303,0)
+        return ((nd if (cs_get(0x300) & MIE_BIT) else 0) |
+                (dl if (cs_get(0x300) & SIE_BIT) else 0)) & mask
+    def tvec(v, c):
+        base = v & ~1
+        return (base | (((v & 1) * ((c & 31) << 2)))) & mask
+    def do_trap(c, val=0):
+        cs[0x341] = pc & mask; cs[0x343] = 0
+        if priv != 3 and (cs.get(0x302,0) >> c) & 1:   # delegate to S
+            cs[0x141] = pc & mask; cs[0x142] = c & mask; cs[0x143] = val & mask
+            trap_s(); return tvec(cs_get(0x105), c)
+        cs[0x342] = c & mask; trap_mstatus()
+        return tvec(cs_get(0x305), c)
     def do_irq():
         b = irq_bits()
-        c = 0x80000000 | (11 if (b & 0x800) else (7 if (b & 0x80) else 3))
-        cs[0x341] = pc & mask; cs[0x342] = c; trap_mstatus()
-        return cs_get(0x305) & mask
+        c = 0x80000000 | ((b & -b).bit_length() - 1)
+        cs[0x343] = 0
+        if priv != 3 and (cs.get(0x303,0) >> (c & 31)) & 1:
+            cs[0x141] = pc & mask; cs[0x142] = c & mask; cs[0x143] = 0
+            trap_s(); return tvec(cs_get(0x105), c)
+        cs[0x341] = pc & mask; cs[0x342] = c
+        trap_mstatus()
+        return tvec(cs_get(0x305), c)
     def retire_counters(xret=False):
         nonlocal mtime
         if not (cs.get(0x320,0) & 1):
@@ -266,19 +343,27 @@ def main(argv):
             csr_num = (ins >> 20) & 0xFFF
             zimm = (ins >> 15) & 0x1F
             if f3 == 0:
-                if csr_num == 0x302:   # MRET: back to mepc, MIE <- MPIE
-                    if irq_p:
+                if csr_num == 0x302:   # MRET
+                    if priv < 3: cause = 2; illegal = True
+                    elif irq_p:
                         pc = do_irq(); steps += 1
                         continue
-                    mret_mstatus((pc & 0x80000000) != 0)
-                    npc = cs_get(0x341) & mask
-                elif csr_num in (0x100, 0x105): # WFI builder aliases: 0x100 (x10000073) and 0x105 (x10500073)
+                    else:
+                        mret_mstatus((pc & 0x80000000) != 0)
+                        npc = cs_get(0x341) & mask
+                elif csr_num in (0x102, 0x106):   # SRET
+                    if priv < 1 or (priv == 1 and (cs_get(0x300) & TSR_BIT)):
+                        cause = 2; illegal = True
+                    else:
+                        sret_mstatus()
+                        npc = cs_get(0x141) & mask
+                elif csr_num in (0x100, 0x105): # WFI builder aliases (also sstatus/stvec read via f3!=0)
                     if irq_p:
                         pc = do_irq(); steps += 1
                         continue
                     npc = (pc+4) & mask
                 elif csr_num == 0:
-                    pc = do_trap(11 if mode else 8); steps += 1  # ECALL: M cause 11, U cause 8
+                    pc = do_trap(8 + priv); steps += 1  # ECALL: M 11, S 9, U 8
                     continue
                 elif csr_num == 1:
                     pc = do_trap(3); steps += 1    # EBREAK
@@ -289,36 +374,43 @@ def main(argv):
                 if irq_p:
                     pc = do_irq(); steps += 1
                     continue
-                if csr_num == 0x308:   # mip: live bits, post-tick view like the RTL
-                    old = (((mtime + 1) >= mtpcmp) << 7) | ((msip & 1) << 3)
+                if priv < csr_priv(csr_num):
+                    cause = 2; illegal = True   # CSR not accessible at current priv
                 else:
-                    old = cs_get(csr_num)
-                if f3 == 1: newv = a0
-                elif f3 == 2: newv = a0 | old
-                elif f3 == 3: newv = old & ((~a0) & mask)
-                elif f3 == 5: newv = zimm
-                elif f3 == 6: newv = zimm | old
-                else: newv = old & ((~zimm) & mask)
-                wena = ((f3 == 1) or (f3 == 5) or
-                        ((f3 == 2 or f3 == 3) and (r1 != 0)) or
-                        ((f3 == 6 or f3 == 7) and (zimm != 0)))
-                if wena and xret_num(csr_num): xret_write = True
-                retire_counters(xret_write)
-                if rd: reg[rd] = old
-                lines.append((pc,ins,rd, old & mask, 0,0,0,0))
-                if wena and csr_num != 0x308: cs_set(csr_num,newv)
-                if (csr_num == 0x3ff) and (newv & 1):
-                    stopped = 1
-                    break
-                npc = (pc+4) & mask
-                pc = npc; steps += 1
-                continue
+                    if csr_num == 0x308 or csr_num == 0x344:   # mip: live bits, post-tick view like the RTL
+                        old = ((((mtime + 1) >= mtpcmp) << 7) |
+                               ((msip & 1) << 3) | (mip_sw & 0xFFFFFF77))
+                    else:
+                        old = cs_get(csr_num)
+                    if f3 == 1: newv = a0
+                    elif f3 == 2: newv = a0 | old
+                    elif f3 == 3: newv = old & ((~a0) & mask)
+                    elif f3 == 5: newv = zimm
+                    elif f3 == 6: newv = zimm | old
+                    else: newv = old & ((~zimm) & mask)
+                    wena = ((f3 == 1) or (f3 == 5) or
+                            ((f3 == 2 or f3 == 3) and (r1 != 0)) or
+                            ((f3 == 6 or f3 == 7) and (zimm != 0)))
+                    if wena and xret_num(csr_num): xret_write = True
+                    retire_counters(xret_write)
+                    if rd: reg[rd] = old
+                    lines.append((pc,ins,rd, old & mask, 0,0,0,0))
+                    if wena: cs_set(csr_num,newv)
+                    if (csr_num == 0x3ff) and (newv & 1):
+                        stopped = 1
+                        break
+                    npc = (pc+4) & mask
+                    pc = npc; steps += 1
+                    continue
+                if illegal:
+                    pc = do_trap(2, ins); steps += 1
+                    continue
             else:
                 illegal = True
         else:
             illegal = True
         if illegal:
-            pc = do_trap(cause); steps += 1
+            pc = do_trap(cause, ins if cause == 2 else 0); steps += 1
             continue
         if irq_p:
             pc = do_irq(); steps += 1

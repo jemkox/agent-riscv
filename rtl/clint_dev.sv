@@ -13,8 +13,13 @@ module clint_dev (
   input  logic        commit,      // store commit (gated by cache32: dreq+ready)
   input  logic [31:0] ea,          // effective address (load select + commit)
   input  logic [31:0] wdata,       // store data (idex sd_raw)
-  input  logic [31:0] mstatus_in,  // MIE bit (after-MEM view)
+  input  logic [31:0] mstatus_in,  // mstatus after-MEM view (MIE/SIE bits)
   input  logic [31:0] mie_in,      // mie after MEM-stage write
+  input  logic [11:0] mideleg_in,  // interrupt delegation mask after MEM-stage write
+  input  logic [1:0]  priv_cur,    // current privilege (3=M, 1=S, 0=U)
+`ifndef FPGA
+  input  logic [31:0] mip_sw_in,   // software-set mip pending bits (except live MSI/MTI)
+`endif
   output logic [31:0] ld_data,
   output logic        pending,
   output logic        timer_ready,
@@ -42,18 +47,26 @@ module clint_dev (
   wire [63:0] mt_next = {st_mth, st_mtl} + (retire_en ? 64'd1 : 64'd0);
   wire        mtie    = (mt_next >= {st_cmh, st_cml});
   wire        msie    = st_msip[0];
-  wire [31:0] mip     = ({mtie ? 32'd1 : 32'd0} << 7) |
-                        ({msie ? 32'd1 : 32'd0} << 3);
-  assign mip_out = mip;
+  wire [31:0] mip_live = ((mtie ? 32'd1 : 32'd0) << 7) |
+                         ((msie ? 32'd1 : 32'd0) << 3);
+  wire [31:0] mip_all  = mip_live | (mip_sw_in & 32'hFFFF_FF77);
+  assign mip_out = mip_live;
   assign mt_out  = mt_next;
   assign cmp_out = {st_cmh, st_cml};
   assign timer_ready = ({st_mth, st_mtl} >= {st_cmh, st_cml});
-  wire [31:0] sel     = mie_in & mip;
+  wire [11:0] mid     = mideleg_in;
+  wire [31:0] ready   = mie_in & mip_all;
+  wire [31:0] nd      = ready & {20'b0, ~mid};
+  wire [31:0] dl      = ready & {20'b0,  mid};
+  wire [31:0] sel     = (priv_cur == 2'b11)
+                      ? (((mstatus_in & 32'h0000_0008) != 0) ? (ready | dl) : 32'h0)
+                      : ((((mstatus_in & 32'h0000_0008) != 0) ? nd : 32'h0) |
+                         (((mstatus_in & 32'h0000_0002) != 0) ? dl : 32'h0));
+  wire [31:0] sel_lsb = sel & (~sel + 32'd1);
   wire        match   = ((ea & 32'hFFFF_0000) == CLINT_BASE);
 
-  assign pending = ((mstatus_in & 32'h0000_0008) != 0) && (sel != 0);
-  assign cause   = ((sel & 32'h0000_0800) != 0) ? 32'h8000_000B :
-                   ((sel & 32'h0000_0080) != 0) ? 32'h8000_0007 : 32'h8000_0003;
+  assign pending = (sel != 0);
+  assign cause   = (sel != 0) ? (32'h8000_0000 | $clog2(sel_lsb)) : 32'h0;
 
   always_comb begin
     ld_data = 32'h0;

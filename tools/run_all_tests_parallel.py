@@ -17,7 +17,7 @@ def main():
     specs = [
         ("test", "[1/8] test (CACHE_LAT=1)", ["test"]),
         ("test_lat5", "[2/8] test CACHE_LAT=5", ["CACHE_LAT=5", "test"]),
-        ("ui_um_mi", "[3/8] ui um mi", ["ui", "um", "mi"]),
+        ("ui_um_mi_ua_si", "[3/8] ui um mi ua si", ["ui", "um", "mi", "ua", "si"]),
         ("regress", "[4/8] regress N=500", ["regress", "N=500"]),
         ("m7", "[5/8] m7", ["m7"]),
         ("doom", "[6/8] doom (31 frames)", ["doom"]),

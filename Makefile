@@ -27,8 +27,8 @@ WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.w
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
 # Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
-FPGA_NETLIST_LUT4 ?= 3123
-FPGA_NETLIST_FLOPS ?= 1099
+FPGA_NETLIST_LUT4 ?= 3305
+FPGA_NETLIST_FLOPS ?= 1163
 # Pinned netlist for the documented fpga_csrtrap ROM (smaller, but it exercises
 # trap CSRs dynamically; see fpga_csrtrap_netlist target below).
 FPGA_CSRTRAP_NETLIST_LUT4 ?= 2176
@@ -55,6 +55,17 @@ MI_NAMES := breakpoint csr illegal instret_overflow lh-misaligned lw-misaligned 
 MI_HEXES := $(foreach n,$(MI_NAMES),$(B)/mi/$(n).hex)
 MI_BINS := $(foreach n,$(MI_NAMES),$(B)/mi/$(n).bin)
 MI_LOGS := $(foreach n,$(MI_NAMES),$(B)/mi/logs/$(n).rtl.log $(B)/mi/logs/$(n).iss.log)
+# rv32si (L5): official supervisor-mode sources run with -D__MACHINE_MODE (the
+# test bodies map stvec/sepc/sret/... to their machine-mode equivalents, which
+# this M+U CPU implements).  dirty.S is skipped: it is SV39-paging (needs the
+# Sv32 MMU built at L6) and cannot even assemble for a 32-bit base.
+SI_DIR := $(RVTEST_DIR)/rv32si
+SI_CCFLAGS := -march=rv32im_zicsr_zifencei -mabi=ilp32 -D__MACHINE_MODE
+SI_MACROS := $(RVTEST_DIR)/macros/scalar
+SI_NAMES := csr ma_fetch sbreak scall wfi
+SI_HEXES := $(foreach n,$(SI_NAMES),$(B)/si/$(n).hex)
+SI_BINS := $(foreach n,$(SI_NAMES),$(B)/si/$(n).bin)
+SI_LOGS := $(foreach n,$(SI_NAMES),$(B)/si/logs/$(n).rtl.log $(B)/si/logs/$(n).iss.log)
 UA_DIR := $(RVTEST_DIR)/rv32ua
 UA_CCFLAGS := -march=rv32im_a_zicsr_zifencei -mabi=ilp32
 UA_MACROS := $(RVTEST_DIR)/macros/scalar
@@ -62,7 +73,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -115,6 +126,9 @@ $(B)/ua:
 
 $(B)/ua/logs:
 	@mkdir -p $(B)/ua/logs
+
+$(B)/si/logs:
+	@mkdir -p $(B)/si/logs
 
 $(B)/%.o: tests/%.S | $(B)
 	$(CC) $(CCFLAGS) -c $< -o $(B)/$*.rvo
@@ -182,6 +196,22 @@ $(B)/mi/%.bin: $(B)/mi/%.elf | $(B)/mi
 	$(OC) -O binary $< $@
 
 $(B)/mi/%.hex: $(B)/mi/%.bin | $(B)/mi
+	python3 tools/bin2hex.py $< $@
+
+$(B)/si:
+	@mkdir -p $(B)/si
+
+$(B)/si/%.o: $(SI_DIR)/%.S env/si/riscv_test.h | $(B)/si
+	$(CC) $(SI_CCFLAGS) -c $< -I env/si -I $(RVTEST_DIR)/../env -I $(SI_MACROS) -o $(B)/si/$*.rvo
+	$(OC) -O elf32-littleriscv $(B)/si/$*.rvo $@
+
+$(B)/si/%.elf: $(B)/si/%.o tests/link.ld | $(B)/si
+	$(CC) $(SI_CCFLAGS) -nostdlib -Wl,-Ttests/link.ld -Wl,-m,elf32lriscv -o $@ $<
+
+$(B)/si/%.bin: $(B)/si/%.elf | $(B)/si
+	$(OC) -O binary $< $@
+
+$(B)/si/%.hex: $(B)/si/%.bin | $(B)/si
 	python3 tools/bin2hex.py $< $@
 
 $(B)/ua/%.o: $(UA_DIR)/%.S env/riscv_test.h | $(B)/ua
@@ -270,6 +300,17 @@ mi: $(MI_BINS) $(MI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/mi $(B)/mi/logs
 
 ua: $(UA_BINS) $(UA_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ua $(B)/ua/logs
 	@bad=0;   for n in $(UA_NAMES); do     cp $(B)/ua/$$n.hex $(B)/p.hex;     ./$(B)/vlt/run_hex > $(B)/ua/logs/$$n.rtl.log;     python3 iss/iss.py --quiet --pass --log $(B)/ua/logs/$$n.iss.log $(B)/ua/$$n.bin > /dev/null || bad=$$((bad+1));     python3 tools/cmp.py $(B)/ua/logs/$$n.rtl.log $(B)/ua/logs/$$n.iss.log > /dev/null || bad=$$((bad+1));   done;   if [ $$bad -eq 0 ]; then echo ALL UA PASS; else echo "UA TEST FAILED: $$bad errors"; exit 1; fi
+
+si: $(SI_BINS) $(SI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/si $(B)/si/logs
+	@bad=0; \
+  for n in $(SI_NAMES); do \
+    cp $(B)/si/$$n.hex $(B)/p.hex; \
+    ./$(B)/vlt/run_hex > $(B)/si/logs/$$n.rtl.log; \
+    python3 iss/iss.py --quiet --pass --log $(B)/si/logs/$$n.iss.log $(B)/si/$$n.bin > /dev/null || bad=$$((bad+1)); \
+    python3 tools/cmp.py $(B)/si/logs/$$n.rtl.log $(B)/si/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
+  done; \
+  if [ $$bad -eq 0 ]; then echo ALL SI PASS; else echo "SI TEST FAILED: $$bad errors"; exit 1; fi
+
 
 regress: $(B)/vlt/run_hex
 	@bad=0; mkdir -p $(B)/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i $(B)/rand/p$$i > /dev/null || bad=$$((bad+1)); cp $(B)/rand/p$$i.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log $(B)/rand/$$i.iss.log $(B)/rand/p$$i.bin > /dev/null; python3 tools/cmp.py $(B)/rand/$$i.rtl.log $(B)/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
