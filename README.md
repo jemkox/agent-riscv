@@ -284,6 +284,20 @@ else's part:
 - Raise the FPGA clock beyond 13 MHz by pipelining the critical path.
 - Atomics, supervisor/user mode and an MMU, on the way to booting Linux.
 
+## Linux notes
+
+- **Pinned Linux kernel:** the simulation kernel used by the Linux targets is
+  **blob-pinned in git**, not reproduced end-to-end by `make linux_rebuild_kernel`.
+  The blob is `linux_kernel_blob.bin` / blob id `09a6ad3ee685bf98496dafdafd70ef5977806528`;
+  `make linux_pinned_kernel` recovers it, patches out the embedded initramfs, and produces
+  `linux/vmlinux.bin` with `KERNEL_SHA256 2bdaf20814e28e45ac315fc7db5cadd079dfeecfe99e9f06691772ee77aaf0bd`.
+  `linux_rebuild_kernel` is the Buildroot recipe for the source kernel image, but it is not
+  sufficient to reproduce the pinned patched artifact by itself.
+- **UART device layout for the Linux machine:** the NS16550-style UART page is
+  `0x1000_0000`; data is at `+0x000` (`0x1000_0000`), status is at `+0x005`
+  (`0x1000_0005`), and the device value consumed by the simulation for UART data loads is
+  `0x60 | rx_pending` (ready without a pending RX byte is `0x60`; pending RX is `0x61`).
+
 ## Honest limits
 
 - DOOM runs in **simulation**. The UP5K has 128 KB of RAM and Doom needs about

@@ -13,7 +13,17 @@
         std::fflush(stdout);
         tail.push_back((char)ch);
         if (tail.size() > 8192) tail.erase(0, tail.size() - 8192);
-        if (tail.find("LINUX_SIM_DONE") != std::string::npos) done_seen = true;
+        auto done_output_seen = [&]() {
+            size_t echo = tail.rfind("echo LINUX_SIM_DONE");
+            if (echo == std::string::npos) return false;
+            size_t p = echo + 19;
+            while (p < tail.size() && (tail[p] == '\n' || tail[p] == '\r' || tail[p] == ' ')) ++p;
+            if (tail.size() < p + 14) return false;
+            if (tail.compare(p, 14, "LINUX_SIM_DONE") != 0) return false;
+            size_t q = p + 14;
+            return q == tail.size() || tail[q] == '\n' || tail[q] == '\r' || tail[q] == ' ';
+        };
+        if (done_output_seen()) done_seen = true;
         if (tail.find("~ #") != std::string::npos || tail.find("~ $") != std::string::npos ||
             tail.find("/ #") != std::string::npos || tail.find("/ $") != std::string::npos ||
             tail.find("BusyBox") != std::string::npos)
