@@ -1491,3 +1491,23 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 | `hdl make -s linux_sim` from deleted ignored inputs | regenerated `linux/linux.dtb` (sha `ccfdfbc3...`), `linux_pinned_kernel` -> `linux/vmlinux.bin` sha `2bdaf208...`; `TEST PASSED`, `#LINUX cycles=3594353 insns=3325007 prompt=0 login=0 done=0 halt=0 cmds=0 dtb=83e00000` |
 | Buildroot rebuild kernel (not pinned) | `bf4fdbb9b1573d8e18ad8d19c68cc45ef44f2d4f7b9bc65b224a4c30aaebfd7e` unpatched / `f7ed4d243f7929ad702cde5f7aa01b765e4c979fd3d47c2669141dc50dec7705` patched |
 | Makefile diff | `linux_sim`, `linux_shell` prerequisite lists only; no RTL/test changes |
+
+## l4 BusyBox shell login/commands pass (2026-11-06)
+- Review fixes for `20e5ed2` were applied first as commit `7842ae7`: pinned `linux/rootfs.cpio` blob and `linux_pinned_rootfs` target were added; `linux_sim_dbg`, `linux_dbg_initrd`, and `linux_trace_check` now have order-only pinned kernel/rootfs prerequisites; the `all_tests` note says the row is carried over when not re-measured.
+- L4 `linux_shell` now completes with BusyBox shell input/commands:
+  - Robust UART input injection in `tb/run_linux.cpp` no longer pops injected input bytes until the runner sees an actual UART data load; loads are detected with `(ex_insn & 0x7f) == 0x03` and `ea == 0x10000000`, not by generic `ex_ea` activity.
+  - `tb/linux_runner_feed.inc` queues login/password/command input from recent output tails (`login:`, `Password:`, recent shell prompt) and queues `uname -a`, `cat /proc/cpuinfo`, `ls /`, then `echo LINUX_SIM_DONE`.
+- Verified after L4 code:
+  - `hdl make -s linux_shell LINUX_SHELL_CYCLES=3000000000`: prints `LINUX_SIM_DONE`, `#LINUX cycles=101839762 insns=89785693 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000`, and `TEST PASSED (L4 BusyBox shell: login, uname, cpuinfo, ls /, LINUX_SIM_DONE)`.
+  - Required suites remain passing: `all_tests` ALL TESTS DONE, `linux_sim` `TEST PASSED` with `cycles=3594353 insns=3325007`, CoreMark `COREMARK PASS` `cycles=180692117 insns=156649049`, FreeRTOS `FREERTOS PASS` `cycles=1124012`, and `fpga_full FPGA_FREQ=13 FPGA_SEED=4` `3070 SB_LUT4 / 1099 SB_DFF / 17.34 MHz post-synth / 16.84 MHz final route PASS at 13 MHz`.
+
+### Metrics (l4 BusyBox shell, measured this session)
+| item | value |
+|---|---|
+| `linux_shell` | `LINUX_SIM_DONE`, `#LINUX cycles=101839762 insns=89785693 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000` |
+| rootfs pinned blob | `linux/rootfs.cpio` sha `6f4a9e7321da671910520379cabf9ef57a2751da01c4965ff7529d21f84a9c9a`; target `linux_pinned_rootfs` recovers it from the committed blob |
+| `linux_sim` | `TEST PASSED`, `#LINUX cycles=3594353 insns=3325007 prompt=0 login=0 done=0 halt=0 cmds=0 dtb=83e00000` |
+| `all_tests` | `ALL TESTS DONE` (re-measured this session; Doom 31 frames unchanged) |
+| CoreMark | `COREMARK PASS: CRCs validated`, `#BENCH cycles=180692117 insns=156649049 IPC=0.867 halt=1`, `CoreMark/MHz = 3.193` |
+| FreeRTOS | `FREERTOS PASS`, `#BENCH cycles=1124012 insns=899607 IPC=0.800 halt=1` |
+| `fpga_full` seed4 | `3070 SB_LUT4`, `1099 SB_DFF`, `8 SB_RAM40_4K`, `1 SB_MAC16`, `17.34 MHz` post-synth / `16.84 MHz` final route PASS at 13 MHz |

@@ -43,6 +43,7 @@ int main(int argc, char **argv) {
     const uint64_t max_cycles = (argc > 3) ? strtoull(argv[3], nullptr, 10) : 1200000000ull;
     const bool prompt_stop = (argc > 4) && !std::strcmp(argv[4], "prompt");
     const bool platform_stop = (argc > 4) && !std::strcmp(argv[4], "platform");
+    const bool shell_stop = (argc > 4) && !std::strcmp(argv[4], "shell");
 #ifdef LINUX_CKPT
 #include "linux_ckpt_config.inc"
 #endif
@@ -95,6 +96,25 @@ int main(int argc, char **argv) {
     bool login_ready = false;
     bool cmd_uname_seen = false, cmd_cpuinfo_seen = false;
     uint32_t watch_addr = 0, watch_val = 0;
+    std::deque<unsigned char> uart_input;
+    bool login_prompt_seen = false, login_sent = false, commands_sent = false, done_sent = false;
+    bool password_sent = false, login_failed_seen = false;
+    uint64_t login_prompt_cyc = 0;
+    bool uname_ok = false, cpuinfo_ok = false, ls_ok = false;
+    auto queue_text = [&](const std::string &s) {
+        printf("#QUEUE len=%zu text=%s\n", s.size(), s.c_str());
+        for (unsigned char c : s) uart_input.push_back(c);
+    };
+    auto last_pos = [&](const std::string &s) {
+        size_t p = std::string::npos;
+        for (size_t i = 0; i + s.size() <= tail.size(); ++i)
+            if (tail.compare(i, s.size(), s) == 0) p = i;
+        return p;
+    };
+    auto saw_after = [&](const std::string &cmd, const std::string &out) {
+        size_t p = last_pos(cmd);
+        return p != std::string::npos && tail.find(out, p + cmd.size()) != std::string::npos;
+    };
 #ifdef LINUX_DEBUG
 #include "linux_debug_init.inc"
 #endif
@@ -109,36 +129,59 @@ int main(int argc, char **argv) {
 #ifdef LINUX_CKPT
 #include "linux_ckpt_save.inc"
 #endif
-        uint32_t rx_ready = 0, rx_byte = 0;
-        if (login_ready && !model->uart_rx_pending) {
-            unsigned char ch = 0;
-            ssize_t n = read(0, &ch, 1);
-            if (n == 1) { rx_ready = 1; rx_byte = ch; }
+        if (login_prompt_seen && login_prompt_cyc != 0 && !login_sent &&
+            cyc >= login_prompt_cyc + 5000000ull && uart_input.empty()) {
+            queue_text("root\n");
+            login_sent = true;
+            password_sent = false;
         }
-        setc(1, 0, 0, 0, 0, rx_ready, rx_byte);
+        bool up_ready = (!model->uart_rx_pending && !uart_input.empty());
+        uint32_t up_rx = up_ready ? uart_input.front() : 0u;
+        bool pending_false = !model->uart_rx_pending;
+        setc(1, 0, 0, 0, 0, up_ready ? 1u : 0u, up_rx);
         model->eval();
+        bool load_up = ((model->ex_insn & 0x7fu) == 0x03u) &&
+                       (model->ex_ea == 0x10000000u);
+        if (up_ready && (model->uart_rx_pending ||
+                         (pending_false && load_up))) {
+            printf("#STDIN_UP cyc=%llu ch=%02x ascii=%c\n",
+                   (unsigned long long)cyc, (unsigned)up_rx,
+                   (up_rx >= 32u && up_rx < 127u) ? (char)up_rx : '.');
+            uart_input.pop_front();
+        }
         // process only after the down-clock state below; otherwise UART stores/retires duplicate
 
-        rx_ready = 0; rx_byte = 0;
-        if (login_ready && !model->uart_rx_pending) {
-            unsigned char ch = 0;
-            ssize_t n = read(0, &ch, 1);
-            if (n == 1) { rx_ready = 1; rx_byte = ch; }
-        }
-        setc(0, 0, 0, 0, 0, rx_ready, rx_byte);
+        bool down_ready = (!model->uart_rx_pending && !uart_input.empty());
+        uint32_t down_rx = down_ready ? uart_input.front() : 0u;
+        pending_false = !model->uart_rx_pending;
+        setc(0, 0, 0, 0, 0, down_ready ? 1u : 0u, down_rx);
         model->eval();
-        if (rx_ready) printf("#STDIN cyc=%llu ch=%02x ascii=%c\n",
-                            (unsigned long long)cyc, (unsigned)rx_byte,
-                            (rx_byte >= 32u && rx_byte < 127u) ? (char)rx_byte : '.');
+        bool load_down = ((model->ex_insn & 0x7fu) == 0x03u) &&
+                         (model->ex_ea == 0x10000000u);
+        if (down_ready && (model->uart_rx_pending ||
+                           (pending_false && load_down))) {
+            printf("#STDIN cyc=%llu ch=%02x ascii=%c\n",
+                   (unsigned long long)cyc, (unsigned)down_rx,
+                   (down_rx >= 32u && down_rx < 127u) ? (char)down_rx : '.');
+            uart_input.pop_front();
+        }
         if (model->rv_valid) {
             insns++;
             if (model->ex_ea == 0x10000000u || model->ex_ea == 0x10000005u) {
                 static uint32_t uart_dev_seen = 0;
-                if (uart_dev_seen < 50u) {
+                if (uart_dev_seen < 3000u) {
                     ++uart_dev_seen;
-                    printf("#UART_DEV cyc=%llu pc=%08x ea=%08x st=%u\n",
+                    bool is_load = !model->ex_st;
+                    uint32_t ch = model->ex_wv & 0xffu;
+                    printf("#UART_DEV cyc=%llu pc=%08x ea=%08x st=%u load=%u rd=%u wv=%08x sa=%08x wben=%u\n",
                            (unsigned long long)cyc, (unsigned)model->ex_pc,
-                           (unsigned)model->ex_ea, (unsigned)model->ex_st);
+                           (unsigned)model->ex_ea, (unsigned)model->ex_st,
+                           (unsigned)is_load, (unsigned)model->ex_rd,
+                           (unsigned)model->ex_wv, (unsigned)model->ex_sa,
+                           (unsigned)model->ex_wben);
+                    if (is_load && model->ex_ea == 0x10000000u && ch >= 32u && ch < 127u)
+                        printf("#UART_CH cyc=%llu ch=%02x ascii=%c\n",
+                               (unsigned long long)cyc, ch, (char)ch);
                 }
             }
 #ifdef LINUX_DEBUG
@@ -219,7 +262,7 @@ int main(int argc, char **argv) {
            (unsigned long long)cyc, (unsigned long long)insns,
            prompt_seen ? 1 : 0, login_ready ? 1 : 0, done_seen ? 1 : 0,
            model->halt ? 1 : 0,
-           (cmd_uname_seen && cmd_cpuinfo_seen) ? 1 : 0, dtb_addr);
+           (uname_ok && cpuinfo_ok && ls_ok) ? 1 : 0, dtb_addr);
     printf("#BP bp=%u taken=%u mis=%u\n",
            model->bp_branches, model->bp_taken_preds, model->bp_mispreds);
     model->final();

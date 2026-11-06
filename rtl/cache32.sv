@@ -251,7 +251,8 @@ module cache32 (
 `ifdef LINUX
     if (uart_load) begin
       if (uart_status_load) ld_norm = (32'h60 | (uart_pend ? 32'h1 : 32'h0));
-      else if (uart_load_data) ld_norm = (uart_pend ? {24'h0,uart_byte} : 32'h0);
+      else if (uart_load_data) ld_norm = (uart_pend ? {24'h0,uart_byte} :
+                                          (uart_rx_ready ? {24'h0,uart_rx_in} : 32'h0));
       else ld_norm = 32'h0;
     end else if (plic_load) ld_norm = 32'h0;
 `endif
