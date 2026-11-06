@@ -94,7 +94,7 @@ deps:
 	@if [ ! -d deps/riscv-arch-test-3.9.1 ]; then \
 	  git clone -q --depth 1 --no-checkout $(ARCHTEST_URL) deps/riscv-arch-test-3.9.1 ; \
 	  git -C deps/riscv-arch-test-3.9.1 fetch -q origin $(ARCHTEST_REV) --depth 1 ; \
-	  printf 'riscv-test-suite/env\nriscv-test-suite/rv32i_m/I\nriscv-test-suite/rv32i_m/M\nriscv-test-suite/rv32i_m/A\nriscv-test-suite/rv32i_m/Zifencei\nriscv-test-suite/rv32i_m/privilege\n' | git -C deps/riscv-arch-test-3.9.1 sparse-checkout --stdin set ; \
+	  git -C deps/riscv-arch-test-3.9.1 sparse-checkout set riscv-test-suite/env riscv-test-suite/rv32i_m/I riscv-test-suite/rv32i_m/M riscv-test-suite/rv32i_m/A riscv-test-suite/rv32i_m/Zifencei riscv-test-suite/rv32i_m/privilege ; \
 	  git -C deps/riscv-arch-test-3.9.1 checkout -q $(ARCHTEST_REV) ; \
 	 fi
 	@echo "deps: riscv-tests $$(git -C deps/riscv-tests rev-parse --short HEAD), coremark $$(git -C deps/coremark rev-parse --short HEAD), FreeRTOS $(FREERTOS_TAG) (pinned; deps/FreeRTOS-Kernel/manifest.yml version)"
