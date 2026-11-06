@@ -1431,3 +1431,28 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 - Copied the independent replay checker unchanged into `tools/trace_replay_check.py`. It replays `build/linux/cpu_retire.bin` records against its own register/memory/CSR model and reports wrong results; the kernel/DTB arguments and `dtb_addr` must match the run that produced the trace. The Makefile target `linux_trace_check` runs after `linux_sim_dbg` and parses the final `dtb=` address from `build/linux/logs/boot_dbg.out`.
 - Housekeeping: `linux/vmlinux.bin` and generated Linux DTBs are now untracked/ignored (`.gitignore` now covers `linux/vmlinux*`, `linux/*.dtb`, `linux/rootfs*.cpio`). The reproducibility answer is the Makefile rebuild recipe plus pinned kernel/rootfs SHA-256 checks, not committing Buildroot images.
 - Caveat: `build/linux/cpu_retire.bin` is exactly 8 GiB, so it has already hit the common 8 GiB file-size limit and is truncated. Future retire traces should keep the needed window (start/end PC or record range) rather than logging the whole boot.
+
+## Linux L4 polled-DTS login-prompt checkpoint (2026-11-05)
+- The `linux_shell` blocker was external to the CPU wait-loop investigation: `rtl/cache32.sv` only stubs the old PLIC page, while the Linux DTs advertised UART TX interrupts with a PLIC parent, so tty output waited for a missing serial/PLIC interrupt.
+- Edited `rtl/linux.dts` and `linux/linux_initrd.dts`: removed UART `interrupts`/`interrupt-parent` and the PLIC node, kept CLINT, added a comment that UART is polled in RTL until a real PLIC is added, and added `stdin-path = "/soc/serial@10000000";` in `chosen`.
+- Added `tools/rootfs_drop_network.py` and Makefile rootfs filtering: Buildroot rootfs is copied to `linux/rootfs_unfiltered.cpio`, then filtered to pinned `linux/rootfs.cpio` by removing `etc/init.d/S40network`. New pinned rootfs sha is `6f4a9e7321da671910520379cabf9ef57a2751da01c4965ff7529d21f84a9c9a`; generated DTBs and cpio images remain ignored/build outputs.
+- Regenerated `linux/linux_initrd.dtb` and filtered `linux/rootfs.cpio`; `hdl make linux_shell LINUX_SHELL_CYCLES=400000000` now stops at BusyBox login prompt. Measured final line: `#LINUX cycles=329179391 insns=288505778 prompt=1 login=1 done=0 halt=0 cmds=0 dtb=83e00000`.
+- `tb/run_linux.cpp` now gates stdin feeding until the UART tail has seen `login:`, tracks `login=`, `done=`, and command-output flags, and keeps heavy Linux path/debug markers inside `LINUX_DEBUG` for non-debug `linux_shell`.
+- Included an unrelated pending `rtl/csrs.sv` mret correction: preserve `mstatus.MPIE` through `mret` and update only `MIE`; this is needed for later Linux paths and passed with `mpp_ret_gate`/`all_tests`. The current FPGA target also regenerated `rtl/fpga_prog_init.sv` with 23 ROM words.
+- Verified required suites after the Linux DTS/rootfs/runner changes: `hdl make -s all_tests` ended `ALL TESTS DONE`; `hdl make coremark` printed `COREMARK PASS: CRCs validated`; `hdl make freertos` printed `FREERTOS PASS`; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` reported 3069 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`, 16.81 MHz post-synth / 16.07 MHz final route PASS at 13 MHz, and netlist sanity OK.
+- Honest current limit: `linux_shell` is an L4 BusyBox login-prompt gate. It has not completed `uname`, `/proc/cpuinfo`, `ls`, or `LINUX_SIM_DONE`; after login the CPU remains idle with no UART status/data loads, so scripted UART input needs the real PLIC/UART RX interrupt path later (L8), not the CPU wait-loop.
+
+### Metrics (Linux L4 polled-DTS checkpoint, measured this session)
+| item | value |
+|---|---|
+| filtered rootfs | `linux/rootfs.cpio` sha `6f4a9e7321da671910520379cabf9ef57a2751da01c4965ff7529d21f84a9c9a`, 1050548 bytes, without `etc/init.d/S40network` |
+| `linux_shell` login prompt | `#LINUX cycles=329179391 insns=288505778 login=1 done=0 cmds=0 halt=0` |
+| `all_tests` | `ALL TESTS DONE` after DTS/rootfs/runner changes |
+| CoreMark | `COREMARK PASS: CRCs validated`, `#BENCH cycles=180692117 insns=156649049 IPC=0.867 halt=1` |
+| FreeRTOS | `FREERTOS PASS`, `#BENCH cycles=1124012 insns=899607 IPC=0.800 halt=1` |
+| `fpga_full` seed4 | 3069 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`; 16.81 MHz post-synth / 16.07 MHz final route PASS at 13 MHz |
+
+### L4 source-file split and re-measure (same session, current tree)
+- Split `tb/run_linux.cpp` into 229-line main plus small `tb/linux_*.inc` pieces (`linux_runner_load.inc`, `linux_runner_feed.inc`, `linux_runner_gates.inc`, `linux_ckpt_config.inc`, `linux_ckpt_restore.inc`, `linux_ckpt_save.inc`, `linux_debug_init.inc`, `linux_debug_markers.inc`, `linux_debug_snap.inc`, `linux_debug_close.inc`). Default Linux, `LINUX_DEBUG`, and `LINUX_CKPT` runner builds compile.
+- Split `rtl/csrs.sv` into a 200-line module that `include`s the 96-line `rtl/csrs_comb.svh` common CSR read/after-state body. `hdl make lint` is clean.
+- After the split, re-measured suites: `hdl make -s all_tests` still ends `ALL TESTS DONE`; CoreMark and FreeRTOS rows above are the current measured pass outputs; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` now reports 3070 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`, 17.34 MHz post-synth / 16.84 MHz final route PASS at 13 MHz, with trap-CSR DFF counts `st_mepc 32`, `st_mtvec 10`, `st_mcause 18`, `st_mie 6`.

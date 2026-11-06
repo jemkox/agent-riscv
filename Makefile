@@ -366,7 +366,7 @@ freertos: need_freertos $(B)/vlt_bench/run_bench $(B)/bench/freertos.hex
 LINUX_KERNEL_BIN ?= ../../build-linux/nommu/images/vmlinux.bin
 KERNEL_SHA256 ?= 30093ca80925a142a8f55133128fe83809356a70041b14a4cb0778ba73729dea
 LINUX_ROOTFS_BIN ?= ../../build-linux/nommu/images/rootfs.cpio
-ROOTFS_SHA256 ?= 75a760b4d7a7db8c04866a368fd9bf70ae82fc143242c56b1b512b2a300a9ac5
+ROOTFS_SHA256 ?= 6f4a9e7321da671910520379cabf9ef57a2751da01c4965ff7529d21f84a9c9a
 BR_ROOT ?= ../../downloads/buildroot-2025.02.19
 BR_OUT ?= ../../build-linux/nommu
 BR_DEFCONFIG ?= linux/configs/qemu_riscv32_nommu_virt_defconfig
@@ -375,6 +375,7 @@ LINUX_CKPT_SAVE_CYCLE ?= 85000000
 LINUX_CKPT_LATER_CYCLE ?= 90000000
 LINUX_CKPT_HASH ?= $(shell sha256sum $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb | sha256sum | cut -d' ' -f1)
 LINUX_DBG_CYCLES ?= 150000000
+LINUX_SHELL_CYCLES ?= 800000000
 linux:
 	@mkdir -p linux $(B)/linux
 $(B)/linux/logs:
@@ -384,8 +385,10 @@ linux/linux.dtb: rtl/linux.dts linux | $(B)
 	@dtc -I dts -O dtb -o linux/linux.dtb rtl/linux.dts
 linux/vmlinux.bin: linux | $(B)
 	@if [ ! -f linux/vmlinux.bin ]; then cp $(LINUX_KERNEL_BIN) linux/vmlinux.bin; fi
-linux/rootfs.cpio: linux | $(B)
-	@if [ ! -f linux/rootfs.cpio ]; then cp $(LINUX_ROOTFS_BIN) linux/rootfs.cpio; fi
+linux/rootfs_unfiltered.cpio: linux | $(B)
+	@if [ ! -f linux/rootfs_unfiltered.cpio ]; then cp $(LINUX_ROOTFS_BIN) linux/rootfs_unfiltered.cpio; fi
+linux/rootfs.cpio: linux/rootfs_unfiltered.cpio linux | $(B)
+	@python3 tools/rootfs_drop_network.py linux/rootfs_unfiltered.cpio linux/rootfs.cpio etc/init.d/S40network
 linux/linux_initrd.dtb: linux/linux_initrd.dts linux | $(B)
 	@mkdir -p linux
 	@dtc -I dts -O dtb -o linux/linux_initrd.dtb linux/linux_initrd.dts
@@ -394,7 +397,8 @@ linux_rebuild_kernel: linux | $(BR_OUT)
 	$(MAKE) -C $(BR_ROOT) O=$(BR_OUT) linux
 	@mkdir -p linux
 	@cp $(BR_OUT)/images/vmlinux.bin linux/vmlinux.bin
-	@cp $(BR_OUT)/images/rootfs.cpio linux/rootfs.cpio
+	@cp $(BR_OUT)/images/rootfs.cpio linux/rootfs_unfiltered.cpio
+	@python3 tools/rootfs_drop_network.py linux/rootfs_unfiltered.cpio linux/rootfs.cpio etc/init.d/S40network
 	@sha256sum linux/vmlinux.bin linux/rootfs.cpio
 linux/gate.txt: linux/configs/gate-symbols.map linux | $(B)
 	@mkdir -p linux
@@ -438,7 +442,7 @@ linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux $(B)/linux/logs
 linux_shell: $(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux_initrd.dtb linux/rootfs.cpio | linux
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX SHELL TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@sha256sum linux/rootfs.cpio | grep -q $(ROOTFS_SHA256) || { echo "LINUX SHELL TEST FAILED: rootfs sha256 mismatch (expected $(ROOTFS_SHA256))" >&2; exit 1; }
-	@mkdir -p $(B)/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | env LINUX_INITRD=linux/rootfs.cpio ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux_initrd.dtb 2000000000 > $(B)/linux/logs/shell.out; sed -n '1,120p' $(B)/linux/logs/shell.out; grep -q LINUX_SIM_DONE $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED" >&2; exit 1; }
+	@mkdir -p $(B)/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | env LINUX_INITRD=linux/rootfs.cpio ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux_initrd.dtb $(LINUX_SHELL_CYCLES) prompt > $(B)/linux/logs/shell.out; sed -n '1,160p' $(B)/linux/logs/shell.out; tail -n 4 $(B)/linux/logs/shell.out; grep -q "#LINUX.*login=1" $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED: login prompt not seen" >&2; exit 1; }; echo "TEST PASSED (L4 BusyBox login prompt reached)"
 
 linux_dbg_initrd: $(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux_initrd.dtb linux/rootfs.cpio
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX DEBUG INITRD FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }

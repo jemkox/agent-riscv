@@ -8,7 +8,8 @@
 
  	 chosen {
  	 bootargs = "console=ttyS0 earlycon=ns16550,mmio,0x10000000 initramfs_async=0";
- 	 stdout-path = "/soc/serial@10000000";
+  	 stdout-path = "/soc/serial@10000000";
+  	 stdin-path = "/soc/serial@10000000";
  	};
 
  	 memory@80000000 {
@@ -51,24 +52,14 @@
  	 compatible = "simple-bus";
  	 ranges;
 
- 	 serial@10000000 {
- 	 interrupts = <0x0a>;
- 	 interrupt-parent = <&pliclabel>;
- 	 clock-frequency = <230400>;
- 	 reg = <0x00 0x10000000 0x00 0x100>;
- 	 compatible = "ns16550a";
- 	 };
+  	 /* UART is polled in RTL until a real PLIC is added; no PLIC node. */
+  	 serial@10000000 {
+  	 clock-frequency = <230400>;
+  	 reg = <0x00 0x10000000 0x00 0x100>;
+  	 compatible = "ns16550a";
+  	 };
 
- 	 pliclabel: plic@c000000 {
- 	 #interrupt-cells = <1>;
- 	 riscv,ndev = <0x5f>;
- 	 interrupt-controller;
- 	 interrupts-extended = <&intc 0xb &intc 0x9>;
- 	 compatible = "sifive,plic-1.0.0", "riscv,plic0";
- 	 reg = <0x00 0xc000000 0x00 0x600000>;
- 	 };
-
- 	 clint@2000000 {
+  	 clint@2000000 {
  	 interrupts-extended = <&intc 0x3 &intc 0x7>;
  	 reg = <0x00 0x2000000 0x00 0x10000>;
  	 compatible = "sifive,clint0", "riscv,clint0";

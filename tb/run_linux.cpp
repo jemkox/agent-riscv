@@ -16,39 +16,12 @@
 #include "Vrun_linux.h"
 #ifdef LINUX_CKPT
 #include <verilated_save.h>
-#include <vector>
-#include <deque>
-#include <array>
 #endif
 
 static const uint32_t KERNEL_ADDR = 0x80000000u;
 static const uint32_t INITRD_ADDR = 0x82000000u;
 
-static bool load_bin(const char *path, std::vector<uint32_t> &out) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return false;
-    fseek(f, 0, SEEK_END);
-    long long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz < 0) { fclose(f); return false; }
-    out.resize((size_t)((sz + 3) / 4));
-    for (size_t i = 0; i < out.size(); i++) {
-        uint32_t w = 0;
-        unsigned char b[4] = {0,0,0,0};
-        size_t n = fread(b, 1, 4, f);
-        if (n != 4 && feof(f)) {
-            for (size_t k=0;k<n;k++) w |= ((uint32_t)b[k]) << (8*k);
-            out[i] = w;
-        } else if (n == 4) {
-            out[i] = (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
-                     ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
-        } else {
-            fclose(f); return false;
-        }
-    }
-    fclose(f);
-    return true;
-}
+#include "linux_runner_load.inc"
 
 int main(int argc, char **argv) {
     if (argc < 3) {
@@ -71,13 +44,7 @@ int main(int argc, char **argv) {
     const bool prompt_stop = (argc > 4) && !std::strcmp(argv[4], "prompt");
     const bool platform_stop = (argc > 4) && !std::strcmp(argv[4], "platform");
 #ifdef LINUX_CKPT
-    const bool ckpt_save = (argc > 5) && !std::strcmp(argv[5], "save");
-    const bool ckpt_restore = (argc > 5) && !std::strcmp(argv[5], "restore");
-    const bool ckpt_mark = (argc > 5) && !std::strcmp(argv[5], "mark");
-    const uint64_t mark_cycle = (ckpt_mark && argc > 6) ? strtoull(argv[6], nullptr, 10) : 0ull;
-    const uint64_t save_cycle = (ckpt_save && max_cycles > 0) ? (max_cycles - 1) : 0ull;
-    const std::string ckpt_file = (argc > 6 && (ckpt_save || ckpt_restore)) ? std::string(argv[6]) : std::string();
-    const std::string ckpt_hash_arg = (argc > 7 && (ckpt_save || ckpt_restore)) ? std::string(argv[7]) : std::string();
+#include "linux_ckpt_config.inc"
 #endif
 
     uint32_t kernel_bytes = (uint32_t)(kernel.size() * 4u);
@@ -123,173 +90,27 @@ int main(int argc, char **argv) {
     std::string tail;
     struct TraceEntry { uint32_t pc, insn, rd, wv, ea; };
     std::deque<TraceEntry> trace;
-#ifdef LINUX_DEBUG
-    FILE *rtf = fopen("build/linux/cpu_retire.bin", "wb");
-    FILE *dbg_log = fopen("build/linux/debug_linux.log", "w");
-#endif
     std::deque<std::array<uint32_t, 3>> store_ring;
     bool prompt_seen = false, done_seen = false, platform_seen = false;
+    bool login_ready = false;
+    bool cmd_uname_seen = false, cmd_cpuinfo_seen = false;
     uint32_t watch_addr = 0, watch_val = 0;
-    auto feed_output = [&](uint32_t ch) {
 #ifdef LINUX_DEBUG
-        static uint32_t uart_tx_seen = 0;
-        if (uart_tx_seen < 200000u) {
-            ++uart_tx_seen;
-            if (dbg_log)
-                std::fprintf(dbg_log, "#UART_TX cyc=%llu ch=%02x ascii=%c\n",
-                             (unsigned long long)cyc, (unsigned)(ch & 0xFFu),
-                             (ch >= 32u && ch < 127u) ? (char)ch : '.');
-        }
+#include "linux_debug_init.inc"
 #endif
-        std::putchar((char)ch);
-        std::fflush(stdout);
-        tail.push_back((char)ch);
-        if (tail.size() > 8192) tail.erase(0, tail.size() - 8192);
-        if (tail.find("LINUX_SIM_DONE") != std::string::npos) done_seen = true;
-        if (tail.find("~ #") != std::string::npos || tail.find("~ $") != std::string::npos ||
-            tail.find("/ #") != std::string::npos || tail.find("/ $") != std::string::npos ||
-            tail.find("BusyBox") != std::string::npos || tail.find("login:") != std::string::npos)
-            prompt_seen = true;
-    };
-
-    struct Gate { std::string name; uint32_t pc; bool seen; };
-    std::vector<Gate> gates;
-    {
-        FILE *gf = fopen("linux/gate.txt", "r");
-        if (gf) {
-            char nm[64];
-            unsigned long long pcv;
-            while (fscanf(gf, "%63s %llx", nm, &pcv) == 2)
-                gates.push_back({nm, (uint32_t)pcv, false});
-            fclose(gf);
-        }
-    }
-    auto gate_seen = [&](const char *name) {
-        for (const auto &g : gates)
-            if (g.name == name) return g.seen;
-        return false;
-    };
+#include "linux_runner_feed.inc"
+#include "linux_runner_gates.inc"
 
 #ifdef LINUX_CKPT
-    auto print_state = [&](const char *tag) {
-        printf("#CKPT_%s cyc=%llu insns=%llu pc=%08x insn=%08x rd=%u wv=%08x st=%u ea=%08x halt=%u prompt=%u done=%u platform=%u\n",
-               tag, (unsigned long long)cyc, (unsigned long long)insns,
-               (unsigned)model->ex_pc, (unsigned)model->ex_insn,
-               (unsigned)model->ex_rd, (unsigned)model->ex_wv,
-               (unsigned)model->ex_st, (unsigned)model->ex_ea,
-               (unsigned)model->halt, prompt_seen ? 1u : 0u,
-               done_seen ? 1u : 0u, platform_seen ? 1u : 0u);
-    };
-
-    if (ckpt_restore) {
-        if (ckpt_file.empty()) {
-            printf("#CKPT_FAIL usage: restore <file> <hash>\n");
-            return 3;
-        }
-        VerilatedRestore os;
-        os.open(ckpt_file.c_str());
-        if (!os.isOpen()) {
-            printf("#CKPT_FAIL cannot open %s\n", ckpt_file.c_str());
-            return 1;
-        }
-        std::string h;
-        os >> h;
-        if (h != ckpt_hash_arg) {
-            printf("#CKPT_REFUSE hash mismatch: file=%s snapshot=%s expected=%s\n",
-                   ckpt_file.c_str(), h.c_str(), ckpt_hash_arg.c_str());
-            exit(3);
-        }
-        os >> cyc;
-        os >> insns;
-        os >> prompt_seen;
-        os >> done_seen;
-        os >> platform_seen;
-        os >> watch_addr;
-        os >> watch_val;
-        uint32_t gate_count = 0;
-        os >> gate_count;
-        if (gate_count != (uint32_t)gates.size()) {
-            printf("#CKPT_REFUSE gate count mismatch: file=%u snapshot=%u\n",
-                   (unsigned)gates.size(), (unsigned)gate_count);
-            exit(3);
-        }
-        for (auto &g : gates) os >> g.seen;
-        uint32_t trace_count = 0;
-        os >> trace_count;
-        for (uint32_t i = 0; i < trace_count; i++) {
-            TraceEntry e;
-            os >> e.pc; os >> e.insn; os >> e.rd; os >> e.wv; os >> e.ea;
-            trace.push_back(e);
-        }
-        uint32_t store_count = 0;
-        os >> store_count;
-        for (uint32_t i = 0; i < store_count; i++) {
-            std::array<uint32_t, 3> s;
-            os >> s[0]; os >> s[1]; os >> s[2];
-            store_ring.push_back(s);
-        }
-        os >> tail;
-        os >> contextp.get();
-        os >> *model;
-        if (!os.isOpen()) {
-            printf("#CKPT_FAIL restore stream closed before model: %s\n", ckpt_file.c_str());
-            exit(1);
-        }
-        os.close();
-        print_state("RESTORE");
-    }
+#include "linux_ckpt_restore.inc"
 #endif
 
     while (cyc < max_cycles) {
 #ifdef LINUX_CKPT
-        if (ckpt_mark && cyc == mark_cycle) print_state("MARK");
-        if (ckpt_save && cyc == save_cycle) {
-            printf("#CKPT_SAVE cyc=%llu insns=%llu file=%s hash=%s\n",
-                   (unsigned long long)cyc, (unsigned long long)insns,
-                   ckpt_file.c_str(), ckpt_hash_arg.c_str());
-            print_state("SAVE");
-            VerilatedSave os;
-            os.open(ckpt_file.c_str());
-            if (!os.isOpen()) {
-                printf("#CKPT_FAIL cannot create %s\n", ckpt_file.c_str());
-                return 1;
-            }
-            os << ckpt_hash_arg;
-            os << (uint64_t)cyc;
-            os << (uint64_t)insns;
-            os << prompt_seen;
-            os << done_seen;
-            os << platform_seen;
-            os << watch_addr;
-            os << watch_val;
-            os << (uint32_t)gates.size();
-            for (const auto &g : gates) os << g.seen;
-            os << (uint32_t)trace.size();
-            for (const auto &t : trace) {
-                os << (uint32_t)t.pc; os << (uint32_t)t.insn;
-                os << (uint32_t)t.rd; os << (uint32_t)t.wv;
-                os << (uint32_t)t.ea;
-            }
-            os << (uint32_t)store_ring.size();
-            for (const auto &s : store_ring) {
-                os << (uint32_t)s[0]; os << (uint32_t)s[1];
-                os << (uint32_t)s[2];
-            }
-            os << tail;
-            os << contextp.get();
-            os << *model;
-            if (!os.isOpen()) {
-                printf("#CKPT_FAIL save stream closed: %s\n", ckpt_file.c_str());
-                os.close();
-                return 1;
-            }
-            os.close();
-            model->final();
-            return 0;
-        }
+#include "linux_ckpt_save.inc"
 #endif
         uint32_t rx_ready = 0, rx_byte = 0;
-        if (!model->uart_rx_pending) {
+        if (login_ready && !model->uart_rx_pending) {
             unsigned char ch = 0;
             ssize_t n = read(0, &ch, 1);
             if (n == 1) { rx_ready = 1; rx_byte = ch; }
@@ -299,15 +120,27 @@ int main(int argc, char **argv) {
         // process only after the down-clock state below; otherwise UART stores/retires duplicate
 
         rx_ready = 0; rx_byte = 0;
-        if (!model->uart_rx_pending) {
+        if (login_ready && !model->uart_rx_pending) {
             unsigned char ch = 0;
             ssize_t n = read(0, &ch, 1);
             if (n == 1) { rx_ready = 1; rx_byte = ch; }
         }
         setc(0, 0, 0, 0, 0, rx_ready, rx_byte);
         model->eval();
+        if (rx_ready) printf("#STDIN cyc=%llu ch=%02x ascii=%c\n",
+                            (unsigned long long)cyc, (unsigned)rx_byte,
+                            (rx_byte >= 32u && rx_byte < 127u) ? (char)rx_byte : '.');
         if (model->rv_valid) {
             insns++;
+            if (model->ex_ea == 0x10000000u || model->ex_ea == 0x10000005u) {
+                static uint32_t uart_dev_seen = 0;
+                if (uart_dev_seen < 50u) {
+                    ++uart_dev_seen;
+                    printf("#UART_DEV cyc=%llu pc=%08x ea=%08x st=%u\n",
+                           (unsigned long long)cyc, (unsigned)model->ex_pc,
+                           (unsigned)model->ex_ea, (unsigned)model->ex_st);
+                }
+            }
 #ifdef LINUX_DEBUG
             if (rtf) {
                 uint32_t rec[8] = {(uint32_t)cyc, (uint32_t)model->ex_pc,
@@ -335,75 +168,9 @@ int main(int argc, char **argv) {
                 }
 #endif
             }
-            {
-                uint32_t p = model->ex_pc;
-                if (p == 0x8045ef8cu || p == 0x8045f08cu) {
-                    printf("#VSN_BASE cyc=%llu pc=%08x ea=%08x val=%08x\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_ea, (unsigned)model->ex_wv);
-                }
-                if (p == 0x8045ef90u) {
-                    printf("#VSN_CAN_ST cyc=%llu pc=%08x ea=%08x val=%08x\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_ea, (unsigned)model->ex_sd);
-                    watch_addr = model->ex_ea;
-                    watch_val = model->ex_sd;
-                }
-                if (watch_addr && model->ex_st && model->ex_ea == watch_addr) {
-                    printf("#WATCH_ST cyc=%llu pc=%08x ea=%08x val=%08x expected=%08x\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_ea, (unsigned)model->ex_sd,
-                           (unsigned)watch_val);
-                }
-                if (p == 0x8045f088u) {
-                    printf("#VSN_CAN_LD cyc=%llu pc=%08x ea=%08x val=%08x\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_ea, (unsigned)model->ex_wv);
-                    if (model->ex_ea == watch_addr && model->ex_wv != watch_val) {
-                        printf("#WATCH_BAD_LD cyc=%llu pc=%08x ea=%08x got=%08x expected=%08x\n",
-                               (unsigned long long)cyc, (unsigned)p,
-                               (unsigned)model->ex_ea, (unsigned)model->ex_wv,
-                               (unsigned)watch_val);
-                    }
-                    watch_addr = 0;
-                    watch_val = 0;
-                }
-                if (p == 0x8045f090u && model->ex_wv != 0) {
-                    printf("#VSN_MISMATCH cyc=%llu xor=%08x\n",
-                           (unsigned long long)cyc, (unsigned)model->ex_wv);
-                }
-                if (p == 0x80473ef4u) {
-            printf("#VSN_SC cyc=%llu pc=%08x ea=%08x val=%08x ok=%u\n",
-                   (unsigned long long)cyc, (unsigned)p,
-                   (unsigned)model->ex_ea, (unsigned)model->ex_sd,
-                   (unsigned)(model->ex_rd == 0 ? 1u : 0u));
-                }
-                if (p == 0x80473dc0u || p == 0x80473dc4u) {
-                    printf("#HND_SP_ST cyc=%llu pc=%08x ea=%08x val=%08x\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_ea, (unsigned)model->ex_sd);
-                }
-                if (p == 0x80473dc8u) {
-                    printf("#HND_SP_LD cyc=%llu pc=%08x ea=%08x val=%08x\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_ea, (unsigned)model->ex_wv);
-                }
-                if (p == 0x80473db4u || p == 0x80473dbcu) {
-                    printf("#HND_CSW cyc=%llu pc=%08x rd=%u wv=%08x ea=%08x\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_rd, (unsigned)model->ex_wv,
-                           (unsigned)model->ex_ea);
-                }
-                if (p == 0x80473db8u) {
-                    printf("#HND_BR cyc=%llu pc=%08x\n", (unsigned long long)cyc, (unsigned)p);
-                }
-                if (p == 0x80473e7cu) {
-                    printf("#HND_CLR cyc=%llu pc=%08x rd=%u wv=%08x ea=%08x\n",
-                           (unsigned long long)cyc, (unsigned)p,
-                           (unsigned)model->ex_rd, (unsigned)model->ex_wv,
-                           (unsigned)model->ex_ea);
-                }
-            }
+#ifdef LINUX_DEBUG
+#include "linux_debug_markers.inc"
+#endif
         }
         if (model->uart_tx_valid) feed_output(model->uart_tx_out & 0xFFu);
         {
@@ -427,10 +194,9 @@ int main(int argc, char **argv) {
             }
             if (platform_stop && gate_seen("kernel_init_freeable")) platform_seen = true;
         }
-        if (trace.size() == 200 && cyc && (cyc % 5000000u == 0u)) {
-            printf("#SNAP cycles=%llu\n", (unsigned long long)cyc);
-            for (auto t : trace) printf("#TRACE %08x %08x %u %08x %08x\n", t.pc, t.insn, t.rd, t.wv, t.ea);
-        }
+#ifdef LINUX_DEBUG
+#include "linux_debug_snap.inc"
+#endif
         if (done_seen || (prompt_stop && prompt_seen) ||
             (platform_stop && platform_seen) || model->halt) {
             if (platform_stop && platform_seen)
@@ -441,8 +207,7 @@ int main(int argc, char **argv) {
     }
 
 #ifdef LINUX_DEBUG
-    if (rtf) fclose(rtf);
-    if (dbg_log) fclose(dbg_log);
+#include "linux_debug_close.inc"
 #endif
     if (!done_seen && !prompt_seen) {
         printf("#TAIL %zu bytes\n", tail.size());
@@ -450,9 +215,11 @@ int main(int argc, char **argv) {
         printf("\n");
         for (auto t : trace) printf("#TRACE %08x %08x %u %08x %08x\n", t.pc, t.insn, t.rd, t.wv, t.ea);
     }
-    printf("#LINUX cycles=%llu insns=%llu prompt=%d done=%d halt=%d dtb=%08x\n",
+    printf("#LINUX cycles=%llu insns=%llu prompt=%d login=%d done=%d halt=%d cmds=%d dtb=%08x\n",
            (unsigned long long)cyc, (unsigned long long)insns,
-           prompt_seen ? 1 : 0, done_seen ? 1 : 0, model->halt ? 1 : 0, dtb_addr);
+           prompt_seen ? 1 : 0, login_ready ? 1 : 0, done_seen ? 1 : 0,
+           model->halt ? 1 : 0,
+           (cmd_uname_seen && cmd_cpuinfo_seen) ? 1 : 0, dtb_addr);
     printf("#BP bp=%u taken=%u mis=%u\n",
            model->bp_branches, model->bp_taken_preds, model->bp_mispreds);
     model->final();
