@@ -86,7 +86,7 @@ module csrs (
   localparam MSTATUS_MIE   = 32'h0000_0008;
   localparam MSTATUS_SIE   = 32'h0000_0002;
   localparam SSTATUS_MASK  = 32'h8000_1922;
-  localparam MISA_VAL      = 32'h4001_5001;
+  localparam MISA_VAL      = 32'h4000_1101;
 
   // ---- machine + supervisor architect state (all kept for synthesis) ----
   logic [31:0] st_mscratch = 0;

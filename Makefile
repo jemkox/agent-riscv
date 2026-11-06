@@ -17,6 +17,9 @@ RISCV_TESTS_REV ?= 3df703cd52d5f0d8224e3c50bf03c6cb70efff98
 COREMARK_URL ?= https://github.com/eembc/coremark.git
 COREMARK_REV ?= 1f483d5b8316753a742cbf5590caf5bd0a4e4777
 FREERTOS_URL ?= https://github.com/FreeRTOS/FreeRTOS-Kernel.git
+ARCHTEST_URL ?= https://github.com/riscv/riscv-arch-test.git
+ARCHTEST_REV ?= eb66181dd27ff7847e2c3a010705b13490b0bf75
+SAIL_URL ?= https://github.com/riscv/sail-riscv/releases/download/0.16/sail-riscv-Linux-x86_64.tar.gz
 FREERTOS_TAG ?= V11.2.0
 WAD_SHA1 := 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d
 B ?= build
@@ -27,8 +30,8 @@ WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.w
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
 # Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
-FPGA_NETLIST_LUT4 ?= 3305
-FPGA_NETLIST_FLOPS ?= 1163
+FPGA_NETLIST_LUT4 ?= 3292
+FPGA_NETLIST_FLOPS ?= 1195
 # Pinned netlist for the documented fpga_csrtrap ROM (smaller, but it exercises
 # trap CSRs dynamically; see fpga_csrtrap_netlist target below).
 FPGA_CSRTRAP_NETLIST_LUT4 ?= 2176
@@ -86,6 +89,14 @@ deps:
 	@if [ ! -d deps/riscv-tests ]; then git clone -q $(RISCV_TESTS_URL) deps/riscv-tests && git -C deps/riscv-tests checkout -q $(RISCV_TESTS_REV) && git -C deps/riscv-tests submodule -q update --init env; fi
 	@if [ ! -d deps/coremark ]; then git clone -q $(COREMARK_URL) deps/coremark && git -C deps/coremark checkout -q $(COREMARK_REV); fi
 	@if [ ! -d deps/FreeRTOS-Kernel ]; then git -c advice.detachedHead=false clone -q --depth 1 --branch $(FREERTOS_TAG) $(FREERTOS_URL) deps/FreeRTOS-Kernel; fi
+	@if [ ! -f deps/sail-riscv-0.16-Linux-x86_64.tar.gz ]; then curl -sL -o deps/sail-riscv-0.16-Linux-x86_64.tar.gz $(SAIL_URL); fi
+	@if [ ! -d deps/sail-riscv-0.16/sail-riscv-Linux-x86_64 ]; then mkdir -p deps/sail-riscv-0.16 && tar -xzf deps/sail-riscv-0.16-Linux-x86_64.tar.gz -C deps/sail-riscv-0.16 && chmod +x deps/sail-riscv-0.16/sail-riscv-Linux-x86_64/bin/sail_riscv_sim; fi
+	@if [ ! -d deps/riscv-arch-test-3.9.1 ]; then \
+	  git clone -q --depth 1 --no-checkout $(ARCHTEST_URL) deps/riscv-arch-test-3.9.1 ; \
+	  git -C deps/riscv-arch-test-3.9.1 fetch -q origin $(ARCHTEST_REV) --depth 1 ; \
+	  printf 'riscv-test-suite/env\nriscv-test-suite/rv32i_m/I\nriscv-test-suite/rv32i_m/M\nriscv-test-suite/rv32i_m/A\nriscv-test-suite/rv32i_m/Zifencei\nriscv-test-suite/rv32i_m/privilege\n' | git -C deps/riscv-arch-test-3.9.1 sparse-checkout --stdin set ; \
+	  git -C deps/riscv-arch-test-3.9.1 checkout -q $(ARCHTEST_REV) ; \
+	 fi
 	@echo "deps: riscv-tests $$(git -C deps/riscv-tests rev-parse --short HEAD), coremark $$(git -C deps/coremark rev-parse --short HEAD), FreeRTOS $(FREERTOS_TAG) (pinned; deps/FreeRTOS-Kernel/manifest.yml version)"
 	@[ -f deps/doom1.wad ] && echo "deps: doom1.wad present" || echo "deps: for Doom, copy the shareware doom1.wad (v1.9, sha1 $(WAD_SHA1)) to deps/doom1.wad"
 
@@ -838,7 +849,7 @@ synth:
 $(B)/vlt_mdtb/mdtb: tb/mdiu_tb.sv rtl/mdiu_fpga.sv | $(B)
 	verilator --binary --timing -O1 --Wall -o mdtb $(filter %.sv,$^) --Mdir $(B)/vlt_mdtb
 
-mdiou_tb: $(B)/vlt_mdtb/mdtb
+mdiu_tb: $(B)/vlt_mdtb/mdtb
 	@./$(B)/vlt_mdtb/mdtb | grep -E 'TEST (PASSED|FAILED)'
 
 # RISCOF arch-test gate (pinned riscv-arch-test 3.9.1).  Runs the five
@@ -855,8 +866,12 @@ $(B)/vlt_riscof/run_hex_sig: $(RTL) tb/run_hex_sig.sv | $(B)
 riscof: $(B)/vlt_riscof/run_hex_sig
 	@for s in $(RISCOF_SUITES); do \
 	  wd=$(B)/riscof_work/$$s; mkdir -p $$wd; \
-	  PATH=$(PWD)/riscof/bin:$(PWD)/deps/bin:$$PATH riscof testlist --config riscof/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd ; \
+	  mkdir -p $(B)/riscof_work; sed 's|@ROOT@|$(PWD)|g' riscof/config.ini > $(B)/riscof_work/config.ini; \
+	  PATH=$(PWD)/riscof/bin:$(PWD)/deps/bin:$$PATH riscof testlist --config $(PWD)/$(B)/riscof_work/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd ; \
 	  python3 -c "import yaml,os,sys;[os.makedirs(d['work_dir'],exist_ok=True) for d in yaml.safe_load(open(sys.argv[1])).values()]" $$wd/test_list.yaml ; \
-	  PATH=$(PWD)/riscof/bin:$(PWD)/deps/bin:$$PATH riscof run --config riscof/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd --no-browser --no-clean --testfile $$wd/test_list.yaml > $$wd/run.log 2>&1 || true ; \
-	  if [ -f $$wd/run.log ] && grep -q Passed $$wd/run.log && ! grep -q Failed $$wd/run.log; then echo "SUITE $$s: PASS"; else echo "SUITE $$s: FAIL"; fi ; \
+	  PATH=$(PWD)/riscof/bin:$(PWD)/deps/bin:$$PATH riscof run --config $(PWD)/$(B)/riscof_work/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd --no-browser --no-clean --testfile $$wd/test_list.yaml > $$wd/run.log 2>&1 || true ; \
+	  n=$$(ls $(RISCOF_SUITE)/$$s/src/*.S | wc -l); \
+	  p=$$(grep -c ": Passed" $$wd/run.log); \
+	  f=$$(grep -c ": Failed" $$wd/run.log); \
+	  if [ $$p = $$n ] && [ $$f = 0 ]; then echo "SUITE $$s: PASS ($$p/$$n)"; else echo "SUITE $$s: FAIL (passed $$p/$$n, failed $$f)"; fi ; \
 	 done

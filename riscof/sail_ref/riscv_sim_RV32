@@ -1,2 +1,5 @@
 #!/bin/sh
-exec /home/jemko/agent-workspace/hdl/rv32cpu/deps/sail-riscv-0.16/sail-riscv-Linux-x86_64/bin/sail_riscv_sim --config /home/jemko/agent-workspace/hdl/rv32cpu/riscof/gate_ref_config.json "$@"
+# Pinned Sail RV32 reference for the RISCOF gate. Repo-relative: the script lives at
+# riscof/sail_ref/, the pinned binary and gate config sit two dirs up (repo root).
+root=$(dirname "$0")/../..
+exec "$root/deps/sail-riscv-0.16/sail-riscv-Linux-x86_64/bin/sail_riscv_sim" --config "$root/riscof/gate_ref_config.json" "$@"

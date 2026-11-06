@@ -36,7 +36,7 @@ def main(argv):
     # CPU in M mode this is identical to the pre-L5 M/U model, so L1-L4 and the
     # rv32mi suite behavior is unchanged; misa advertises S and U (bit18/bit20).
     cs = {0x300:0x1800,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
-          0x340:0,0x301:0x40015001,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0,
+          0x340:0,0x301:0x40001101,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0,
           0x302:0,0x303:0,0x306:0,
           0x100:0,0x104:0,0x105:0,0x106:0,0x140:0,0x141:0,0x142:0,0x143:0,0x144:0,0x180:0,
           0x32d:0,0x32e:0,0x32f:0}
@@ -144,7 +144,7 @@ def main(argv):
         base = v & ~1
         return (base | (((v & 1) * ((c & 31) << 2)))) & mask
     def do_trap(c, val=0):
-        cs[0x341] = pc & mask; cs[0x343] = 0
+        cs[0x341] = pc & mask; cs[0x343] = val & mask
         if priv != 3 and (cs.get(0x302,0) >> c) & 1:   # delegate to S
             cs[0x141] = pc & mask; cs[0x142] = c & mask; cs[0x143] = val & mask
             trap_s(); return tvec(cs_get(0x105), c)
@@ -366,7 +366,7 @@ def main(argv):
                     pc = do_trap(8 + priv); steps += 1  # ECALL: M 11, S 9, U 8
                     continue
                 elif csr_num == 1:
-                    pc = do_trap(3); steps += 1    # EBREAK
+                    pc = do_trap(3, pc); steps += 1    # EBREAK: mtval = epc
                     continue
                 else:
                     cause = 2; illegal = True
@@ -410,7 +410,9 @@ def main(argv):
         else:
             illegal = True
         if illegal:
-            pc = do_trap(cause, ins if cause == 2 else 0); steps += 1
+            pc = do_trap(cause, ins if cause == 2 else
+                         (npc if cause == 0 else
+                          (ea if cause in (4,5,6,7) else 0))); steps += 1
             continue
         if irq_p:
             pc = do_irq(); steps += 1
