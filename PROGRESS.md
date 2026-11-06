@@ -1450,9 +1450,31 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 | `all_tests` | `ALL TESTS DONE` after DTS/rootfs/runner changes |
 | CoreMark | `COREMARK PASS: CRCs validated`, `#BENCH cycles=180692117 insns=156649049 IPC=0.867 halt=1` |
 | FreeRTOS | `FREERTOS PASS`, `#BENCH cycles=1124012 insns=899607 IPC=0.800 halt=1` |
-| `fpga_full` seed4 | 3069 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`; 16.81 MHz post-synth / 16.07 MHz final route PASS at 13 MHz |
+| `fpga_full` seed4 | stale pre-split row: 3069 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`; current split-tree row: 3070 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`; 17.34 MHz post-synth / 16.84 MHz final route PASS at 13 MHz |
 
 ### L4 source-file split and re-measure (same session, current tree)
 - Split `tb/run_linux.cpp` into 229-line main plus small `tb/linux_*.inc` pieces (`linux_runner_load.inc`, `linux_runner_feed.inc`, `linux_runner_gates.inc`, `linux_ckpt_config.inc`, `linux_ckpt_restore.inc`, `linux_ckpt_save.inc`, `linux_debug_init.inc`, `linux_debug_markers.inc`, `linux_debug_snap.inc`, `linux_debug_close.inc`). Default Linux, `LINUX_DEBUG`, and `LINUX_CKPT` runner builds compile.
 - Split `rtl/csrs.sv` into a 200-line module that `include`s the 96-line `rtl/csrs_comb.svh` common CSR read/after-state body. `hdl make lint` is clean.
 - After the split, re-measured suites: `hdl make -s all_tests` still ends `ALL TESTS DONE`; CoreMark and FreeRTOS rows above are the current measured pass outputs; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` now reports 3070 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`, 17.34 MHz post-synth / 16.84 MHz final route PASS at 13 MHz, with trap-CSR DFF counts `st_mepc 32`, `st_mtvec 10`, `st_mcause 18`, `st_mie 6`.
+
+## review fixes: 12696de (2026-11-06)
+- Fixed the no-network boot claim by changing the kernel pin itself, not only the external rootfs: `tools/kernel_disable_embedded_initramfs.py` finds the appended embedded cpio gzip inside the pinned kernel and zeroes its 4-byte embedded-initramfs size field. The gzip bytes remain, but the kernel no longer unpacks/uses the embedded initramfs, so the external filtered `linux/rootfs.cpio` is the initramfs that actually runs.
+- `hdl make linux_shell LINUX_SHELL_CYCLES=400000000` with the patched pinned kernel now reaches BusyBox login at `#LINUX cycles=84088006 insns=74186087 prompt=1 login=1 done=0 halt=0 cmds=0 dtb=83e00000`; `build/linux/logs/shell.out` tail shows `Run /init`, `Welcome to Buildroot`, and `buildroot login:` without `Starting network`, `Waiting for interface`, or `wait_iface`.
+- Updated Makefile `KERNEL_SHA256 ?= 2bdaf20814e28e45ac315fc7db5cadd079dfeecfe99e9f06691772ee77aaf0bd` for the recovered pinned kernel size `6615800`. `ROOTFS_SHA256` remains `6f4a9e7321da671910520379cabf9ef57a2751da01c4965ff7529d21f84a9c9a` for the filtered external rootfs.
+- Added `tools/git_blob_to_file.py` and Makefile target `linux_pinned_kernel`: recover blob `09a6ad3` from the repo into `build/linux_kernel_blob.bin`, run `tools/kernel_disable_embedded_initramfs.py`, and print/verify the new pinned kernel sha. `linux_rebuild_kernel` now rebuilds from Buildroot and applies the same embedded-initramfs-size-zero patch before the rootfs filter, so the rebuild path is tied to the pinned `KERNEL_SHA256`.
+- Re-verified required suites after the kernel/Makefile changes: `hdl make -s all_tests` ended `ALL TESTS DONE`; `hdl make coremark` printed `COREMARK PASS: CRCs validated`; `hdl make freertos` printed `FREERTOS PASS`; `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` reported 3070 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`, 17.34 MHz post-synth / 16.84 MHz final route PASS at 13 MHz, with netlist sanity OK.
+- Re-verified Linux L3 gate: `hdl make linux_sim` passed with `#LINUX cycles=3648358 insns=3376075 prompt=0 login=0 done=0 halt=0 cmds=0 dtb=83e00000`.
+- Stale metrics row updated: the L4 checkpoint `fpga_full seed4` row now distinguishes the stale pre-split `3069` result from the current split-tree `3070` result.
+
+### Metrics (review fixes for 12696de, measured this session)
+| item | value |
+|---|---|
+| filtered external rootfs | `linux/rootfs.cpio` sha `6f4a9e7321da671910520379cabf9ef57a2751da01c4965ff7529d21f84a9c9a`, 1050548 bytes, without `etc/init.d/S40network` |
+| embedded initramfs disabled | pinned kernel sha `2bdaf20814e28e45ac315fc7db5cadd079dfeecfe99e9f06691772ee77aaf0bd`, 6615800 bytes, embedded-initramfs size field zeroed |
+| `linux_shell` login prompt | `#LINUX cycles=84088006 insns=74186087 login=1 done=0 cmds=0 halt=0` |
+| boot log | no `Starting network`, `Waiting for interface`, or `wait_iface`; reaches `Welcome to Buildroot` and `buildroot login:` |
+| `linux_sim` L3 | TEST PASSED, cycles=3,648,358, insns=3,376,075, prompt=0, login=0 |
+| `all_tests` | `ALL TESTS DONE` |
+| CoreMark | `COREMARK PASS: CRCs validated`, `#BENCH cycles=180692117 insns=156649049 IPC=0.867 halt=1` |
+| FreeRTOS | `FREERTOS PASS`, `#BENCH cycles=1124012 insns=899607 IPC=0.800 halt=1` |
+| `fpga_full` seed4 | 3070 `SB_LUT4`, 1099 `SB_DFF`, 8 `SB_RAM40_4K`, 1 `SB_MAC16`; 17.34 MHz post-synth / 16.84 MHz final route PASS at 13 MHz |
