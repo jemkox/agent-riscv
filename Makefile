@@ -73,7 +73,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -838,5 +838,25 @@ synth:
 $(B)/vlt_mdtb/mdtb: tb/mdiu_tb.sv rtl/mdiu_fpga.sv | $(B)
 	verilator --binary --timing -O1 --Wall -o mdtb $(filter %.sv,$^) --Mdir $(B)/vlt_mdtb
 
-mdiu_tb: $(B)/vlt_mdtb/mdtb
+mdiou_tb: $(B)/vlt_mdtb/mdtb
 	@./$(B)/vlt_mdtb/mdtb | grep -E 'TEST (PASSED|FAILED)'
+
+# RISCOF arch-test gate (pinned riscv-arch-test 3.9.1).  Runs the five
+# suites sequentially, one PASS/FAIL line each, never opens a browser.
+# The runner needs -DLINUX -DHIGH_PC so RAM and the load window are the
+# 0x8000_0000 physical window the arch-test link scripts use.
+RISCOF_SUITES ?= I M A Zifencei privilege
+RISCOF_ENV := deps/riscv-arch-test-3.9.1/riscv-test-suite/env
+RISCOF_SUITE := deps/riscv-arch-test-3.9.1/riscv-test-suite/rv32i_m
+
+$(B)/vlt_riscof/run_hex_sig: $(RTL) tb/run_hex_sig.sv | $(B)
+	verilator --binary --Wall --timing -O2 	-DTOPPIPE -DVRUNTIME -DLINUX -DHIGH_PC -DLINUX_DEBUG -DCACHE_LAT=1 -DTBHEX='"$(B)/riscof/p.hex"' -DSIGCFG='"$(B)/riscof/p.sigcfg"' -DSIGOUT='"$(B)/riscof/p.sigout"' --Mdir $(B)/vlt_riscof -o run_hex_sig $(RTL) tb/run_hex_sig.sv
+
+riscof: $(B)/vlt_riscof/run_hex_sig
+	@for s in $(RISCOF_SUITES); do \
+	  wd=$(B)/riscof_work/$$s; mkdir -p $$wd; \
+	  PATH=$(PWD)/riscof/bin:$(PWD)/deps/bin:$$PATH riscof testlist --config riscof/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd ; \
+	  python3 -c "import yaml,os,sys;[os.makedirs(d['work_dir'],exist_ok=True) for d in yaml.safe_load(open(sys.argv[1])).values()]" $$wd/test_list.yaml ; \
+	  PATH=$(PWD)/riscof/bin:$(PWD)/deps/bin:$$PATH riscof run --config riscof/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd --no-browser --no-clean --testfile $$wd/test_list.yaml > $$wd/run.log 2>&1 || true ; \
+	  if [ -f $$wd/run.log ] && grep -q Passed $$wd/run.log && ! grep -q Failed $$wd/run.log; then echo "SUITE $$s: PASS"; else echo "SUITE $$s: FAIL"; fi ; \
+	 done

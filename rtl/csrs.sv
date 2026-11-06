@@ -16,6 +16,7 @@ module csrs (
   input  logic        trap_to_sup,    // 0 -> M handler, 1 -> S handler
   input  logic [31:0] trap_pc,
   input  logic [31:0] trap_cause,
+  input  logic [31:0] trap_tval,
   input  logic        mret_en,
   input  logic        sret_en,
 
@@ -198,7 +199,10 @@ module csrs (
         end
       end
       if (trap_en) begin
-        st_mtval <= 32'h0;
+        st_mtval <= trap_tval;
+`ifdef LINUX_DEBUG
+        $display("DBG TRAPST pc=%08x cause=%08x tval=%08x", trap_pc, trap_cause, trap_tval);
+`endif
         if (trap_to_sup) begin
           // S handler: SPIE<-SIE, SIE<-0, SPP<-priv, MPP<-priv, priv<-S
           st_mstatus <= (after_mstatus & ~(MSTATUS_SPIE | MSTATUS_SIE | MSTATUS_SPP | MSTATUS_MPP)) |
@@ -206,7 +210,7 @@ module csrs (
                         (((after_mstatus & MSTATUS_SIE) != 0) ? MSTATUS_SPIE : 32'h0) |
                         ({30'b0, after_priv} << 11);
           st_priv <= 2'b01;
-          st_sepc <= trap_pc; st_scause <= trap_cause; st_stval <= trap_cause;
+          st_sepc <= trap_pc; st_scause <= trap_cause; st_stval <= trap_tval;
         end else begin
           // M handler: MPIE<-MIE, MIE<-0, MPP<-priv, priv<-M
           st_mstatus <= (after_mstatus & ~(MSTATUS_MPIE | MSTATUS_MIE | MSTATUS_MPP)) |

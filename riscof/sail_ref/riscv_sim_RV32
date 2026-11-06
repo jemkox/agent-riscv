@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /home/jemko/agent-workspace/hdl/rv32cpu/deps/sail-riscv-0.16/sail-riscv-Linux-x86_64/bin/sail_riscv_sim --config /home/jemko/agent-workspace/hdl/rv32cpu/riscof/gate_ref_config.json "$@"

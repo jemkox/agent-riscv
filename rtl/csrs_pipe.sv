@@ -58,6 +58,8 @@ module csrs_pipe (
   /* verilator lint_on UNUSEDSIGNAL */
   logic [11:0] cs_medeleg, cs_mideleg;
   logic [31:0] insn_cause;
+  logic [31:0] insn_tval, trap_tval;
+  logic [31:0] brimm, jimm;
 `ifndef FPGA
   logic [31:0] clint_mip;
   logic [31:0] mip_sw_next;
@@ -68,6 +70,7 @@ module csrs_pipe (
 
   csrs CSRS(.clk(clk), .reset(reset), .halt_in(halt),
             .trap_en(trap_en), .trap_to_sup(trap_to_sup), .trap_pc(idex_pc), .trap_cause(trap_cause),
+            .trap_tval(trap_tval),
             .mret_en(mret_en), .sret_en(sret_en),
             .cs_read_en(exmem_valid && exmem_csr_en), .cs_rsel(exmem_insn[31:20]),
             .cs_old(cs_old),
@@ -135,6 +138,16 @@ module csrs_pipe (
     cs_trap_pc = ((trap_to_sup ? stvec_next : mtvec_next) & 32'hFFFF_FFFE) |
                  ((((trap_to_sup ? stvec_next : mtvec_next) & 32'h1) != 0)
                   ? ((trap_cause & 32'h1f) << 2) : 32'h0);
+    // mtval/stval per cause: misaligned fetch reports the faulting target address,
+    // EBREAK reports its address, illegal instructions report the encoding.
+    brimm = {{20{idex_insn[31]}}, idex_insn[7], idex_insn[30:25], idex_insn[11:8], 1'b0};
+    jimm  = {{11{idex_insn[31]}}, idex_insn[31], idex_insn[19:12], idex_insn[20], idex_insn[30:21], 1'b0};
+    if (ce_fetch_bad)     insn_tval = (idex_insn[6:2] == 5'b11011) ? (idex_pc + jimm)
+                          : ((idex_insn[6:2] == 5'b11000) ? (idex_pc + brimm)
+                             : (idex_ea & 32'hFFFF_FFFE));
+    else if (ce_sys)      insn_tval = (idex_insn == 32'h0010_0073) ? idex_pc : 32'h0;
+    else                  insn_tval = idex_insn;
+    trap_tval = trap_flush ? insn_tval : 32'h0;
     mret_en = mret_active && !trap_flush && !timer_flush;
     sret_en = sret_active && !trap_flush && !timer_flush;
     mret_flush = mret_en;

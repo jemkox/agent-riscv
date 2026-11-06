@@ -1523,6 +1523,7 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 - Restored the FPGA trap-CSR netlist guard under `ifdef FPGA` in `rtl/csrs.sv`; impossible 32-bit counter predicates keep `st_mtvec`, `st_mie`, `st_mepc`, and `st_mcause` reachable in yosys. The netlist checker prints `st_mepc 32`, `st_mtvec 10`, `st_mcause 18`, `st_mie 6`.
 - Updated Makefile netlist baselines for the current tree after the guard to `FPGA_NETLIST_LUT4=3305` and `FPGA_NETLIST_FLOPS=1163`.
 - Verified Linux gates after L5 privilege changes: `hdl make -s linux_sim` passed and `hdl make -s linux_shell LINUX_SHELL_CYCLES=150000000` passed with strict `LINUX_SIM_DONE` detection.
+- RISCOF arch-test gate added (`hdl make riscof`): DUT plugin `riscof/rv32cpu/`, `tb/run_hex_sig.sv` signature runner (`-DLINUX -DHIGH_PC`, halt + `MAX_INSNS`/`MAX_CYCLES` bounds, `#NOTERM` on no-halt), `run_dut.py` (ELF->hex, begin/end symbol scan incl. `rvtest_sig_*` fallback, stale-sig removal, 120 s timeout). Reference wrapper `riscof/sail_ref/riscv_sim_RV32` + `riscof/gate_ref_config.json` pin the Sail RV32 model to the DUT ISA (C/Zca/Zcb/Zcf/Zcd and H off; delegatable/stateen/Sdtrig bits trimmed to satisfy schema). Trap `mtval` is now real: `csrs_pipe` computes misaligned-fetch target (branch/jal/jalr), EBREAK epc, illegal insn bits; `csrs_comb.svh` reads `mtval`; `csrs.sv` stores `trap_tval`. `MISA_VAL`/ISS/ispec keep H off (0x4001_5001). Result: I/M/A/Zifencei/privilege all PASS; privilege 15/15 after the mtval + target fixes; `regress` still `ALL PASS`.
 
 ### Honest limitations (L5)
 - This is privilege/trap groundwork, not a complete supervisor implementation. `satp` is not an Sv32 MMU yet (L6), `scounteren` is accepted but does not gate counters, and the selected `rv32si` suite uses `__MACHINE_MODE` aliases for supervisor-specific labels.
@@ -1532,6 +1533,7 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 |---|---|
 | `all_tests` | `ALL TESTS DONE`; suites: test LAT1/5, `ui um mi ua si`, regress N=500, m7, doom, mpp_ret_gate, FPGA gates |
 | `si` | `ALL SI PASS` (official rv32si with `__MACHINE_MODE`) |
+| `riscof` | `SUITE I/M/A/Zifencei/privilege: PASS` (5/5 suites, `riscv-arch-test 3.9.1`, sail_cSim pinned noC/noH config, `--testfile` flow, `--no-browser`) |
 | `mi` | `ALL MI PASS` |
 | `ua` | `ALL UA PASS` (included in `all_tests` this session) |
 | CoreMark | `COREMARK PASS: CRCs validated`, `41.504125`, `3.193 CoreMark/MHz`, `#BENCH cycles=180692117 insns=156649049 IPC=0.867 halt=1` |
