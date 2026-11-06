@@ -410,6 +410,13 @@ linux_pinned_kernel: linux | $(B)
 	@sha256sum linux/vmlinux.bin
 	@echo "Recovered pinned kernel for KERNEL_SHA256=$(KERNEL_SHA256)"
 
+linux_pinned_rootfs: linux | $(B)
+	@mkdir -p linux $(B)
+	@python3 tools/git_blob_to_file.py HEAD:linux/rootfs.cpio $(B)/linux_rootfs_blob.bin
+	@cp $(B)/linux_rootfs_blob.bin linux/rootfs.cpio
+	@sha256sum linux/rootfs.cpio
+	@echo "Recovered pinned rootfs for ROOTFS_SHA256=$(ROOTFS_SHA256)"
+
 linux/gate.txt: linux/configs/gate-symbols.map linux | $(B)
 	@mkdir -p linux
 	@python3 tools/linux_gate.py linux/configs/gate-symbols.map linux/gate.txt
@@ -421,16 +428,18 @@ $(B)/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
 	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir $(B)/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3 -DLINUX_DEBUG" run_linux -j 4
 
-linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux
-	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
+linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
+	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Recover the pinned kernel with make linux_pinned_kernel, rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
+	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX DEBUG BOOT TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@mkdir -p $(B)/linux/logs; ./$(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee $(B)/linux/logs/boot_dbg.out
 
 # Independent retire-trace replay checker. Run it after linux_sim_dbg (or after
 # linux_dbg_initrd by editing the kernel/dtb inputs/log); it must use the same
 # vmlinux.bin, dtb and dtb_addr that produced build/linux/cpu_retire.bin. The
 # runner prints the load address as `dtb=xxxxxxxx` in its final #LINUX line.
-linux_trace_check: linux_sim_dbg
+linux_trace_check: linux_sim_dbg | linux linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
+	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "linux_trace_check: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@DTB=`grep -o 'dtb=[0-9a-f]\{8\}' $(B)/linux/logs/boot_dbg.out | tail -n 1 | cut -d= -f 2`; \
 	 [ -n "$$DTB" ] || { echo "linux_trace_check: no dtb=xxxxxxxx address found in $(B)/linux/logs/boot_dbg.out" >&2; exit 1; }; \
 	 echo "linux_trace_check: using kernel linux/vmlinux.bin, dtb linux/linux.dtb, dtb_addr $$DTB"; \
@@ -449,12 +458,12 @@ linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux linux/linux.dtb linux
 	@grep -q "^#LINUX" $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: runner did not finish" >&2; exit 1; }
 	@echo "TEST PASSED (L3 platform boot: Linux reaches init_freeable; BusyBox prompt not reached yet)"
 
-linux_shell: $(B)/vlt_linux/run_linux | linux linux/linux_initrd.dtb linux_pinned_kernel linux/rootfs.cpio $(B)/linux/logs
+linux_shell: $(B)/vlt_linux/run_linux | linux linux/linux_initrd.dtb linux_pinned_kernel linux_pinned_rootfs linux/rootfs.cpio $(B)/linux/logs
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX SHELL TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@sha256sum linux/rootfs.cpio | grep -q $(ROOTFS_SHA256) || { echo "LINUX SHELL TEST FAILED: rootfs sha256 mismatch (expected $(ROOTFS_SHA256))" >&2; exit 1; }
 	@mkdir -p $(B)/linux/logs; printf 'root\nuname -a\ncat /proc/cpuinfo\nls /\necho LINUX_SIM_DONE\n' | env LINUX_INITRD=linux/rootfs.cpio ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux_initrd.dtb $(LINUX_SHELL_CYCLES) prompt > $(B)/linux/logs/shell.out; sed -n '1,160p' $(B)/linux/logs/shell.out; tail -n 4 $(B)/linux/logs/shell.out; grep -q "#LINUX.*login=1" $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED: login prompt not seen" >&2; exit 1; }; echo "TEST PASSED (L4 BusyBox login prompt reached)"
 
-linux_dbg_initrd: $(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux_initrd.dtb linux/rootfs.cpio
+linux_dbg_initrd: $(B)/vlt_linux_dbg/run_linux | linux linux/linux_initrd.dtb linux_pinned_kernel linux_pinned_rootfs $(B)/linux/logs
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX DEBUG INITRD FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@sha256sum linux/rootfs.cpio | grep -q $(ROOTFS_SHA256) || { echo "LINUX DEBUG INITRD FAILED: rootfs sha256 mismatch (expected $(ROOTFS_SHA256))" >&2; exit 1; }
 	@mkdir -p $(B)/linux/logs; env LINUX_INITRD=linux/rootfs.cpio ./$(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux_initrd.dtb $(LINUX_DBG_CYCLES) prompt | tee $(B)/linux/logs/boot_dbg_initrd.out
