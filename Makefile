@@ -866,10 +866,10 @@ $(B)/vlt_riscof/run_hex_sig: $(RTL) tb/run_hex_sig.sv | $(B)
 riscof: $(B)/vlt_riscof/run_hex_sig
 	@for s in $(RISCOF_SUITES); do \
 	  wd=$(B)/riscof_work/$$s; mkdir -p $$wd; \
-	  mkdir -p $(B)/riscof_work; sed 's|@ROOT@|$(PWD)|g' riscof/config.ini > $(B)/riscof_work/config.ini; \
-	  PATH=$(PWD)/riscof/bin:$(PWD)/deps/bin:$$PATH riscof testlist --config $(PWD)/$(B)/riscof_work/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd ; \
+	  mkdir -p $(B)/riscof_work; sed 's|@ROOT@|$(shell pwd)|g' riscof/config.ini > $(B)/riscof_work/config.ini; \
+	  PATH=$(shell pwd)/riscof/bin:$(shell pwd)/deps/bin:$$PATH riscof testlist --config $(shell pwd)/$(B)/riscof_work/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd ; \
 	  python3 -c "import yaml,os,sys;[os.makedirs(d['work_dir'],exist_ok=True) for d in yaml.safe_load(open(sys.argv[1])).values()]" $$wd/test_list.yaml ; \
-	  PATH=$(PWD)/riscof/bin:$(PWD)/deps/bin:$$PATH riscof run --config $(PWD)/$(B)/riscof_work/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd --no-browser --no-clean --testfile $$wd/test_list.yaml > $$wd/run.log 2>&1 || true ; \
+	  PATH=$(shell pwd)/riscof/bin:$(shell pwd)/deps/bin:$$PATH riscof run --config $(shell pwd)/$(B)/riscof_work/config.ini --suite $(RISCOF_SUITE)/$$s --env $(RISCOF_ENV) --work-dir $$wd --no-browser --no-clean --testfile $$wd/test_list.yaml > $$wd/run.log 2>&1 || true ; \
 	  n=$$(ls $(RISCOF_SUITE)/$$s/src/*.S | wc -l); \
 	  p=$$(grep -c ": Passed" $$wd/run.log); \
 	  f=$$(grep -c ": Failed" $$wd/run.log); \
