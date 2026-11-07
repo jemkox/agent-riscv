@@ -946,10 +946,12 @@ linux_mmu_build: linux | $(BR_MMU_OUT)
 	@chmod +x $(BR_ROOT)/board/qemu/riscv32-virt/post-build-mmu.sh
 	$(MAKE) -s -C $(BR_ROOT) O=$(BR_MMU_OUT) $(BR_MMU_NAME)
 	$(MAKE) -s -C $(BR_ROOT) O=$(BR_MMU_OUT) all -j2
-	@sha256sum $(BR_MMU_OUT)/images/fw_dynamic.elf $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio
+	@python3 tools/canonical_cpio.py $(BR_MMU_OUT)/images/rootfs.cpio $(BR_MMU_OUT)/rootfs_canon.cpio
+	@sha256sum $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/fw_dynamic.elf $(BR_MMU_OUT)/rootfs_canon.cpio
 
 linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
-	@timeout 240 sh -c 'printf "root\nls /\nuname -a\ncat /proc/cpuinfo\n" | hdl qemu-system-riscv32 -M virt -m 64M -nographic -bios $(BR_MMU_OUT)/images/fw_dynamic.bin -kernel $(BR_MMU_OUT)/images/Image -initrd $(BR_MMU_OUT)/images/rootfs.cpio > $(BR_MMU_OUT)/qemu_boot.log' || true
+	@rm -f $(BR_MMU_OUT)/qemu_boot.log
+	@timeout 240 sh -c '(sleep 115; printf "root\n"; sleep 6; printf "ls /\n"; sleep 6; printf "uname -a\n"; sleep 6; printf "cat /proc/cpuinfo\n"; sleep 6; printf "poweroff\n") | hdl qemu-system-riscv32 -M virt -m 64M -nographic -bios $(BR_MMU_OUT)/images/fw_dynamic.bin -kernel $(BR_MMU_OUT)/images/Image -initrd $(BR_MMU_OUT)/images/rootfs.cpio > $(BR_MMU_OUT)/qemu_boot.log'
 	@echo "QEMU boot log: $(BR_MMU_OUT)/qemu_boot.log"
-	@if grep -q "OpenSBI v1.6" $(BR_MMU_OUT)/qemu_boot.log && grep -q "buildroot login:" $(BR_MMU_OUT)/qemu_boot.log; then echo "L7 QEMU BOOT OK: OpenSBI banner + login prompt"; else echo "L7 QEMU BOOT FAIL"; exit 1; fi
-	@grep -m 5 -a "OpenSBI\|Run /init as init\|login" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true
+	@if grep -q "OpenSBI v1.6" $(BR_MMU_OUT)/qemu_boot.log && grep -q "buildroot login:" $(BR_MMU_OUT)/qemu_boot.log && grep -q "reboot: Power down" $(BR_MMU_OUT)/qemu_boot.log; then echo "L7 QEMU BOOT OK: OpenSBI banner + login + commands + clean poweroff"; else echo "L7 QEMU BOOT FAIL"; exit 1; fi
+	@grep -m 5 -a "OpenSBI\|Run /init as init\|login\|Power down" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true
