@@ -1,7 +1,12 @@
 // mmu.sv - L6 Sv32 MMU: direct-mapped 4-entry fetch/data TLBs + 2-level walker.
-// Walker reads/writes leave through the shared cache access port; the PTE value
-// is latched (pv) at the end of the issue cycle and evaluated the next cycle,
-// so port outputs never depend combinationally on p_data.
+// Walker reads/writes leave through the shared cache access port; grant decisions
+// in always_comb never look at p_data/p_ready (no combinational cycle). The PTE
+// value is latched (pv) in the clocked block ONLY on a grant cycle where p_ready
+// (cache32 mem_ready) says the access completed; own/won (the "data landed" and
+// "store committed" state bits) are set with the same gate, so with CACHE_LAT>1
+// a cold PTE line keeps the side in its pending state (re-issuing the same
+// address via the retry branches) until the fill returns. A/D writes stay held
+// (p_we re-issued by the s=2 pending-write retry) until the store commits.
 `default_nettype none
 /* verilator lint_off UNUSED */
 /* verilator lint_off WIDTHEXPAND */
@@ -25,7 +30,8 @@ module mmu (
   output logic [3:0]  df_cause,
   output logic        p_ld, p_we,
   output logic [31:0] p_a, p_wa, p_wd,
-  input  logic [31:0] p_data
+  input  logic [31:0] p_data,
+  input  logic        p_ready   // cache32 mem_ready: the shared-port access done
 );
   logic [3:0]  tv_i = 0, tv_d = 0;
   logic [19:0] tg_i [0:3], tg_d [0:3];
@@ -53,8 +59,8 @@ module mmu (
     ok = 1;
     if (!rd && !wr) begin
       if (!x) ok = 0;
-      // S-mode may never fetch U pages (spec); M fetching U pages is allowed.
-      if (u && pr == 2'b01) ok = 0;
+      // S fetching a U page needs mstatus.SUM (same rule as S loading U pages); M may.
+      if (u && pr == 2'b01 && !sm) ok = 0;
     end else begin
       if (rd && !(r || (w && mx))) ok = 0;
       if (wr && !w) ok = 0;
@@ -263,7 +269,8 @@ module mmu (
       s_i <= 0; s_d <= 0; own_i <= 0; own_d <= 0; won_i <= 0; won_d <= 0;
     end else begin
       s_i <= ns_i; s_d <= ns_d;
-      own_i <= own_ni; own_d <= own_nd; won_i <= won_ni; won_d <= won_nd;
+      own_i <= own_ni && (!iss_i || p_ready); own_d <= own_nd && (!iss_d || p_ready);
+      won_i <= won_ni && (!g_w_i || p_ready); won_d <= won_nd && (!g_w_d || p_ready);
       lvl_i <= lvl_ni; lvl_d <= lvl_nd;
       wt_i <= nwt_i; wt_d <= nwt_d;
       fcsr_i <= fcsr_ni; fcsr_d <= fcsr_nd;
@@ -271,8 +278,8 @@ module mmu (
       cap_i <= ncap_i; cap_d <= ncap_d;
       wda_i <= nwda_i; wda_d <= nwda_d;
       wdv_i <= nwdv_i; wdv_d <= nwdv_d;
-      if (iss_i) pv_i <= p_data;
-      if (iss_d) pv_d <= p_data;
+      if (iss_i && p_ready) pv_i <= p_data;
+      if (iss_d && p_ready) pv_d <= p_data;
 `ifdef SCDBG2
       if (mode)
         $display("MMUW s_i=%0d o_i=%0d l_i=%0d t_i=%x w_i=%x pv_i=%x f_i=%x n_i=%x iss_i=%x p_ld=%x p_a=%x r=%x va=%x s_d=%0d o_d=%0d l_d=%0d t_d=%x w_d=%x pv_d=%x f_d=%x n_d=%x iss_d=%x fc_i=%b fc_d=%b tv=%b tg=%x fg=%x fgA=%b",

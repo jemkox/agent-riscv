@@ -40,6 +40,9 @@ _start:
   csrs mstatus, t0
   mret
 sblock:
+  li t5, 0x4000        # X|R|U page: S fetch w/o SUM -> IT PF (supervisor may not exec U)
+  jalr x0, 0(t5)
+afterit:
   li t3, 0x5000        # U page: S load w/o SUM -> PF
   lw t2, 0(t3)
   li t4, 0x6161
@@ -48,9 +51,6 @@ sblock:
   lw t2, 0(t3)
   li t4, 0x6161
   bne t2, t4, fail
-  li t5, 0x4000        # X|R|U page: S fetch -> IT PF (supervisor may not exec U)
-  jalr x0, 0(t5)
-afterit:
   li t4, 3
   bne s0, t4, fail
   li gp, 1

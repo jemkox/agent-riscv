@@ -172,7 +172,7 @@ def main(argv):
         ok = True
         if typ == 0:
             if not x: ok = False
-            if u and priv == 1: ok = False   # S may never fetch U pages (spec); M may
+            if u and priv == 1 and typ == 0 and not (cs[0x300] & SUM_BIT): ok = False   # S fetch of U page needs SUM; M may
         elif typ == 1:
             if not (r or (w and (cs[0x300] & MXR_BIT))): ok = False
         else:

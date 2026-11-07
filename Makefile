@@ -81,7 +81,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu mmu
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu $(B)/vlt_mmu5/run_mmu5 mmu mmu5
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -299,7 +299,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules
+MMU_TESTS := t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -321,6 +321,25 @@ mmu: $(B)/vlt_mmu/run_mmu $(B)/mmu $(B)/mmu/logs $(foreach t,$(MMU_TESTS),$(B)/$
 
 $(B)/vlt/run_hex: $(B)/vlt/run_hex_lat$(CACHE_LAT)
 	@cp -f $< $@
+
+$(B)/vlt_mmu5/run_mmu5: $(RTL) $(TB) | $(B) $(B)/vlt_mmu5
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=5 --Mdir $(B)/vlt_mmu5 -o run_mmu5 $(RTL) $(TB)
+
+$(B)/vlt_mmu5:
+	@mkdir -p $(B)/vlt_mmu5
+$(B)/mmu5:
+	@mkdir -p $(B)/mmu5
+$(B)/mmu5/logs:
+	@mkdir -p $(B)/mmu5/logs
+
+mmu5: $(B)/vlt_mmu5/run_mmu5 $(B)/mmu5 $(B)/mmu5/logs $(foreach t,$(MMU_TESTS),$(B)/$(t).bin $(B)/$(t).hex $(B)/$(t).elf) | $(B)
+	@bad=0; for t in $(MMU_TESTS); do \
+	  cp $(B)/$$t.hex $(B)/p.hex; \
+	  ./$(B)/vlt_mmu5/run_mmu5 > $(B)/mmu5/logs/$$t.rtl.log; \
+	  python3 iss/iss.py --quiet --pass --log $(B)/mmu5/logs/$$t.iss.log $(B)/$$t.bin > /dev/null || bad=$$((bad+1)); \
+	  python3 tools/cmp.py $(B)/mmu5/logs/$$t.rtl.log $(B)/mmu5/logs/$$t.iss.log || bad=$$((bad+1)); \
+	  riscv64-unknown-elf-objdump -t $(B)/$$t.elf | python3 tools/mmuself.py tests/$$t.S $(B)/mmu5/logs/$$t.rtl.log || bad=$$((bad+1)); \
+ done; if [ $$bad -eq 0 ]; then echo "MMU5 ALL PASS"; else echo "MMU5 $$bad FAILS"; exit 1; fi
 
 um: $(UM_BINS) $(UM_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/um $(B)/um/logs
 	@bad=0; \
@@ -357,7 +376,7 @@ si: $(SI_BINS) $(SI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/si $(B)/si/logs
 
 
 regress: $(B)/vlt/run_hex
-	@python3 tools/run_regress.py $(N) $(B)
+	@python3 tools/run_regress.py $(N) $(B) $(CACHE_LAT)
 
 TB_MMIO := tb/run_mmio.sv
 M7_NAMES := hello fib sort matmul bench

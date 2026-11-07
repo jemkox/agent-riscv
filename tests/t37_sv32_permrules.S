@@ -1,4 +1,4 @@
-# t37: permission-rule pins against the spec (validated vs Sail access_ok).
+# t37: permission-rule pins against the spec (rv32 § access-control rules).
 # e6: W-only page (R=0): M load w/o MXR -> PF13; handler sets MXR and re-execs
 # the load -> returns 0x6161.  e7: R-only page (W=0): M store -> PF15, handler
 # skips the store (mepc+4).  R|W page load still ok.  s0 must be 2 (both faults

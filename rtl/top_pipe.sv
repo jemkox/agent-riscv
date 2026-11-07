@@ -245,7 +245,7 @@ module top_pipe (
           .df_hit(mm_hit_d), .df_fault(mm_fl_d), .df_stall(mm_st_d), .df_pa(mm_pa_d),
           .df_cause(mm_dcause),
           .p_ld(mm_pld), .p_a(mm_paddr), .p_we(mm_pwe), .p_wa(mm_wa), .p_wd(mm_wd),
-          .p_data(ldx_raw));
+          .p_data(ldx_raw), .p_ready(mem_ready));
 `endif
   /* verilator lint_off PINCONNECTEMPTY */
   ctrl   CE(.alu_op(ce_alu_op), .f3(ce_f3), .op7(), .rs1(ce_rs1), .rs2(ce_rs2), .rd(ce_rd),
