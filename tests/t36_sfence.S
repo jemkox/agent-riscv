@@ -33,7 +33,7 @@ _start:
   li t3, 0x9020
   li t2, 0x2CC7        # (0xB<<10)|R|W|A|D|V
   sw t2, 0(t3)         # store to W page ok
-  .word 0x0900000f     # sfence.vma x0,x0 (RV32 encoding)
+  .word 0x12000073       # sfence.vma zero,zero (real SYSTEM encoding, bits[31:25]=0x12>>1)
   lw t2, 0(t3)         # read back the new PTE (stale/flush both ok: PTE page identity)
   lw t2, 0(t3)         # (kept: exercises TLB again)
   li t3, 0x8000

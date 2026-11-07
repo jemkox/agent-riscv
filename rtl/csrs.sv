@@ -47,7 +47,7 @@ module csrs (
   output logic [11:0] cs_mideleg,
   output logic        halt_out,
   output logic        mmu_mode,      // satp bit31: Sv32 enabled (L6)
-  output logic [19:0]   mmu_ppn,       // satp PPN
+  output logic [21:0]   mmu_ppn,       // satp PPN
   output logic        cs_satp_wr     // satp CSR written this cycle (TLB flush)
 `ifndef FPGA
   , output logic [31:0] cs_mip_sw
@@ -179,7 +179,7 @@ module csrs (
   assign cs_mideleg = after_mideleg;
   assign halt_out = halt_wr;
   assign mmu_mode = after_satp[31];
-  assign mmu_ppn = after_satp[19:0];
+  assign mmu_ppn = after_satp[21:0];
   assign cs_satp_wr = cs_write_en && (cs_wsel == 12'h180) && !halt_in && !reset;
 `ifndef FPGA
   assign cs_mip_sw = after_mip_sw;
@@ -266,7 +266,7 @@ module csrs (
           CSR_SSCRATCH: st_sscratch <= newv;
           CSR_SIE: st_sie <= newv;
           CSR_SCNTR: st_scntr <= newv;
-          CSR_SATP: st_satp <= newv & 32'hBFFF_FFFF;
+          CSR_SATP: st_satp <= newv & 32'h803F_FFFF;
           CSR_MCYCLE: st_mcycle <= newv;
           CSR_MINSTRT, CSR_INSTRET: st_minstret <= newv;
           CSR_MINSTRT_H, CSR_INSTRET_H: st_minstret_hi <= newv;

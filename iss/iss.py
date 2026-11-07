@@ -46,7 +46,7 @@ def main(argv):
     SUM_BIT = 0x00040000; MXR_BIT = 0x00080000
     MPP_MASK = 0x1800; SPP_BIT = 0x100; MPIE_BIT = 0x80; SPIE_BIT = 0x20
     MIE_BIT = 0x8; SIE_BIT = 0x2
-    TSR_BIT = 0x00400000; TVM_BIT = 0x00200000
+    TSR_BIT = 0x00400000; TVM_BIT = 0x00100000
     def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
         if n == 0x100:   return cs[0x300] & SSTATUS_MASK   # sstatus = mstatus view
@@ -71,8 +71,8 @@ def main(argv):
             cs[n] = ((v & ~MPP_MASK) | mpp) & mask
         elif n == 0x320:
             cs[n] = v & 0x7
-        elif n == 0x180:   # satp: MODE(bit31)|ASID(30:22)|PPN(21:0)
-            cs[n] = v & 0xBFFFFFFF
+        elif n == 0x180:   # satp: keep MODE(bit31) + PPN[21:0], drop ASID[30:22]
+            cs[n] = ((v & 0x80000000) | (v & 0x3FFFFF)) & mask
             if v & 0x80000000: MMASK[0] = 0xFFFFF
         elif n == 0x308 or n == 0x344:
             mip_sw = v & 0xFFFFFF77
@@ -172,7 +172,7 @@ def main(argv):
         ok = True
         if typ == 0:
             if not x: ok = False
-            if u and priv != 0: ok = False   # supervisor may never fetch U pages
+            if u and priv == 1: ok = False   # S may never fetch U pages (spec); M may
         elif typ == 1:
             if not (r or (w and (cs[0x300] & MXR_BIT))): ok = False
         else:
@@ -419,6 +419,11 @@ def main(argv):
                 elif csr_num == 1:
                     pc = do_trap(3, pc); steps += 1    # EBREAK: mtval = epc
                     continue
+                elif (ins >> 25) & 0x7f == 0x9 and rd == 0:   # SFENCE.VMA (real encoding)
+                    if priv < 1 or (priv == 1 and (cs_get(0x300) & TVM_BIT)):
+                        cause = 2; illegal = True
+                    else:
+                        npc = (pc+4) & mask
                 else:
                     cause = 2; illegal = True
             elif f3 in (1,2,3,5,6,7):
@@ -427,6 +432,8 @@ def main(argv):
                     continue
                 if priv < csr_priv(csr_num):
                     cause = 2; illegal = True   # CSR not accessible at current priv
+                elif csr_num == 0x180 and priv == 1 and (cs_get(0x300) & TVM_BIT):
+                    cause = 2; illegal = True   # satp access illegal in S when mstatus.TVM
                 else:
                     if csr_num == 0x308 or csr_num == 0x344:   # mip: live bits, post-tick view like the RTL
                         old = ((((mtime + 1) >= mtpcmp) << 7) |

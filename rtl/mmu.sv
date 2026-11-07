@@ -8,7 +8,7 @@
 module mmu (
   input  logic        clk, reset,
   input  logic        mode,
-  input  logic [19:0] sppn,
+  input  logic [21:0] sppn,
   input  logic [1:0]  priv,
   input  logic        sum, mxr,
   input  logic        flush,
@@ -28,7 +28,7 @@ module mmu (
 );
   logic [3:0]  tv_i = 0, tv_d = 0;
   logic [19:0] tg_i [0:3], tg_d [0:3];
-  logic [19:0] ppa_i [0:3], ppa_d [0:3];
+  logic [21:0] ppa_i [0:3], ppa_d [0:3];
   logic [6:0]  fg_i [0:3], fg_d [0:3];
   logic [1:0]  s_i = 0, s_d = 0;   // 0 idle 1 pending-read 2 pending-write 3 fault-hold
   logic        own_i = 0, own_d = 0, won_i = 0, won_d = 0;
@@ -52,14 +52,15 @@ module mmu (
     ok = 1;
     if (!rd && !wr) begin
       if (!x) ok = 0;
-      if (u && pr != 2'b00) ok = 0;
+      // S-mode may never fetch U pages (spec); M fetching U pages is allowed.
+      if (u && pr == 2'b01) ok = 0;
     end else begin
       if (rd && !(r || (w && mx))) ok = 0;
       if (wr && !w) ok = 0;
     end
     if (pr == 2'b00 && !u) ok = 0;
     if (pr == 2'b01 && (rd || wr) && u && !sm) ok = 0;
-    return !ok;
+    pbad = !ok;
   endfunction
 
   logic hb_i, hb_d, nw_i, nw_d, hit_ok_i, hit_ok_d;
@@ -75,9 +76,9 @@ module mmu (
   assign if_hit = hit_ok_i;
   assign df_hit = hit_ok_d;
   assign if_pa = hit_ok_i ? (fg_i[tag_i[1:0]][6] ? {ppa_i[tag_i[1:0]][19:10], if_va[21:0]}
-                      : {ppa_i[tag_i[1:0]], if_va[11:0]}) : 32'h0;
+                      : {ppa_i[tag_i[1:0]][19:0], if_va[11:0]}) : 32'h0;
   assign df_pa = hit_ok_d ? (fg_d[tag_d[1:0]][6] ? {ppa_d[tag_d[1:0]][19:10], df_va[21:0]}
-                      : {ppa_d[tag_d[1:0]], df_va[11:0]}) : 32'h0;
+                      : {ppa_d[tag_d[1:0]][19:0], df_va[11:0]}) : 32'h0;
   // A previously faulted entry (s==3) whose latched PTE is now permitted due to
   // a CSR change (SUM/MXR/priv) self-heals: fill the TLB and proceed instead of
   // re-faulting (matches the reference model re-walking every access).
@@ -98,8 +99,8 @@ module mmu (
   assign vp0_i = if_va[21:12];
   assign vp1_d = df_va[31:22];
   assign vp0_d = df_va[21:12];
-  assign l1a_i = {sppn, vp1_i, 2'b0};
-  assign l1a_d = {sppn, vp1_d, 2'b0};
+  assign l1a_i = {sppn[19:0], vp1_i, 2'b0};   // (PPN<<12 + VPN1*4) mod 2^32
+  assign l1a_d = {sppn[19:0], vp1_d, 2'b0};
 
   logic ev_i, ev_d;                 // evaluating latched read this cycle
   logic [2:0] fa, fd;               // 0 none 1 fault 2 write-adi 3 fill 4 descend
@@ -113,7 +114,7 @@ module mmu (
   logic [19:0] nwt_i, nwt_d;
   logic [31:0] nra_i, nra_d, ncap_i, ncap_d, nwda_i, nwda_d, nwdv_i, nwdv_d;
   logic fi_i, fi_d;
-  logic [19:0] fpa_i, fpa_d;
+  logic [21:0] fpa_i, fpa_d;
   logic [6:0]  ffl_i, ffl_d;
 
   always_comb begin
@@ -168,7 +169,7 @@ module mmu (
       else if (heal_i) begin
         // CSRs changed since the fault (SUM/MXR/priv): the latched PTE is now
         // permitted -> fill and let the access proceed (reference model re-walks).
-        ns_i = 2'b00; fi_i = 1; fpa_i = pv_i[29:10];
+        ns_i = 2'b00; fi_i = 1; fpa_i = pv_i[31:10];
         ffl_i = {lvl_i, pv_i[6], pv_i[7], pv_i[1], pv_i[2], pv_i[3], pv_i[4]};
       end
     end
@@ -183,7 +184,7 @@ module mmu (
       if (tag_d != wt_d)                  wd_r = mode && df_on;      // restart / reissue
       else if (heal_d) begin
         // CSR change since the fault made the latched PTE legal -> fill, proceed.
-        ns_d = 2'b00; fi_d = 1; fpa_d = pv_d[29:10];
+        ns_d = 2'b00; fi_d = 1; fpa_d = pv_d[31:10];
         ffl_d = {lvl_d, pv_d[6], pv_d[7], pv_d[1], pv_d[2], pv_d[3], pv_d[4]};
       end
     end
@@ -196,7 +197,7 @@ module mmu (
     // fetch transitions
     if (s_i == 2'b10) begin
       if (won_i) begin
-        ns_i = 2'b00; fi_i = 1; fpa_i = cap_i[29:10];
+        ns_i = 2'b00; fi_i = 1; fpa_i = cap_i[31:10];
         ffl_i = {lvl_i, wdv_i[6], wdv_i[7], wdv_i[1], wdv_i[2], wdv_i[3], wdv_i[4]};
       end else if (g_w_i) begin
         p_we = 1; p_wa = wda_i; p_wd = wdv_i; won_ni = 1;
@@ -206,7 +207,7 @@ module mmu (
       else if (fa == 2) begin
         ns_i = 2'b10; ncap_i = pv_i; nwda_i = ra_i; nwdv_i = pv_i | 32'h40;
       end else if (fa == 3) begin
-        ns_i = 2'b00; fi_i = 1; fpa_i = pv_i[29:10];
+        ns_i = 2'b00; fi_i = 1; fpa_i = pv_i[31:10];
         ffl_i = {lvl_i, pv_i[6], pv_i[7], pv_i[1], pv_i[2], pv_i[3], pv_i[4]};
       end else if (fa == 4 && g_r_i) begin
         ns_i = 2'b01; own_ni = 1; lvl_ni = 0; iss_i = 1;
@@ -226,7 +227,7 @@ module mmu (
     // data transitions
     if (s_d == 2'b10) begin
       if (won_d) begin
-        ns_d = 2'b00; fi_d = 1; fpa_d = cap_d[29:10];
+        ns_d = 2'b00; fi_d = 1; fpa_d = cap_d[31:10];
         ffl_d = {lvl_d, wdv_d[6], wdv_d[7], wdv_d[1], wdv_d[2], wdv_d[3], wdv_d[4]};
       end else if (g_w_d) begin
         p_we = 1; p_wa = wda_d; p_wd = wdv_d; won_nd = 1;
@@ -237,7 +238,7 @@ module mmu (
         ns_d = 2'b10; ncap_d = pv_d; nwda_d = ra_d;
         nwdv_d = pv_d | 32'h40 | (df_w ? 32'h80 : 32'h0);
       end else if (fd == 3) begin
-        ns_d = 2'b00; fi_d = 1; fpa_d = pv_d[29:10];
+        ns_d = 2'b00; fi_d = 1; fpa_d = pv_d[31:10];
         ffl_d = {lvl_d, pv_d[6], pv_d[7], pv_d[1], pv_d[2], pv_d[3], pv_d[4]};
       end else if (fd == 4 && g_r_d) begin
         ns_d = 2'b01; own_nd = 1; lvl_nd = 0; iss_d = 1;

@@ -55,7 +55,7 @@ module csrs_pipe (
   output logic [31:0] cs_trap_pc,
   output logic        halt_out,
   output logic        mmu_mode,      // satp Sv32 on (L6)
-  output logic [19:0] mmu_ppn,       // satp PPN
+  output logic [21:0] mmu_ppn,       // satp PPN
   output logic        cs_satp_wr,    // satp write pulse (TLB flush)
   output logic [1:0]  cs_priv,       // current privilege (L6 MMU)
   output logic        mmu_sum,       // mstatus.SUM (L6)
@@ -126,7 +126,8 @@ module csrs_pipe (
   assign cs_sfence = 0;
 `else
   assign dpf_g = dpf; assign itpf_g = itpf; assign dpc_g = dpf_cause;
-  assign cs_sfence = idex_valid && (idex_insn == 32'h0900_000f);
+  assign cs_sfence = idex_valid && (idex_insn[31:25] == 7'b0001001) &&
+                     (idex_insn[11:7] == 5'b0) && !priv_viol;
 `endif
   always_comb begin
     idex_ld = idex_valid && ld_ok && !dpf_g;
@@ -136,7 +137,14 @@ module csrs_pipe (
     priv_viol = idex_valid && ((ce_mret && (priv_cur != 2'b11)) ||
                               (ce_sret && (priv_cur == 2'b00 ||
                                (priv_cur == 2'b01 && ((mstatus_next & 32'h0040_0000) != 0)))) ||
-                              (ce_csr && (priv_cur < ce_csr_req)));
+                              (ce_csr && (priv_cur < ce_csr_req)) ||
+                              // SFENCE.VMA: illegal in U; illegal in S when mstatus.TVM (rv32 bit20).
+                              ((idex_insn[31:25] == 7'b0001001) && (idex_insn[11:7] == 5'b0) &&
+                               (priv_cur == 2'b00 ||
+                                (priv_cur == 2'b01 && ((mstatus_next & 32'h0010_0000) != 0)))) ||
+                              // satp access in S is illegal when mstatus.TVM (U already covered).
+                              (ce_csr && (idex_insn[31:20] == 12'h180) &&
+                               (priv_cur == 2'b01) && ((mstatus_next & 32'h0010_0000) != 0)));
     // Standard model: synchronous traps are always enabled (mtvec set by software).
     idex_trap = idex_valid && (ce_sys || ce_ill || ce_fetch_bad || priv_viol || dpf_g || itpf_g);
     idex_stop = 1'b0;

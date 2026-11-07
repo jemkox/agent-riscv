@@ -107,7 +107,7 @@
       else if (cs_wsel == CSR_SSCRATCH) after_sscratch = newv;
       else if (cs_wsel == CSR_SIE) after_sie = newv;
       else if (cs_wsel == CSR_SCNTR) after_scntr = newv;
-      else if (cs_wsel == CSR_SATP) after_satp = newv & 32'hBFFF_FFFF;
+      else if (cs_wsel == CSR_SATP) after_satp = newv & 32'h803F_FFFF;
       else if (cs_wsel == CSR_XHALT) after_halt = newv[0] ? 1'b1 : after_halt;
 `ifndef FPGA
       else if (cs_wsel == CSR_MIP || cs_wsel == CSR_MIP_OLD) after_mip_sw = newv & 32'hFFFF_FF77;

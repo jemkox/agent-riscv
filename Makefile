@@ -299,7 +299,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence
+MMU_TESTS := t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -314,7 +314,7 @@ mmu: $(B)/vlt_mmu/run_mmu $(B)/mmu $(B)/mmu/logs $(foreach t,$(MMU_TESTS),$(B)/$
 	@bad=0; for t in $(MMU_TESTS); do \
 	  cp $(B)/$$t.hex $(B)/p.hex; \
 	  ./$(B)/vlt_mmu/run_mmu > $(B)/mmu/logs/$$t.rtl.log; \
-	  python3 iss/iss.py --quiet --pass --log $(B)/mmu/logs/$$t.iss.log $(B)/$$t.bin > /dev/null; \
+	  python3 iss/iss.py --quiet --pass --log $(B)/mmu/logs/$$t.iss.log $(B)/$$t.bin > /dev/null || bad=$$((bad+1)); \
 	  python3 tools/cmp.py $(B)/mmu/logs/$$t.rtl.log $(B)/mmu/logs/$$t.iss.log || bad=$$((bad+1)); \
 	  riscv64-unknown-elf-objdump -t $(B)/$$t.elf | python3 tools/mmuself.py tests/$$t.S $(B)/mmu/logs/$$t.rtl.log || bad=$$((bad+1)); \
 	 done; if [ $$bad -eq 0 ]; then echo "MMU ALL PASS"; else echo "MMU $$bad FAILS"; exit 1; fi

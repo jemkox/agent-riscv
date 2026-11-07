@@ -39,8 +39,13 @@ out = sys.argv[2]
 random.seed(seed)
 K = random.randint(1, 15)
 Bn = random.randint(70, 400)
-prog = [U(1, 28, 0x37), I(K, 31, 0, 31, 0x13)]
-loop_idx = 2
+# Paging class: seed%4==3 runs the body with Sv32 identity mapping on (satp set)
+# + periodic SFENCE.VMA, so the walker/TLB paths get a differential work-out too.
+PAG = (seed % 4 == 3)
+prog = ([U(0x80000, 5, 0x37), I(0x2, 5, 0, 5, 0x13),    # x5 = 0x80000002 (Sv32, root PPN 2)
+         I(0x180, 5, 1, 0, 0x73)]                       # csrrw x0, satp, x5
+        if PAG else []) + [U(0x20 if PAG else 1, 28, 0x37), I(K, 31, 0, 31, 0x13)]
+loop_idx = len(prog)
 bne_idx = loop_idx + Bn + 1
 
 def rdreg():
@@ -87,7 +92,9 @@ KINDS = (
     'add', 'sub', 'sll', 'slt', 'sltu', 'xor', 'srl', 'sra', 'and', 'or', 'fence',
     'mul', 'mulh', 'mulhsu', 'mulhu', 'div', 'divu', 'rem', 'remu',
     'amoadd', 'amoand', 'amoswap', 'amoor', 'amoxor', 'amomax', 'amomaxu',
-    'amomin', 'amominu', 'lr', 'sc')
+     'amomin', 'amominu', 'lr', 'sc')
+
+KINDUSE = KINDS + ('sfence',) if PAG else KINDS
 
 def emit(kind, idx):
     d = rdreg()
@@ -185,6 +192,8 @@ def emit(kind, idx):
         return R(1, b, a, 6, d, 0x33)
     if kind == 'remu':
         return R(1, b, a, 7, d, 0x33)
+    if kind == 'sfence':
+        return 0x12000073
     if kind in ('lr', 'sc'):
         return AMO(0x02 if kind == 'lr' else 0x03, a if kind == 'sc' else 0, 28, d)
     if kind.startswith('amo'):
@@ -195,7 +204,7 @@ def emit(kind, idx):
 
 for i in range(Bn):
     idx = loop_idx + i
-    kind = KINDS[i] if i < len(KINDS) else random.choice(KINDS)
+    kind = KINDUSE[i] if i < len(KINDUSE) else random.choice(KINDUSE)
     prog.append(emit(kind, idx))
 
 prog.append(I(-1, 31, 0, 31, 0x13))
@@ -203,6 +212,20 @@ bi = len(prog)
 prog.append(B(-4 * (bi - loop_idx), 31, 0, 1, 0x63))
 prog.append(I(1, 31, 6, 31, 0x13))      # ori x31,x31,1 -> always odd
 prog.append(I(0x3ff, 31, 1, 0, 0x73))   # csrrw x0,0x3ff,x31 = test-exit halt
+
+if PAG:
+    # Sv32 identity pages inside the 4096-word test RAM: L1 root at PA 0x2000
+    # (PPN 2), L0 at PA 0x3000 (PPN 3); leaves cover VPN0 0..0x3F (PA = VA,
+    # A/D preset to skip AD walks). Code < 0x2000, data base VA 0x20000.
+    NOPW = 0x00000013
+    while len(prog) < 0x800:
+        prog.append(NOPW)
+    assert len(prog) == 0x800
+    prog.append((0x3 << 10) | 0xC1)          # L1[VPN1=0] -> L0: V|A|D, perms zero => interior entry
+    while len(prog) < 0xC00:
+        prog.append(NOPW)
+    for i in range(0x40):
+        prog.append((i << 10) | 0xCF)       # leaf R|W|X|A|D|V, PA=VA
 
 with open(out + '.bin', 'wb') as f:
     for w in prog:

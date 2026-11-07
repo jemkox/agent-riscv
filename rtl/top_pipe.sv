@@ -166,7 +166,7 @@ module top_pipe (
   logic [31:0] mm_pa_i, mm_pa_d, mm_paddr, mm_wa, mm_wd, fetch_pa;
   logic [3:0]  mm_dcause;
   logic mm_pld, mm_pwe, mm_act, mm_dmiss, mm_walk_i, mm_walk_d, mm_inject;
-  logic [19:0] mm_sppn;
+  logic [21:0] mm_sppn;
   logic [1:0]  mm_priv;
   logic mm_sum_b, mm_mxr_b, mm_satpwr, mm_sfence;
   logic ifid_itpf, idex_itpf;
@@ -467,7 +467,9 @@ module top_pipe (
       halt <= 1'b0;
       ifid_valid <= 1'b0; idex_valid <= 1'b0; exmem_valid <= 1'b0; mwb_valid <= 1'b0;
       idex_m_done <= 1'b1;
+`ifndef FPGA
       ifid_itpf <= 1'b0; idex_itpf <= 1'b0;
+`endif
 `ifdef FPGA
       idex_m_go <= 1'b0;
 `endif
@@ -535,7 +537,11 @@ module top_pipe (
         exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;
         exmem_f3 <= ce_f3; exmem_ea <= idex_ea;
         exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
+`ifdef FPGA
+        exmem_spa <= idex_ea;
+`else
         exmem_spa <= (mm_hit_d ? mm_pa_d : idex_ea);
+`endif
         exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
         exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
         exmem_r1 <= a_ex;   // CSR write data: the forwarded rs1 (lw t0,..; csrw mepc,t0 needs the load)
@@ -550,7 +556,11 @@ module top_pipe (
         exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;
         exmem_f3 <= ce_f3; exmem_ea <= idex_ea;
         exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
+`ifdef FPGA
+        exmem_spa <= idex_ea;
+`else
         exmem_spa <= (mm_hit_d ? mm_pa_d : idex_ea);
+`endif
         exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
         exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
         exmem_r1 <= a_ex;   // CSR write data: the forwarded rs1 (lw t0,..; csrw mepc,t0 needs the load)
@@ -558,7 +568,9 @@ module top_pipe (
         idex_valid <= ifid_valid;
         idex_pc <= ifid_pc; idex_insn <= ifid_insn; idex_r1 <= idex_r1_cs; idex_r2 <= ifid_r2_fwd;
         idex_pred_taken <= ifid_pred_taken; idex_pred_tgt <= ifid_pred_tgt;
+`ifndef FPGA
         idex_itpf <= ifid_itpf;
+`endif
         idex_m_done <= ifid_valid ? !(ceif_m && !ceif_ill) : 1'b1;
 `ifdef FPGA
         idex_m_go   <= ifid_valid && ceif_m && !ceif_ill;
@@ -573,7 +585,9 @@ module top_pipe (
           ifid_pred_tgt <= bp_pred_tgt_if;
           ifid_pc <= pc_if; ifid_insn <= fetch_insn;
           pc_if <= bp_pred_if ? bp_pred_tgt_if : (pc_if + 32'd4);
+`ifndef FPGA
           ifid_itpf <= 1'b0;
+`endif
         end
 `ifndef FPGA
         if (mm_inject) begin
