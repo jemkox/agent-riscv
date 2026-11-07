@@ -1578,12 +1578,21 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 - `tools/run_regress.py`: parallel-friendly regress with per-seed 60s sim limit + `#NOTERM` stuck-pipeline detection (the Makefile `regress` loop had no time limit); `tools/mmuself.py` symbol-label regex now parses both objdump `-t` layouts; `make mmu` gates ISS `--pass`.
 - Fresh clone `/home/jemko/agent-workspace/hdl/rv32cpu-check-l6`: `hdl make -s mmu` from a clean tree = `MMU ALL PASS` (proves `mmuself.py` + Makefile gate are committed).
 
+### Review fixes round: 124968f (2026-11-07)
+- `rtl/mmu.sv`: latency-correct walker PTE handshake. The walker assumed CACHE_LAT=1 (latch pv at end of issue cycle, `own=1` same cycle). Added `p_ready` input (top passes cache32 `mem_ready`); grant decisions in `always_comb` stay p_ready-free (no combinational cycle — Verilator flagged the naive version UNOPTFLAT), while the clocked block gates the PTE latch (`if (iss_i && p_ready) pv_i <= p_data`) and the "data landed"/"store committed" state bits (`own_i <= own_ni && (!iss_i || p_ready)`, same for `won` via `g_w_i/g_w_d`). With CACHE_LAT=5/20 the pending-read/write retry branches re-issue the same address until the cold-line fill returns; A/D writes stay held (`p_we` re-issued from `s==2`) until the store commits.
+- `rtl/top_pipe.sv`: `.p_ready(mem_ready)` on the mmu instance.
+- `rtl/mmu.sv` + `iss/iss.py`: S fetching a U page now needs `mstatus.SUM=1` (rv32 Table: S+U fetch allowed iff SUM), was unconditional fault; `pbad` fetch arm gains `&& !sm`, ISS `xlate` typ==0 arm gains `and not (cs[0x300] & SUM_BIT)`. `tests/t35_sv32_perms.S` reordered: the U-page `jalr` IT pin now runs *before* the SUM-setting load handler (it previously encoded the old wrong rule). New `tests/t38_sv32_sumfetch.S`: S-mode with SUM=1 running from an identity X|R|U code page + U-page load/store, pinned via `mmucheck sblock 0` + `gp=1`.
+- `Makefile`: `run_mmu5` (`-DCACHE_LAT=5`) + `mmu5` target (same 9 directed tests through the cold-fill walker); `regress` passes `$(CACHE_LAT)` to the runner.
+- `tools/run_regress.py`: state cache keyed `seed_latN` (a lat5 run must not inherit lat1 verdicts) + duplicate `verify()` pass removed (it had doubled runtime).
+- `tests/t37_sv32_permrules.S` header: "validated vs Sail access_ok" claim dropped (no committed trace comparison exists); pins reworded to the rv32 access-control rules.
+
 ### Metrics (L6, measured after the review fixes)
 | item | value |
 |---|---|
-| `mmu` | 8/8 PASS (t30 47, t31 52, t32 41, t33 64, t34 44, t35 100, t36 49, t37 76 instrs); each `MMUSELF PASSED` + ISS `--pass` |
-| `test`/`test_lat5` | `ALL PASS` (satp=0) |
-| `regress` | `REGRESS ALL PASS (500 seeds)` via `tools/run_regress.py` (paging class included) |
+| `mmu` | 9/9 PASS (t30 47, t31 52, t32 41, t33 64, t34 44, t35 100, t36 49, t37 76, t38 52 instrs); each `MMUSELF PASSED` + ISS `--pass` |
+| `mmu5` (new: `make mmu5` = same 9 directed tests, `run_mmu5` built `-DCACHE_LAT=5`) | 9/9 PASS `MMU5 ALL PASS` — walker cold-PTE-fill paths now exercised |
+| `test` (all suites: TESTS+ui+um+random seeds) | `ALL PASS` at `CACHE_LAT=1`, `CACHE_LAT=5` and `CACHE_LAT=20` (gen.py enables satp on 25% of the random seeds; ISS+cmp lockstep cover the satp-on class at every latency) |
+| `regress` | `REGRESS ALL PASS (200 checked, 0 skipped)` at `CACHE_LAT=1`, `5` and `20` (state cache now keyed `seed_latN`) |
 | `ui`/`um`/`ua`/`si` | ALL PASS |
 | `mi` | 15/15 ALL MI PASS (incl. `illegal` via TVM/TSR gating) |
 | `m7` / `mpp_ret_gate` | ALL M7 PASS / PASS |
