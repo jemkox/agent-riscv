@@ -59,8 +59,10 @@ module mmu (
     ok = 1;
     if (!rd && !wr) begin
       if (!x) ok = 0;
-      // S fetching a U page needs mstatus.SUM (same rule as S loading U pages); M may.
-      if (u && pr == 2'b01 && !sm) ok = 0;
+      // S NEVER fetches a U page: mstatus.SUM only governs S loads/stores (spec
+      // access-control table; arch-test Sv_sv32_upage_mstatus_sum_set_Smode faults
+      // the jalr even with SUM set). M may fetch anything permitted.
+      if (u && pr == 2'b01) ok = 0;
     end else begin
       if (rd && !(r || (w && mx))) ok = 0;
       if (wr && !w) ok = 0;

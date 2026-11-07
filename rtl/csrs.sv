@@ -43,8 +43,8 @@ module csrs (
   output logic [31:0] stvec_next,
   output logic [31:0] sepc_next,
   output logic [1:0]  priv_cur,       // current privilege 3=M 1=S 0=U
-  output logic [11:0] cs_medeleg,
-  output logic [11:0] cs_mideleg,
+  output logic [31:0] cs_medeleg,
+  output logic [31:0] cs_mideleg,
   output logic        halt_out,
   output logic        mmu_mode,      // satp bit31: Sv32 enabled (L6)
   output logic [21:0]   mmu_ppn,       // satp PPN
@@ -100,8 +100,8 @@ module csrs (
   (* keep *) logic [31:0] st_mepc = 0;
   (* keep *) logic [31:0] st_mcause = 0;
   (* keep *) logic [31:0] st_mtval = 0;
-  (* keep *) logic [11:0] st_medeleg = 0;
-  (* keep *) logic [11:0] st_mideleg = 0;  (* keep *) logic [31:0] st_stvec = 0;
+  (* keep *) logic [31:0] st_medeleg = 0;
+  (* keep *) logic [31:0] st_mideleg = 0;  (* keep *) logic [31:0] st_stvec = 0;
   (* keep *) logic [31:0] st_sepc = 0;
   (* keep *) logic [31:0] st_scause = 0;
   (* keep *) logic [31:0] st_stval = 0;
@@ -130,8 +130,8 @@ module csrs (
   logic [31:0] idex_old;
   (* keep *) logic [31:0] after_mstatus, after_mtvec, after_mepc, after_mcause, after_mcycle, after_minstret;
   (* keep *) logic [31:0] after_minstret_hi, after_mcountinhibit, after_mie;
-  (* keep *) logic [11:0] after_medeleg;
-  (* keep *) logic [11:0] after_mideleg;
+  (* keep *) logic [31:0] after_medeleg;
+  (* keep *) logic [31:0] after_mideleg;
   (* keep *) logic [31:0] after_stvec, after_sepc, after_scause, after_stval, after_sscratch, after_sie, after_scntr;
   (* keep *) logic [31:0] after_mtval;
   logic after_halt;
@@ -257,8 +257,8 @@ module csrs (
 `ifndef FPGA
           CSR_MIP, CSR_MIP_OLD: st_mip_sw <= newv & 32'hFFFF_FF77;
 `endif
-          CSR_MEDELEG: st_medeleg <= newv[11:0];
-          CSR_MIDELEG: st_mideleg <= newv[11:0];
+          CSR_MEDELEG: st_medeleg <= newv;
+          CSR_MIDELEG: st_mideleg <= newv;
           CSR_STVEC: st_stvec <= newv;
           CSR_SEPC: st_sepc <= newv;
           CSR_SCAUSE: st_scause <= newv;

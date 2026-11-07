@@ -68,7 +68,7 @@ module csrs_pipe (
   /* verilator lint_off UNUSEDSIGNAL */
   logic [31:0] mstatus_next, mie_next, mtvec_next, mepc_next, stvec_next, sepc_next;
   /* verilator lint_on UNUSEDSIGNAL */
-  logic [11:0] cs_medeleg, cs_mideleg;
+  logic [31:0] cs_medeleg, cs_mideleg;
   logic dpf_g, itpf_g; logic [3:0] dpc_g;
   logic [31:0] insn_cause;
   logic [31:0] insn_tval, trap_tval;
@@ -166,8 +166,8 @@ module csrs_pipe (
     trap_cause = trap_flush ? insn_cause : irq_cause;
     // medeleg/mideleg route U/S-mode traps to the supervisor handler.
     trap_to_sup = (priv_cur != 2'b11) && (trap_flush
-        ? ((((cs_medeleg >> insn_cause[4:0]) & 12'h1) != 0) ? 1'b1 : 1'b0)
-        : ((((cs_mideleg >> irq_cause[4:0]) & 12'h1) != 0) ? 1'b1 : 1'b0));
+        ? ((((cs_medeleg >> insn_cause[4:0]) & 32'h1) != 0) ? 1'b1 : 1'b0)
+        : ((((cs_mideleg >> irq_cause[4:0]) & 32'h1) != 0) ? 1'b1 : 1'b0));
     // Vector mtvec/stvec low bit adds cause*4 to the aligned base.
     cs_trap_pc = ((trap_to_sup ? stvec_next : mtvec_next) & 32'hFFFF_FFFE) |
                  ((((trap_to_sup ? stvec_next : mtvec_next) & 32'h1) != 0)

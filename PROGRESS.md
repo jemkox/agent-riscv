@@ -1581,15 +1581,21 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 ### Review fixes round: 124968f (2026-11-07)
 - `rtl/mmu.sv`: latency-correct walker PTE handshake. The walker assumed CACHE_LAT=1 (latch pv at end of issue cycle, `own=1` same cycle). Added `p_ready` input (top passes cache32 `mem_ready`); grant decisions in `always_comb` stay p_ready-free (no combinational cycle — Verilator flagged the naive version UNOPTFLAT), while the clocked block gates the PTE latch (`if (iss_i && p_ready) pv_i <= p_data`) and the "data landed"/"store committed" state bits (`own_i <= own_ni && (!iss_i || p_ready)`, same for `won` via `g_w_i/g_w_d`). With CACHE_LAT=5/20 the pending-read/write retry branches re-issue the same address until the cold-line fill returns; A/D writes stay held (`p_we` re-issued from `s==2`) until the store commits.
 - `rtl/top_pipe.sv`: `.p_ready(mem_ready)` on the mmu instance.
-- `rtl/mmu.sv` + `iss/iss.py`: S fetching a U page now needs `mstatus.SUM=1` (rv32 Table: S+U fetch allowed iff SUM), was unconditional fault; `pbad` fetch arm gains `&& !sm`, ISS `xlate` typ==0 arm gains `and not (cs[0x300] & SUM_BIT)`. `tests/t35_sv32_perms.S` reordered: the U-page `jalr` IT pin now runs *before* the SUM-setting load handler (it previously encoded the old wrong rule). New `tests/t38_sv32_sumfetch.S`: S-mode with SUM=1 running from an identity X|R|U code page + U-page load/store, pinned via `mmucheck sblock 0` + `gp=1`.
+- `rtl/mmu.sv` + `iss/iss.py`: S fetching a U page now needs `mstatus.SUM=1` (rv32 Table: S+U fetch allowed iff SUM), was unconditional fault; `pbad` fetch arm gains `&& !sm`, ISS `xlate` typ==0 arm gains `and not (cs[0x300] & SUM_BIT)`. `tests/t35_sv32_perms.S` reordered: the U-page `jalr` IT pin now runs *before* the SUM-setting load handler (it previously encoded the old wrong rule). New `tests/t38_sv32_sumfetch.S`: S-mode with SUM=1 running from an identity X|R|U code page + U-page load/store, pinned via `mmucheck sblock 0` + `gp=1`. (Corrected in the 6f0ef34 round below: that fetch rule was a mis-citation — SUM rescues supervisor *load/store* accesses to U pages only; an S-mode *fetch* of a U page faults regardless of SUM, and the round-2 SUM-for-fetch edit was reverted.)
 - `Makefile`: `run_mmu5` (`-DCACHE_LAT=5`) + `mmu5` target (same 9 directed tests through the cold-fill walker); `regress` passes `$(CACHE_LAT)` to the runner.
 - `tools/run_regress.py`: state cache keyed `seed_latN` (a lat5 run must not inherit lat1 verdicts) + duplicate `verify()` pass removed (it had doubled runtime).
 - `tests/t37_sv32_permrules.S` header: "validated vs Sail access_ok" claim dropped (no committed trace comparison exists); pins reworded to the rv32 access-control rules.
 
-### Metrics (L6, measured after the review fixes)
+### Review fixes round: 6f0ef34 (2026-11-07)
+- `rtl/mmu.sv` + `iss/iss.py`: reverted the round-2 SUM-for-fetch rule. `pbad()` fetch arm is back to `if (u && pr == 2'b01) ok = 0;` (S NEVER fetches a U page; SUM removed), ISS `xlate` typ==0 arm: `if u and priv == 1 and typ == 0: ok = False`. Matches arch-test `Sv_sv32_upage_mstatus_sum_set_Smode-00`-style expectation (S-mode jalr to an R|X|U page with `sstatus.SUM` set still faults PF12); SUM now only gates supervisor *load/store* to U pages (data arm `pr==2'b01 && (rd||wr) && u && !sm` unchanged).
+- `tests/t38_sv32_sumfetch.S` rewritten to pin the fault semantics: S with SUM=1 `jalr`s to the X|R|U page VA 0x4000 (PA 0x14000, no A/D yet); the **jalr retires**, the *fetch* at 0x4000 faults PF12 delegated via `medeleg[12]` -> `stvec` S handler; handler pins `scause==12`, `sepc==0x4000` (the faulting fetch VA, not the jalr PC), `stval==0x4000`, `a6=12` via `# mmucheck sdone c` (the mmucheck parser reads the expected value as hex); handler sets `sepc=afterit` and `sret -> gp=1`.
+- `rtl/csrs.sv` + `csrs_comb.svh` + `csrs_pipe.sv` + `clint_dev.sv`: `medeleg`/`mideleg` widened 12 -> 32 bits (writes no longer truncated `newv[11:0]`); real bug found while fixing t38: `medeleg[12]` (page-fetch delegation) was being *dropped* by the 12-bit store — earlier tests only exercised `medeleg[8]` (ecall). `trap_to_sup` shift mask now `32'h1`; `clint_dev.sv` `nd`/`dl` use full-width `~mid`/`mid`.
+- FPGA gate re-run after the widening: netlist unchanged — `fpga_full FPGA_FREQ=13 FPGA_SEED=4`: SB_LUT4 3339, SB_DFF 1259 (Makefile pins kept), post-route 16.89/17.39 MHz PASS.
+
+### Metrics (L6, measured after the 6f0ef34 review fixes)
 | item | value |
 |---|---|
-| `mmu` | 9/9 PASS (t30 47, t31 52, t32 41, t33 64, t34 44, t35 100, t36 49, t37 76, t38 52 instrs); each `MMUSELF PASSED` + ISS `--pass` |
+| `mmu` | 9/9 PASS (t30 47, t31 52, t32 41, t33 64, t34 44, t35 100, t36 49, t37 76, t38 62 instrs); each `MMUSELF PASSED` + ISS `--pass` |
 | `mmu5` (new: `make mmu5` = same 9 directed tests, `run_mmu5` built `-DCACHE_LAT=5`) | 9/9 PASS `MMU5 ALL PASS` — walker cold-PTE-fill paths now exercised |
 | `test` (all suites: TESTS+ui+um+random seeds) | `ALL PASS` at `CACHE_LAT=1`, `CACHE_LAT=5` and `CACHE_LAT=20` (gen.py enables satp on 25% of the random seeds; ISS+cmp lockstep cover the satp-on class at every latency) |
 | `regress` | `REGRESS ALL PASS (200 checked, 0 skipped)` at `CACHE_LAT=1`, `5` and `20` (state cache now keyed `seed_latN`) |
@@ -1597,6 +1603,7 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 | `mi` | 15/15 ALL MI PASS (incl. `illegal` via TVM/TSR gating) |
 | `m7` / `mpp_ret_gate` | ALL M7 PASS / PASS |
 | `fpga_mgate/subw/control/csr` | 4x TEST PASSED (`-DFPGA` builds clean) |
-| `fpga_full` seed4 | SB_LUT4 3339, SB_DFF 1259, Max freq 16.89 MHz (post-route, 13 MHz PASS); Makefile pins 3339/1259 |
-| `all_tests` | runner suites green (individual suites verified this round; `run_all_tests_parallel.py` unchanged — heavy suites rerun green in-repo this session via per-suite calls) |
+| `fpga_full` seed4 | SB_LUT4 3339, SB_DFF 1259, Max freq 17.39/16.89 MHz (post-route, 13 MHz PASS); Makefile pins 3339/1259 (unchanged by the 32-bit medeleg widening) |
+| `all_tests` | `ALL TESTS DONE` (all 8 suites incl. doom 31 frames + mpp_ret + fpga gates) |
+| `lat20` / `coremark` / `freertos` | ALL PASS / COREMARK PASS (CRCs validated, CoreMark/MHz = 3.193) / FREERTOS PASS |
 

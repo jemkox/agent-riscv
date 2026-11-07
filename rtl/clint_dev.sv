@@ -15,7 +15,7 @@ module clint_dev (
   input  logic [31:0] wdata,       // store data (idex sd_raw)
   input  logic [31:0] mstatus_in,  // mstatus after-MEM view (MIE/SIE bits)
   input  logic [31:0] mie_in,      // mie after MEM-stage write
-  input  logic [11:0] mideleg_in,  // interrupt delegation mask after MEM-stage write
+  input  logic [31:0] mideleg_in,  // interrupt delegation mask after MEM-stage write
   input  logic [1:0]  priv_cur,    // current privilege (3=M, 1=S, 0=U)
 `ifndef FPGA
   input  logic [31:0] mip_sw_in,   // software-set mip pending bits (except live MSI/MTI)
@@ -54,10 +54,10 @@ module clint_dev (
   assign mt_out  = mt_next;
   assign cmp_out = {st_cmh, st_cml};
   assign timer_ready = ({st_mth, st_mtl} >= {st_cmh, st_cml});
-  wire [11:0] mid     = mideleg_in;
+  wire [31:0] mid     = mideleg_in;
   wire [31:0] ready   = mie_in & mip_all;
-  wire [31:0] nd      = ready & {20'b0, ~mid};
-  wire [31:0] dl      = ready & {20'b0,  mid};
+  wire [31:0] nd      = ready & ~mid;
+  wire [31:0] dl      = ready & mid;
   wire [31:0] sel     = (priv_cur == 2'b11)
                       ? (((mstatus_in & 32'h0000_0008) != 0) ? (ready | dl) : 32'h0)
                       : ((((mstatus_in & 32'h0000_0008) != 0) ? nd : 32'h0) |

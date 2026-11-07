@@ -9,8 +9,8 @@
             | (cs_rsel == CSR_MSCRATCH ? st_mscratch : 32'h0)
             | (cs_rsel == CSR_MISA     ? st_misa : 32'h0)
             | (cs_rsel == CSR_MIE      ? st_mie : 32'h0)
-            | (cs_rsel == CSR_MEDELEG  ? {20'b0, st_medeleg} : 32'h0)
-            | (cs_rsel == CSR_MIDELEG  ? {20'b0, st_mideleg} : 32'h0)
+            | (cs_rsel == CSR_MEDELEG  ? st_medeleg : 32'h0)
+            | (cs_rsel == CSR_MIDELEG  ? st_mideleg : 32'h0)
             | (cs_rsel == CSR_STVEC    ? st_stvec : 32'h0)
             | (cs_rsel == CSR_SEPC     ? st_sepc : 32'h0)
             | (cs_rsel == CSR_SCAUSE   ? st_scause : 32'h0)
@@ -98,8 +98,8 @@
       else if (cs_wsel == CSR_MCAUSE) after_mcause = newv;
       else if (cs_wsel == CSR_MIE) after_mie = newv;
       else if (cs_wsel == CSR_MSCRATCH) after_mscratch = newv;
-      else if (cs_wsel == CSR_MEDELEG) after_medeleg = newv[11:0];
-      else if (cs_wsel == CSR_MIDELEG) after_mideleg = newv[11:0];
+      else if (cs_wsel == CSR_MEDELEG) after_medeleg = newv;
+      else if (cs_wsel == CSR_MIDELEG) after_mideleg = newv;
       else if (cs_wsel == CSR_STVEC) after_stvec = newv;
       else if (cs_wsel == CSR_SEPC) after_sepc = newv;
       else if (cs_wsel == CSR_SCAUSE) after_scause = newv;
@@ -130,8 +130,8 @@
             | (idex_rsel == CSR_MSCRATCH ? after_mscratch : 32'h0)
             | (idex_rsel == CSR_MISA     ? st_misa : 32'h0)
             | (idex_rsel == CSR_MIE      ? after_mie : 32'h0)
-            | (idex_rsel == CSR_MEDELEG  ? {20'b0, after_medeleg} : 32'h0)
-            | (idex_rsel == CSR_MIDELEG  ? {20'b0, after_mideleg} : 32'h0)
+            | (idex_rsel == CSR_MEDELEG  ? after_medeleg : 32'h0)
+            | (idex_rsel == CSR_MIDELEG  ? after_mideleg : 32'h0)
             | (idex_rsel == CSR_STVEC    ? after_stvec : 32'h0)
             | (idex_rsel == CSR_SEPC     ? after_sepc : 32'h0)
             | (idex_rsel == CSR_SCAUSE   ? after_scause : 32'h0)

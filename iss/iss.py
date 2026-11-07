@@ -172,7 +172,7 @@ def main(argv):
         ok = True
         if typ == 0:
             if not x: ok = False
-            if u and priv == 1 and typ == 0 and not (cs[0x300] & SUM_BIT): ok = False   # S fetch of U page needs SUM; M may
+            if u and priv == 1 and typ == 0: ok = False   # S NEVER fetches a U page; SUM applies to loads/stores only (arch-test Sv_sv32_upage_mstatus_sum_set_Smode faults the jalr even with SUM set)
         elif typ == 1:
             if not (r or (w and (cs[0x300] & MXR_BIT))): ok = False
         else:
