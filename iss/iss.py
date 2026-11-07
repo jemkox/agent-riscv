@@ -20,7 +20,8 @@ def main(argv):
     if binfile is None:
         print("usage: iss.py [--quiet] [--pass] [--log F] BIN"); return 1
     prog = open(binfile,'rb').read()
-    mem = bytearray(0x40000)          # 256 KiB, word index = (a>>2)&0xFFFF
+    mem = bytearray(0x100000)         # 1 MiB; identity mode wraps at MMASK[0] (256 KiB unless Sv32 is on)
+    MMASK = [0x3FFFF]
     mem[0:len(prog)] = prog
     reg = [0]*32
     pc = 0x80000000 if high else 0
@@ -41,7 +42,8 @@ def main(argv):
           0x100:0,0x104:0,0x105:0,0x106:0,0x140:0,0x141:0,0x142:0,0x143:0,0x144:0,0x180:0,
           0x32d:0,0x32e:0,0x32f:0}
     priv = 3   # current privilege: 3 = M, 1 = S, 0 = U
-    SSTATUS_MASK = 0x80001922   # SD | MPP(12:11) | SPP | SPIE | SIE (rv32 encoding.h masks)
+    SSTATUS_MASK = 0x800C1922   # SD | SUM(18) | MXR(19) | MPP(12:11) | SPP | SPIE | SIE (rv32 encoding.h masks)
+    SUM_BIT = 0x00040000; MXR_BIT = 0x00080000
     MPP_MASK = 0x1800; SPP_BIT = 0x100; MPIE_BIT = 0x80; SPIE_BIT = 0x20
     MIE_BIT = 0x8; SIE_BIT = 0x2
     TSR_BIT = 0x00400000; TVM_BIT = 0x00200000
@@ -69,6 +71,9 @@ def main(argv):
             cs[n] = ((v & ~MPP_MASK) | mpp) & mask
         elif n == 0x320:
             cs[n] = v & 0x7
+        elif n == 0x180:   # satp: MODE(bit31)|ASID(30:22)|PPN(21:0)
+            cs[n] = v & 0xBFFFFFFF
+            if v & 0x80000000: MMASK[0] = 0xFFFFF
         elif n == 0x308 or n == 0x344:
             mip_sw = v & 0xFFFFFF77
         elif n == 0xc02:
@@ -143,6 +148,41 @@ def main(argv):
     def tvec(v, c):
         base = v & ~1
         return (base | (((v & 1) * ((c & 31) << 2)))) & mask
+    # ---- Sv32 MMU (L6): two-level walk, hardware A/D update, PF causes 12/13/15.
+    # typ: 0 fetch, 1 load (incl LR), 2 store (incl SC/AMO). Returns PA, or None for
+    # a page fault. With satp.MODE=0 addresses are identity (pre-L6 behavior intact).
+    def xlate(v, typ):
+        if not (cs.get(0x180,0) & 0x80000000): return v
+        root = (cs[0x180] & 0x3FFFFF) << 12
+        vpn = ((v >> 12) & 0x3FF, (v >> 22) & 0x3FF)   # vpn[1] = bits 31:22, vpn[0] = bits 21:12
+        pte = 0; addr = 0; lvl = 0; leaf = False
+        for i in (1,0):
+            addr = root + vpn[i]*4
+            pte = rw(addr)
+            if not (pte & 1): return None
+            ppn = pte >> 10
+            if pte & 0xE:
+                leaf = True; lvl = i
+                if i == 1 and (ppn & 0x3FF): return None  # misaligned megapage
+                break
+            root = ppn << 12
+        if not leaf: return None          # level-0 PTE with no perms is invalid
+        r = (pte >> 1) & 1; w = (pte >> 2) & 1; x = (pte >> 3) & 1; u = (pte >> 4) & 1
+        pa = (((pte >> 10) << 12) | (v & (0x3FFFFF if lvl == 1 else 0xFFF)))
+        ok = True
+        if typ == 0:
+            if not x: ok = False
+            if u and priv != 0: ok = False   # supervisor may never fetch U pages
+        elif typ == 1:
+            if not (r or (w and (cs[0x300] & MXR_BIT))): ok = False
+        else:
+            if not w: ok = False
+        if priv == 0 and not u: ok = False
+        if priv == 1 and u and typ != 0 and not (cs[0x300] & SUM_BIT): ok = False
+        if not ok: return None
+        if not (pte & 0x40) or (typ == 2 and not (pte & 0x80)):
+            w32(addr, (pte | 0x40 | (0x80 if typ == 2 else 0)) & mask)  # A/D hardware update
+        return pa
     def do_trap(c, val=0):
         cs[0x341] = pc & mask; cs[0x343] = val & mask
         if priv != 3 and (cs.get(0x302,0) >> c) & 1:   # delegate to S
@@ -169,12 +209,12 @@ def main(argv):
             cs[0xb02] = (cs[0xb02] + 1) & mask
             if cs[0xb02] == 0: cs[0xb82] = (cs[0xb82] + 1) & mask
         mtime = (mtime + 1) & CLW   # CLINT mtime ticks per retire (not inhibit-gated)
-    def rd8(a):  return mem[a & 0x3FFFF]
-    def rw(a):   return int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+4)],'little')
-    def rw16(a): return int.from_bytes(mem[(a&0x3FFFF):((a&0x3FFFF)+2)],'little')
-    def w8(a,v):  mem[a&0x3FFFF] = v & 0xFF
-    def w16(a,v): mem[(a&0x3FFFF):((a&0x3FFFF)+2)] = (v&0xFFFF).to_bytes(2,'little')
-    def w32(a,v): mem[(a&0x3FFFF):((a&0x3FFFF)+4)] = (v&0xFFFFFFFF).to_bytes(4,'little')
+    def rd8(a):  return mem[a & MMASK[0]]
+    def rw(a):   return int.from_bytes(mem[(a&MMASK[0]):((a&MMASK[0])+4)],'little')
+    def rw16(a): return int.from_bytes(mem[(a&MMASK[0]):((a&MMASK[0])+2)],'little')
+    def w8(a,v):  mem[a&MMASK[0]] = v & 0xFF
+    def w16(a,v): mem[(a&MMASK[0]):((a&MMASK[0])+2)] = (v&0xFFFF).to_bytes(2,'little')
+    def w32(a,v): mem[(a&MMASK[0]):((a&MMASK[0])+4)] = (v&0xFFFFFFFF).to_bytes(4,'little')
     def sx(v,n):  return v - (1<<n) if v & (1<<(n-1)) else v
     def idiv(a,b):
         if b == 0: return -1
@@ -190,8 +230,11 @@ def main(argv):
     stopped = 0
     res_v = False; res_a = 0   # LR/SC reservation (rv32A, sim CPU)
     while steps < LIM:
-        a = pc & 0x3FFFF
-        ins = int.from_bytes(mem[a:a+4],'little')
+        apa = xlate(pc, 0)
+        if apa is None:
+            pc = do_trap(12, pc); steps += 1
+            continue
+        ins = rw(apa)
         opc = ins & 0x7F; f3 = (ins>>12)&7; rd = (ins>>7)&31
         r1 = (ins>>15)&31; r2 = (ins>>20)&31
         iimm = sx((ins>>20)&0xFFF,12); simm = sx(((ins>>20)&0xFE0)|((ins>>7)&31),12)
@@ -253,38 +296,44 @@ def main(argv):
                 illegal = True
             elif ea & 3:
                 cause = 4; illegal = True
-            elif (ea & 0xFFFF0000) == 0x02000000 or (ea & 0xFFFFF000) == 0x10000000:
-                illegal = True
-            elif f5 == 0x02 and rs2f == 0:  # LR.W
-                wv = rw(ea)
-                res_v = True; res_a = ea
-            elif f5 == 0x03:               # SC.W
-                ok = res_v and res_a == ea
-                if ok:
-                    w32(ea, a1)
-                    slog = (1, ea, a1 & mask, 0xF)
-                res_v = False
-                wv = 0 if ok else 1
-            elif f5 in (0x00,0x01,0x04,0x08,0x0C,0x10,0x14,0x18,0x1C):  # AMO*.W
-                old_v = rw(ea)
-                if   f5 == 0x00: new = (old_v + a1) & mask
-                elif f5 == 0x01: new = a1 & mask
-                elif f5 == 0x04: new = (old_v ^ a1) & mask
-                elif f5 == 0x08: new = (old_v | a1) & mask
-                elif f5 == 0x0C: new = (old_v & a1) & mask
-                elif f5 == 0x10: new = old_v if sx(old_v,32) < sx(a1,32) else a1
-                elif f5 == 0x14: new = old_v if sx(old_v,32) > sx(a1,32) else a1
-                elif f5 == 0x18: new = old_v if old_v < a1 else a1
-                else:            new = old_v if old_v > a1 else a1
-                w32(ea, new)
-                if res_a == ea: res_v = False
-                slog = (1, ea, new & mask, 0xF)
-                wv = old_v
             else:
-                illegal = True
+                pa = xlate(ea, 1 if f5 == 0x02 else 2)
+                if pa is None:
+                    cause = 13 if f5 == 0x02 else 15; illegal = True
+                elif (pa & 0xFFFF0000) == 0x02000000 or (pa & 0xFFFFF000) == 0x10000000:
+                    illegal = True   # atomics to MMIO stay illegal, like pre-L6
+                elif f5 == 0x02 and rs2f == 0:  # LR.W
+                    wv = rw(pa)
+                    res_v = True; res_a = ea
+                elif f5 == 0x03:               # SC.W
+                    ok = res_v and res_a == ea
+                    if ok:
+                        w32(pa, a1)
+                        slog = (1, pa, a1 & mask, 0xF)
+                    res_v = False
+                    wv = 0 if ok else 1
+                elif f5 in (0x00,0x01,0x04,0x08,0x0C,0x10,0x14,0x18,0x1C):  # AMO*.W
+                    old_v = rw(pa)
+                    if   f5 == 0x00: new = (old_v + a1) & mask
+                    elif f5 == 0x01: new = a1 & mask
+                    elif f5 == 0x04: new = (old_v ^ a1) & mask
+                    elif f5 == 0x08: new = (old_v | a1) & mask
+                    elif f5 == 0x0C: new = (old_v & a1) & mask
+                    elif f5 == 0x10: new = old_v if sx(old_v,32) < sx(a1,32) else a1
+                    elif f5 == 0x14: new = old_v if sx(old_v,32) > sx(a1,32) else a1
+                    elif f5 == 0x18: new = old_v if old_v < a1 else a1
+                    else:            new = old_v if old_v > a1 else a1
+                    w32(ea, new)
+                    if res_a == ea: res_v = False
+                    slog = (1, ea, new & mask, 0xF)
+                    wv = old_v
+                else:
+                    illegal = True
         elif opc == 0x03: # LOAD
             ea = (a0 + iimm) & 0xFFFFFFFF
-            clw = clint_off(ea)
+            pa = xlate(ea, 1)
+            if pa is None: cause = 13; illegal = True; pa = ea
+            clw = clint_off(pa)
             if clw is not None:
                 v32 = ({0:msip,0x800:(mtpcmp & mask),0x804:(mtpcmp>>32)&mask,
                         0x808:(mtime & mask),0x80c:(mtime>>32)&mask,
@@ -297,27 +346,29 @@ def main(argv):
                     v = (v32 >> (8*(ea&3))) & 0xFF; ldrd = sx(v,8) if f3==0 else v
                 else: illegal = True
             elif f3 == 2:
-                ldrd = rw(ea)
+                ldrd = rw(pa)
             elif f3 in (1,5):
-                v = rw16(ea); ldrd = sx(v,16) if f3 == 1 else v
+                v = rw16(pa); ldrd = sx(v,16) if f3 == 1 else v
             elif f3 in (0,4):
-                v = rd8(ea); ldrd = sx(v,8) if f3 == 0 else v
+                v = rd8(pa); ldrd = sx(v,8) if f3 == 0 else v
             else: illegal = True
             wv = ldrd
         elif opc == 0x23: # STORE
             ea = (a0 + simm) & 0xFFFFFFFF
-            if f3 == 2:
-                st = (32, ea, a1)
-                slog = (1, ea, a1, 0xF)
+            pa = xlate(ea, 2)
+            if pa is None: cause = 15; illegal = True; pa = ea
+            elif f3 == 2:
+                st = (32, pa, a1)
+                slog = (1, pa, a1, 0xF)
             elif f3 in (1,5):
                 half = a1 & 0xFFFF
-                st = (16, ea, half)
-                slog = (1, ea, half << (16 * ((ea >> 1) & 1)),
+                st = (16, pa, half)
+                slog = (1, pa, half << (16 * ((ea >> 1) & 1)),
                         3 << (2 * ((ea >> 1) & 1)))
             elif f3 in (0,4):
                 byte = a1 & 0xFF
-                st = (8, ea, byte)
-                slog = (1, ea, byte << (8 * (ea & 3)),
+                st = (8, pa, byte)
+                slog = (1, pa, byte << (8 * (ea & 3)),
                         1 << (ea & 3))
             else: illegal = True
         elif opc == 0x63: # BRANCH
@@ -412,7 +463,7 @@ def main(argv):
         if illegal:
             pc = do_trap(cause, ins if cause == 2 else
                          (npc if cause == 0 else
-                          (ea if cause in (4,5,6,7) else 0))); steps += 1
+                          (ea if cause in (4,5,6,7,13,15) else 0))); steps += 1
             continue
         if irq_p:
             pc = do_irq(); steps += 1

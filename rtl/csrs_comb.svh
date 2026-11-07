@@ -18,6 +18,7 @@
             | (cs_rsel == CSR_SSCRATCH ? st_sscratch : 32'h0)
             | (cs_rsel == CSR_SIE      ? st_sie : 32'h0)
             | (cs_rsel == CSR_SCNTR    ? st_scntr : 32'h0)
+            | (cs_rsel == CSR_SATP     ? st_satp : 32'h0)
 `ifndef FPGA
             | ((cs_rsel == CSR_MIP || cs_rsel == CSR_MIP_OLD) ? mip_live : 32'h0)
 `endif
@@ -71,6 +72,7 @@
     after_scntr = st_scntr;
     after_halt = st_halt;
     after_mscratch = st_mscratch;
+    after_satp = st_satp;
     after_priv = st_priv;
 `ifndef FPGA
     after_mip_sw = st_mip_sw;
@@ -105,6 +107,7 @@
       else if (cs_wsel == CSR_SSCRATCH) after_sscratch = newv;
       else if (cs_wsel == CSR_SIE) after_sie = newv;
       else if (cs_wsel == CSR_SCNTR) after_scntr = newv;
+      else if (cs_wsel == CSR_SATP) after_satp = newv & 32'hBFFF_FFFF;
       else if (cs_wsel == CSR_XHALT) after_halt = newv[0] ? 1'b1 : after_halt;
 `ifndef FPGA
       else if (cs_wsel == CSR_MIP || cs_wsel == CSR_MIP_OLD) after_mip_sw = newv & 32'hFFFF_FF77;
@@ -136,6 +139,7 @@
             | (idex_rsel == CSR_SSCRATCH ? after_sscratch : 32'h0)
             | (idex_rsel == CSR_SIE      ? after_sie : 32'h0)
             | (idex_rsel == CSR_SCNTR    ? after_scntr : 32'h0)
+            | (idex_rsel == CSR_SATP     ? after_satp : 32'h0)
 `ifndef FPGA
              | ((idex_rsel == CSR_MIP || idex_rsel == CSR_MIP_OLD)
                 ? (mip_in | (after_mip_sw & 32'hFFFF_FF77)) : 32'h0)

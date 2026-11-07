@@ -28,11 +28,19 @@ module csrs_pipe (
   input  logic [31:0] exmem_r1,
   input  logic [31:0] idex_ea,
   input  logic [31:0] idex_sd_raw,
+`ifndef FPGA
+  input  logic        dpf,           // data page fault at EX (L6 MMU)
+  input  logic [3:0]  dpf_cause,     // 13/15
+  input  logic        itpf,          // EX insn is an injected IT page fault
+`endif
   input  logic        clint_commit,
   input  logic        wfi_tick,
   output logic        idex_ld,
   output logic        idex_st,
   output logic        idex_trap,
+`ifndef FPGA
+  output logic        cs_sfence,     // SFENCE.VMA retiring (TLB flush pulse)
+`endif
   output logic        idex_stop,
   output logic        idex_csr_en,
   output logic        idex_csr_wen,
@@ -46,6 +54,12 @@ module csrs_pipe (
   output logic [31:0] cs_sepc,
   output logic [31:0] cs_trap_pc,
   output logic        halt_out,
+  output logic        mmu_mode,      // satp Sv32 on (L6)
+  output logic [19:0] mmu_ppn,       // satp PPN
+  output logic        cs_satp_wr,    // satp write pulse (TLB flush)
+  output logic [1:0]  cs_priv,       // current privilege (L6 MMU)
+  output logic        mmu_sum,       // mstatus.SUM (L6)
+  output logic        mmu_mxr,       // mstatus.MXR (L6)
   output logic [31:0] clint_ld_data,
   output logic        irq_pending,
   output logic        timer_ready
@@ -57,6 +71,7 @@ module csrs_pipe (
   logic [31:0] mstatus_next, mie_next, mtvec_next, mepc_next, stvec_next, sepc_next;
   /* verilator lint_on UNUSEDSIGNAL */
   logic [11:0] cs_medeleg, cs_mideleg;
+  logic dpf_g, itpf_g; logic [3:0] dpc_g;
   logic [31:0] insn_cause;
   logic [31:0] insn_tval, trap_tval;
   logic [31:0] brimm, jimm;
@@ -83,7 +98,8 @@ module csrs_pipe (
 `endif
             .mstatus_next(mstatus_next), .mie_next(mie_next), .mtvec_next(mtvec_next),
             .mepc_next(mepc_next), .stvec_next(stvec_next), .sepc_next(sepc_next),
-            .priv_cur(priv_cur), .cs_medeleg(cs_medeleg), .cs_mideleg(cs_mideleg), .halt_out(halt_out)
+            .priv_cur(priv_cur), .cs_medeleg(cs_medeleg), .cs_mideleg(cs_mideleg), .halt_out(halt_out),
+            .mmu_mode(mmu_mode), .mmu_ppn(mmu_ppn), .cs_satp_wr(cs_satp_wr)
 `ifndef FPGA
             , .cs_mip_sw(mip_sw_next)
 `endif
@@ -102,9 +118,19 @@ module csrs_pipe (
 `endif
             );
 
+  assign cs_priv = priv_cur;
+  assign mmu_sum = mstatus_next[18];
+  assign mmu_mxr = mstatus_next[19];
+`ifdef FPGA
+  assign dpf_g = 0; assign itpf_g = 0; assign dpc_g = 0;
+  assign cs_sfence = 0;
+`else
+  assign dpf_g = dpf; assign itpf_g = itpf; assign dpc_g = dpf_cause;
+  assign cs_sfence = idex_valid && (idex_insn == 32'h0900_000f);
+`endif
   always_comb begin
-    idex_ld = idex_valid && ld_ok;
-    idex_st = idex_valid && st_ok;
+    idex_ld = idex_valid && ld_ok && !dpf_g;
+    idex_st = idex_valid && st_ok && !dpf_g;
     // Privilege checks: a CSR/mret/sret whose required privilege exceeds the
     // current mode faults as an illegal instruction instead of executing.
     priv_viol = idex_valid && ((ce_mret && (priv_cur != 2'b11)) ||
@@ -112,13 +138,15 @@ module csrs_pipe (
                                (priv_cur == 2'b01 && ((mstatus_next & 32'h0040_0000) != 0)))) ||
                               (ce_csr && (priv_cur < ce_csr_req)));
     // Standard model: synchronous traps are always enabled (mtvec set by software).
-    idex_trap = idex_valid && (ce_sys || ce_ill || ce_fetch_bad || priv_viol);
+    idex_trap = idex_valid && (ce_sys || ce_ill || ce_fetch_bad || priv_viol || dpf_g || itpf_g);
     idex_stop = 1'b0;
     idex_csr_en = idex_valid && ce_csr && !priv_viol;
     idex_csr_wen = idex_csr_en && ((ce_f3 == 3'b001) || (ce_f3 == 3'b101) ||
       ((ce_f3 == 3'b010 || ce_f3 == 3'b011) && ce_rs1 != 5'd0) ||
       ((ce_f3 == 3'b110 || ce_f3 == 3'b111) && idex_insn[19:15] != 5'd0));
-    if (idex_insn == 32'h0010_0073)      insn_cause = 32'd3;           // EBREAK
+    if (itpf_g)                          insn_cause = 32'd12;          // IT page fault
+    else if (dpf_g)                      insn_cause = {28'b0, dpc_g};  // 13/15
+    else if (idex_insn == 32'h0010_0073) insn_cause = 32'd3;           // EBREAK
     else if (idex_insn == 32'h0000_0073) insn_cause = 32'h8 | {30'b0, priv_cur}; // ECALL: M 11, S 9, U 8
     else if (ce_fetch_bad)               insn_cause = 32'd0;           // misaligned fetch
     else                                 insn_cause = 32'd2;           // illegal
@@ -142,7 +170,9 @@ module csrs_pipe (
     // EBREAK reports its address, illegal instructions report the encoding.
     brimm = {{20{idex_insn[31]}}, idex_insn[7], idex_insn[30:25], idex_insn[11:8], 1'b0};
     jimm  = {{11{idex_insn[31]}}, idex_insn[31], idex_insn[19:12], idex_insn[20], idex_insn[30:21], 1'b0};
-    if (ce_fetch_bad)     insn_tval = (idex_insn[6:2] == 5'b11011) ? (idex_pc + jimm)
+    if (itpf_g)         insn_tval = idex_pc;                // IT PF: faulting fetch VA
+    else if (dpf_g)       insn_tval = idex_ea;                // DPF: EA
+    else if (ce_fetch_bad) insn_tval = (idex_insn[6:2] == 5'b11011) ? (idex_pc + jimm)
                           : ((idex_insn[6:2] == 5'b11000) ? (idex_pc + brimm)
                              : (idex_ea & 32'hFFFF_FFFE));
     else if (ce_sys)      insn_tval = (idex_insn == 32'h0010_0073) ? idex_pc : 32'h0;

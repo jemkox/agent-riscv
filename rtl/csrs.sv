@@ -45,7 +45,10 @@ module csrs (
   output logic [1:0]  priv_cur,       // current privilege 3=M 1=S 0=U
   output logic [11:0] cs_medeleg,
   output logic [11:0] cs_mideleg,
-  output logic        halt_out
+  output logic        halt_out,
+  output logic        mmu_mode,      // satp bit31: Sv32 enabled (L6)
+  output logic [19:0]   mmu_ppn,       // satp PPN
+  output logic        cs_satp_wr     // satp CSR written this cycle (TLB flush)
 `ifndef FPGA
   , output logic [31:0] cs_mip_sw
 `endif
@@ -78,6 +81,7 @@ module csrs (
   localparam CSR_SSCRATCH  = 12'h140;
   localparam CSR_SIE       = 12'h104;
   localparam CSR_SCNTR     = 12'h106;
+  localparam CSR_SATP      = 12'h180;
   localparam CSR_SSTATUS   = 12'h100;
   localparam MSTATUS_MPP   = 32'h0000_1800;
   localparam MSTATUS_SPP   = 32'h0000_0100;
@@ -85,7 +89,7 @@ module csrs (
   localparam MSTATUS_SPIE  = 32'h0000_0020;
   localparam MSTATUS_MIE   = 32'h0000_0008;
   localparam MSTATUS_SIE   = 32'h0000_0002;
-  localparam SSTATUS_MASK  = 32'h8000_1922;
+  localparam SSTATUS_MASK  = 32'h800C1922;
   localparam MISA_VAL      = 32'h4000_1101;
 
   // ---- machine + supervisor architect state (all kept for synthesis) ----
@@ -104,6 +108,7 @@ module csrs (
   (* keep *) logic [31:0] st_sscratch = 0;
   (* keep *) logic [31:0] st_sie = 0;
   logic [31:0] st_scntr = 0;
+  (* keep *) logic [31:0] st_satp = 0;   // satp: mode|ASID|PPN (L6 MMU)
   logic [31:0] st_mcycle;
   logic [31:0] st_minstret;
   logic [31:0] st_minstret_hi;
@@ -132,6 +137,7 @@ module csrs (
   logic after_halt;
   logic [1:0] after_priv;
   logic [31:0] after_mscratch;
+  logic [31:0] after_satp;
 `ifndef FPGA
   (* keep *) logic [31:0] after_mip_sw;
 `endif
@@ -172,6 +178,9 @@ module csrs (
   assign cs_medeleg = after_medeleg;
   assign cs_mideleg = after_mideleg;
   assign halt_out = halt_wr;
+  assign mmu_mode = after_satp[31];
+  assign mmu_ppn = after_satp[19:0];
+  assign cs_satp_wr = cs_write_en && (cs_wsel == 12'h180) && !halt_in && !reset;
 `ifndef FPGA
   assign cs_mip_sw = after_mip_sw;
 `endif
@@ -257,6 +266,7 @@ module csrs (
           CSR_SSCRATCH: st_sscratch <= newv;
           CSR_SIE: st_sie <= newv;
           CSR_SCNTR: st_scntr <= newv;
+          CSR_SATP: st_satp <= newv & 32'hBFFF_FFFF;
           CSR_MCYCLE: st_mcycle <= newv;
           CSR_MINSTRT, CSR_INSTRET: st_minstret <= newv;
           CSR_MINSTRT_H, CSR_INSTRET_H: st_minstret_hi <= newv;
@@ -266,6 +276,7 @@ module csrs (
         endcase
       end
       st_medeleg <= after_medeleg;
+      st_satp <= after_satp;
       st_mideleg <= after_mideleg;
 `ifdef FPGA
       // impossible-counter XOR guards: architecturally unreachable, but they keep

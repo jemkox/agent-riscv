@@ -266,6 +266,13 @@ module cache32 (
                    amo_sc_done ? (amo_ok_now ? 32'h0 : 32'h1) : ld_norm) : 32'h0;
 `endif
     clint_commit = clint_store && dc_ready_now;  end
+`ifdef SCDBG2
+  always_comb
+    if (idex_valid && (idex_ld || idex_st) && !reset && !halt)
+      $display("CACC ea=%08x ld=%b st=%b ready=%b norm=%08x raw=%08x hit=%b rbwb=%08x idx=%x tag=%x ep=%0d epoch=%0d dt=%08x",
+               ea, idex_ld, idex_st, dc_ready_now, ld_norm, ld_raw, dc_hit, rbwb(ea), d_idx, d_tag,
+               dc_ep[d_idx], epoch, dc_tag[d_idx]);
+`endif
 `ifdef DOOM_BIG
   assign key_hit = key_load && dc_ready_now;
 `endif

@@ -49,7 +49,8 @@ module top_pipe (
   logic [31:0] ifid_pc = 0, ifid_insn = 0, idex_pc = 0, idex_insn = 0, idex_r1 = 0, idex_r2 = 0;
   logic [31:0] exmem_pc = 0, exmem_insn = 0, exmem_result = 0, exmem_wbval = 0, exmem_ea = 0,
                exmem_sd_log = 0;
-  logic [31:0] mwb_pc = 0, mwb_insn = 0, mwb_sa = 0, mwb_sd = 0, mwb_wv = 0, exmem_ld_raw = 0;
+  logic [31:0] mwb_pc = 0, mwb_insn = 0, mwb_sd = 0, mwb_wv = 0, exmem_ld_raw = 0;
+  logic [31:0] mwb_spa = 0, exmem_spa = 0;
   logic        fetch_ready, mem_ready;
   logic [4:0]  exmem_rd = 0, mwb_rd = 0, ce_rs1, ce_rs2, ce_rd, ceif_rs1, ceif_rs2;
   logic [31:0] a_ex, b_ex, aluB_ex, br_tgt_ex, iimm, simm, bimm, uimm, jimm, fetch_insn, rf_r1, rf_r2;
@@ -159,19 +160,48 @@ module top_pipe (
 `endif
             .wena(mwb_valid && mwb_wben && (mwb_rd != 5'd0) && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
 `endif
+`ifndef FPGA
+  // ---- L6 Sv32 MMU (Sv48-lite: 2-level walk) ----
+  logic mm_mode, mm_hit_i, mm_fl_i, mm_st_i, mm_hit_d, mm_fl_d, mm_st_d;
+  logic [31:0] mm_pa_i, mm_pa_d, mm_paddr, mm_wa, mm_wd, fetch_pa;
+  logic [3:0]  mm_dcause;
+  logic mm_pld, mm_pwe, mm_act, mm_dmiss, mm_walk_i, mm_walk_d, mm_inject;
+  logic [19:0] mm_sppn;
+  logic [1:0]  mm_priv;
+  logic mm_sum_b, mm_mxr_b, mm_satpwr, mm_sfence;
+  logic ifid_itpf, idex_itpf;
+  assign mm_act = mm_pld || mm_pwe;
+  assign mm_dmiss = mm_mode && (idex_valid && (ce_ld || ce_st || ce_amo)) && !mm_hit_d;
+  assign mm_walk_i = mm_st_i && !mm_fl_i && !(mm_fl_d && idex_valid && (ce_ld||ce_st||ce_amo));
+  assign mm_walk_d = mm_st_d && !mm_fl_d && !(idex_itpf && idex_valid);
+  assign mm_inject = mm_fl_i && !(idex_itpf && idex_valid) && !(ifid_itpf && ifid_valid);
+  assign fetch_pa = (mm_mode && mm_hit_i) ? mm_pa_i : pc_if;
+`endif
   cache32 MM(.clk(clk), .reset(reset), .halt(halt), .lwe(lwe), .lwa(lwa), .lwd(lwd),
 `ifdef DOOM_BIG
              .dbg_re(dbg_re), .dbg_ra(dbg_ra), .dbg_rd(dbg_rd),
              .key_in(key_in), .key_hit(key_hit),
              .stat_icm(stat_icm), .stat_dcm(stat_dcm),
 `endif
-             .pc_if(pc_if), .fetch_insn(fetch_insn), .fetch_ready(fetch_ready),
+`ifdef FPGA
+             .pc_if(pc_if),
+`else
+             .pc_if(fetch_pa),
+`endif
+             .fetch_insn(fetch_insn), .fetch_ready(fetch_ready),
              // No memory access while a load-use stall holds this instruction: its address/data operands
              // are not valid yet, and a store would write a wrong address (it is redone after the stall).
+`ifdef FPGA
              .idex_valid(idex_valid && !stall && !mem_kill_now), .idex_ld(idex_ld), .idex_st(idex_st),
              .ea(idex_ea), .sd_raw(idex_sd_raw), .ssz(idex_ssz),
+`else
+             .idex_valid((idex_valid && !stall && !mem_kill_now && !mm_dmiss) || mm_act),
+             .idex_ld(mm_act ? mm_pld : idex_ld), .idex_st(mm_act ? mm_pwe : idex_st),
+             .ea(mm_act ? (mm_pwe ? mm_wa : mm_paddr) : (mm_hit_d ? mm_pa_d : idex_ea)),
+             .sd_raw(mm_act ? mm_wd : idex_sd_raw), .ssz(mm_act ? 2'b10 : idex_ssz),
+`endif
 `ifndef FPGA
-             .amo_v(idex_valid && ce_amo && !ce_ex_ill && !stall && !mem_kill_now),
+             .amo_v(idex_valid && ce_amo && !ce_ex_ill && !stall && !mem_kill_now && !mm_act && !mm_dmiss),
              .amo_lr(ce_lr && idex_valid && !ce_ex_ill && !stall && !mem_kill_now),
              .amo_sc(ce_sc && idex_valid && !ce_ex_ill && !stall && !mem_kill_now), .amo5(ce_amo5),
              .amo_new(amo_new), .amo_sc_ok(amo_sc_ok),
@@ -184,6 +214,19 @@ module top_pipe (
               .uart_rx_pending(uart_rx_pending), .uart_tx_ready(uart_tx_ready)
 `endif
 );
+`ifndef FPGA
+  mmu MMU(.clk(clk), .reset(reset), .mode(mm_mode), .sppn(mm_sppn),
+          .priv(mm_priv), .sum(mm_sum_b), .mxr(mm_mxr_b),
+          .flush(mm_sfence || mm_satpwr),
+          .if_va(pc_if), .if_on(1'b1),
+          .if_hit(mm_hit_i), .if_fault(mm_fl_i), .if_stall(mm_st_i), .if_pa(mm_pa_i),
+          .df_va(idex_ea), .df_on(idex_valid && (ce_ld || ce_st || ce_amo)),
+          .df_r(ce_ld || (ce_amo && !ce_sc)), .df_w(ce_st || (ce_amo && !ce_lr)),
+          .df_hit(mm_hit_d), .df_fault(mm_fl_d), .df_stall(mm_st_d), .df_pa(mm_pa_d),
+          .df_cause(mm_dcause),
+          .p_ld(mm_pld), .p_a(mm_paddr), .p_we(mm_pwe), .p_wa(mm_wa), .p_wd(mm_wd),
+          .p_data(ldx_raw));
+`endif
   /* verilator lint_off PINCONNECTEMPTY */
   ctrl   CE(.alu_op(ce_alu_op), .f3(ce_f3), .op7(), .rs1(ce_rs1), .rs2(ce_rs2), .rd(ce_rd),
             .a_sel(), .b_sel(ce_bsel), .is_ld(ce_ld), .is_st(ce_st), .is_br(ce_br),
@@ -340,7 +383,7 @@ module top_pipe (
 `ifdef FPGA
     m_stall = (idex_m_go && (!idex_m_done || !fetch_ready)) || mem_pend;
 `else
-    m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend || wfi_wait;
+    m_stall = (idex_valid && ce_m && !ce_ill && !idex_m_done) || mem_pend || wfi_wait || mm_walk_i || mm_walk_d;
 `endif
   end
 
@@ -381,6 +424,11 @@ module top_pipe (
             .idex_ea(idex_ea), .idex_sd_raw(idex_sd_raw),
             .clint_commit(clint_commit), .clint_ld_data(clint_ld), .irq_pending(irq_pend),
             .timer_ready(timer_ready), .wfi_tick(wfi_tick),
+`ifndef FPGA
+            .dpf(mm_fl_d), .dpf_cause(mm_dcause), .itpf(idex_itpf),
+            .cs_sfence(mm_sfence), .mmu_mode(mm_mode), .mmu_ppn(mm_sppn),
+            .cs_satp_wr(mm_satpwr), .cs_priv(mm_priv), .mmu_sum(mm_sum_b), .mmu_mxr(mm_mxr_b),
+`endif
             .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .sret_flush(sret_flush), .mret_pc(mret_pc),
             .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_sepc(cs_sepc),
             .cs_trap_pc(cs_trap_pc), .halt_out(halt_out));
@@ -400,6 +448,14 @@ module top_pipe (
   always_comb if (idex_valid && ce_amo)
     $display("DBGTOP idex=%08x valid=%0d stall=%0d ce_sc=%0d ce_lr=%0d idex_ld=%0d idex_st=%0d",
              idex_insn, idex_valid, stall, ce_sc, ce_lr, idex_ld, idex_st);
+  always_comb begin
+    static int dbg_cyc = 0;
+    dbg_cyc = dbg_cyc + 1;
+    if (mm_mode || dbg_cyc < 400)
+      $display("MMUD pld=%b pwe=%b pa=%08x hit_i=%b hit_d=%b st_i=%b st_d=%b fl_i=%b fl_d=%b mode=%b pc=%08x ldx=%08x idexv=%b idex=%08x stall=%b mstall=%b",
+               mm_pld, mm_pwe, mm_paddr, mm_hit_i, mm_hit_d, mm_st_i, mm_st_d, mm_fl_i, mm_fl_d, mm_mode, pc_if,
+               ldx_raw, idex_valid, idex_insn, stall, m_stall);
+  end
 `endif
   always_ff @(posedge clk) begin
     if (reset) begin
@@ -411,6 +467,7 @@ module top_pipe (
       halt <= 1'b0;
       ifid_valid <= 1'b0; idex_valid <= 1'b0; exmem_valid <= 1'b0; mwb_valid <= 1'b0;
       idex_m_done <= 1'b1;
+      ifid_itpf <= 1'b0; idex_itpf <= 1'b0;
 `ifdef FPGA
       idex_m_go <= 1'b0;
 `endif
@@ -432,7 +489,7 @@ module top_pipe (
                : ((exmem_ld || exmem_is_amo) ? ldx_ex : exmem_wbval));
       mwb_stop <= exmem_stop;
       mwb_st <= (exmem_st || (exmem_is_amo && amo_log_wr)) && !exmem_stop;
-      mwb_sa <= exmem_ea;
+      mwb_spa <= exmem_spa;
       mwb_sd <= exmem_is_amo ? exmem_amo_new : exmem_sd_log;
       mwb_sbe <= exmem_sbe;
       exmem_ld_raw <= ldx_raw;
@@ -478,6 +535,7 @@ module top_pipe (
         exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;
         exmem_f3 <= ce_f3; exmem_ea <= idex_ea;
         exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
+        exmem_spa <= (mm_hit_d ? mm_pa_d : idex_ea);
         exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
         exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
         exmem_r1 <= a_ex;   // CSR write data: the forwarded rs1 (lw t0,..; csrw mepc,t0 needs the load)
@@ -492,6 +550,7 @@ module top_pipe (
         exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;
         exmem_f3 <= ce_f3; exmem_ea <= idex_ea;
         exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
+        exmem_spa <= (mm_hit_d ? mm_pa_d : idex_ea);
         exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
         exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
         exmem_r1 <= a_ex;   // CSR write data: the forwarded rs1 (lw t0,..; csrw mepc,t0 needs the load)
@@ -499,6 +558,7 @@ module top_pipe (
         idex_valid <= ifid_valid;
         idex_pc <= ifid_pc; idex_insn <= ifid_insn; idex_r1 <= idex_r1_cs; idex_r2 <= ifid_r2_fwd;
         idex_pred_taken <= ifid_pred_taken; idex_pred_tgt <= ifid_pred_tgt;
+        idex_itpf <= ifid_itpf;
         idex_m_done <= ifid_valid ? !(ceif_m && !ceif_ill) : 1'b1;
 `ifdef FPGA
         idex_m_go   <= ifid_valid && ceif_m && !ceif_ill;
@@ -513,7 +573,14 @@ module top_pipe (
           ifid_pred_tgt <= bp_pred_tgt_if;
           ifid_pc <= pc_if; ifid_insn <= fetch_insn;
           pc_if <= bp_pred_if ? bp_pred_tgt_if : (pc_if + 32'd4);
+          ifid_itpf <= 1'b0;
         end
+`ifndef FPGA
+        if (mm_inject) begin
+          ifid_valid <= 1'b1; ifid_insn <= 32'h0; ifid_pc <= pc_if;
+          ifid_pred_taken <= 1'b0; ifid_pred_tgt <= 32'h0; ifid_itpf <= 1'b1;
+        end
+`endif
       end
       if (m_done_now) idex_m_done <= 1'b1;
     end
@@ -525,9 +592,9 @@ module top_pipe (
   assign ex_wben  = mwb_valid && mwb_wben;
   assign ex_wv    = mwb_wv;
   assign ex_st    = mwb_valid && mwb_st;
-  assign ex_sa    = ex_st ? mwb_sa : 32'h0;
+  assign ex_sa    = ex_st ? mwb_spa : 32'h0;
   assign ex_sd    = ex_st ? mwb_sd : 32'h0;
-  assign ex_ea    = mwb_valid ? mwb_sa : 32'h0;
+  assign ex_ea    = mwb_valid ? mwb_spa : 32'h0;
   assign ex_sbe   = ex_st ? mwb_sbe : 4'h0;
   assign rv_valid = mwb_valid && !reset;
 endmodule
