@@ -5,6 +5,7 @@
 `default_nettype none
 /* verilator lint_off UNUSED */
 /* verilator lint_off WIDTHEXPAND */
+`ifndef FPGA
 module mmu (
   input  logic        clk, reset,
   input  logic        mode,
@@ -292,4 +293,5 @@ module mmu (
     end
   end
 endmodule
+`endif
 /* verilator lint_on UNUSED */

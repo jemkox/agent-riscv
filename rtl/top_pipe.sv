@@ -160,8 +160,8 @@ module top_pipe (
 `endif
             .wena(mwb_valid && mwb_wben && (mwb_rd != 5'd0) && !halt && !reset), .wsel(mwb_rd), .wdata(mwb_wv));
 `endif
-`ifndef FPGA
-  // ---- L6 Sv32 MMU (Sv48-lite: 2-level walk) ----
+  /* verilator lint_off UNUSEDSIGNAL */
+  // ---- L6 Sv32 MMU wiring (declared always; folded to 0 under FPGA) ----
   logic mm_mode, mm_hit_i, mm_fl_i, mm_st_i, mm_hit_d, mm_fl_d, mm_st_d;
   logic [31:0] mm_pa_i, mm_pa_d, mm_paddr, mm_wa, mm_wd, fetch_pa;
   logic [3:0]  mm_dcause;
@@ -170,12 +170,32 @@ module top_pipe (
   logic [1:0]  mm_priv;
   logic mm_sum_b, mm_mxr_b, mm_satpwr, mm_sfence;
   logic ifid_itpf, idex_itpf;
+  /* verilator lint_on UNUSEDSIGNAL */
+`ifdef FPGA
+  // mm_mode/mm_sppn/mm_priv/mm_sum_b/mm_mxr_b/mm_satpwr/mm_sfence come from CSR1
+  // even in the FPGA build; the address-translation side folds to zero here.
+  assign mm_hit_i = 0; assign mm_hit_d = 0; assign mm_fl_i = 0; assign mm_fl_d = 0;
+  assign mm_st_i = 0; assign mm_st_d = 0; assign mm_pa_i = 0; assign mm_pa_d = 0;
+  assign mm_paddr = 0; assign mm_wa = 0; assign mm_wd = 0; assign mm_dcause = 0;
+  assign mm_pld = 0; assign mm_pwe = 0; assign mm_act = 0; assign mm_dmiss = 0;
+  assign mm_walk_i = 0; assign mm_walk_d = 0; assign mm_inject = 0;
+  assign fetch_pa = pc_if;
+`else
   assign mm_act = mm_pld || mm_pwe;
-  assign mm_dmiss = mm_mode && (idex_valid && (ce_ld || ce_st || ce_amo)) && !mm_hit_d;
+  // A stalled EX instruction's EA is not valid yet (load-use forwarding), so it must
+  // not drive a TLB walk (stale EA fills the wrong entry); same kill rules as the cache.
+  assign mm_dmiss = mm_mode && (idex_valid && !stall && !mem_kill_now && (ce_ld || ce_st || ce_amo)) && !mm_hit_d;
   assign mm_walk_i = mm_st_i && !mm_fl_i && !(mm_fl_d && idex_valid && (ce_ld||ce_st||ce_amo));
   assign mm_walk_d = mm_st_d && !mm_fl_d && !(idex_itpf && idex_valid);
   assign mm_inject = mm_fl_i && !(idex_itpf && idex_valid) && !(ifid_itpf && ifid_valid);
   assign fetch_pa = (mm_mode && mm_hit_i) ? mm_pa_i : pc_if;
+`endif
+`ifndef FPGA
+  // The SFENCE.VMA / satp-write flush must fire ONCE, on the cycle the CSR/SFENCE
+  // insn actually advances (retires); pulsing it every cycle while the insn sits in
+  // EX would cancel an in-progress TLB walk forever (deadlock).
+  logic flush_now;
+  assign flush_now = (mm_sfence || mm_satpwr) && !stall && !m_stall;
 `endif
   cache32 MM(.clk(clk), .reset(reset), .halt(halt), .lwe(lwe), .lwa(lwa), .lwd(lwd),
 `ifdef DOOM_BIG
@@ -217,10 +237,10 @@ module top_pipe (
 `ifndef FPGA
   mmu MMU(.clk(clk), .reset(reset), .mode(mm_mode), .sppn(mm_sppn),
           .priv(mm_priv), .sum(mm_sum_b), .mxr(mm_mxr_b),
-          .flush(mm_sfence || mm_satpwr),
+           .flush(flush_now),
           .if_va(pc_if), .if_on(1'b1),
           .if_hit(mm_hit_i), .if_fault(mm_fl_i), .if_stall(mm_st_i), .if_pa(mm_pa_i),
-          .df_va(idex_ea), .df_on(idex_valid && (ce_ld || ce_st || ce_amo)),
+           .df_va(idex_ea), .df_on(idex_valid && !stall && !mem_kill_now && (ce_ld || ce_st || ce_amo)),
           .df_r(ce_ld || (ce_amo && !ce_sc)), .df_w(ce_st || (ce_amo && !ce_lr)),
           .df_hit(mm_hit_d), .df_fault(mm_fl_d), .df_stall(mm_st_d), .df_pa(mm_pa_d),
           .df_cause(mm_dcause),
@@ -426,9 +446,9 @@ module top_pipe (
             .timer_ready(timer_ready), .wfi_tick(wfi_tick),
 `ifndef FPGA
             .dpf(mm_fl_d), .dpf_cause(mm_dcause), .itpf(idex_itpf),
+`endif
             .cs_sfence(mm_sfence), .mmu_mode(mm_mode), .mmu_ppn(mm_sppn),
             .cs_satp_wr(mm_satpwr), .cs_priv(mm_priv), .mmu_sum(mm_sum_b), .mmu_mxr(mm_mxr_b),
-`endif
             .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .sret_flush(sret_flush), .mret_pc(mret_pc),
             .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_sepc(cs_sepc),
             .cs_trap_pc(cs_trap_pc), .halt_out(halt_out));

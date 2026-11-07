@@ -38,9 +38,7 @@ module csrs_pipe (
   output logic        idex_ld,
   output logic        idex_st,
   output logic        idex_trap,
-`ifndef FPGA
   output logic        cs_sfence,     // SFENCE.VMA retiring (TLB flush pulse)
-`endif
   output logic        idex_stop,
   output logic        idex_csr_en,
   output logic        idex_csr_wen,

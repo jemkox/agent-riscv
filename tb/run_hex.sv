@@ -85,7 +85,14 @@ module run_hex ();
     #1;
     // run: log feeds (instruction about to commit), then commit
     n = 0; done = 0; cycles = 0;
-    while (n < 200000 && done == 0) begin
+    while (n < 200000 && done == 0 && cycles < 4000000) begin
+`ifdef TLBT
+      $display("@TLB %0d v=%b hit_i=%b hit_d=%b act=%b walk_i=%b walk_d=%b pa_d=%h paddr=%h wa=%h raw=%h lraw=%h inj=%b ea=%h aex=%h exmem_ea=%h st=%b ms=%b mp=%b amo=%b dcause=%h ram8k=%h",
+               cycles, T.idex_valid, T.mm_hit_i, T.mm_hit_d, T.mm_act, T.mm_walk_i, T.mm_walk_d,
+               T.mm_pa_d, T.mm_paddr, T.mm_wa, T.ldx_raw, T.exmem_ld_raw, T.mm_inject,
+               T.idex_ea, T.a_ex, T.exmem_ea, T.stall, T.m_stall, T.mem_pend, T.ce_amo, T.mm_dcause,
+               T.MM.rw[32'h8000]);
+`endif
       if (rv_valid) begin
         $display("%08x %08x %0d %08x %0d %08x %08x %0x",
                  ex_pc, ex_insn, ex_rd, wben ? ex_wv : 32'h0,

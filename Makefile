@@ -35,8 +35,8 @@ WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.w
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
 # Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
-FPGA_NETLIST_LUT4 ?= 3292
-FPGA_NETLIST_FLOPS ?= 1195
+FPGA_NETLIST_LUT4 ?= 3339
+FPGA_NETLIST_FLOPS ?= 1259
 # Pinned netlist for the documented fpga_csrtrap ROM (smaller, but it exercises
 # trap CSRs dynamically; see fpga_csrtrap_netlist target below).
 FPGA_CSRTRAP_NETLIST_LUT4 ?= 2176
@@ -357,7 +357,7 @@ si: $(SI_BINS) $(SI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/si $(B)/si/logs
 
 
 regress: $(B)/vlt/run_hex
-	@bad=0; mkdir -p $(B)/rand; for i in $(shell seq 1 $(N)); do python3 tools/gen.py $$i $(B)/rand/p$$i > /dev/null || bad=$$((bad+1)); cp $(B)/rand/p$$i.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/rand/$$i.rtl.log; python3 iss/iss.py --quiet --log $(B)/rand/$$i.iss.log $(B)/rand/p$$i.bin > /dev/null; python3 tools/cmp.py $(B)/rand/$$i.rtl.log $(B)/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); done; if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
+	@python3 tools/run_regress.py $(N) $(B)
 
 TB_MMIO := tb/run_mmio.sv
 M7_NAMES := hello fib sort matmul bench

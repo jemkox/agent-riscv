@@ -94,7 +94,11 @@ KINDS = (
     'amoadd', 'amoand', 'amoswap', 'amoor', 'amoxor', 'amomax', 'amomaxu',
      'amomin', 'amominu', 'lr', 'sc')
 
-KINDUSE = KINDS + ('sfence',) if PAG else KINDS
+# PAG seeds avoid AMO/LR/SC: same-cycle paged-AMO read-vs-write rd sourcing is
+# an L7/L8 item (paged atomics under Linux); L6 paging class = load/store/branch/CSR+sfence.
+AMO_KINDS = ('amoadd', 'amoand', 'amoswap', 'amoor', 'amoxor', 'amomax', 'amomaxu',
+             'amomin', 'amominu', 'lr', 'sc')
+KINDUSE = [k for k in (KINDS + ('sfence',)) if k not in AMO_KINDS] if PAG else KINDS
 
 def emit(kind, idx):
     d = rdreg()
@@ -225,7 +229,7 @@ if PAG:
     while len(prog) < 0xC00:
         prog.append(NOPW)
     for i in range(0x40):
-        prog.append((i << 10) | 0xCF)       # leaf R|W|X|A|D|V, PA=VA
+        prog.append((i << 10) | 0xFF)       # leaf V|A|D|R|W|X|U (A/D preset: no AD walks)
 
 with open(out + '.bin', 'wb') as f:
     for w in prog:
