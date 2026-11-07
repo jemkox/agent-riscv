@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 # matches a stored hash and whose cmp passed before are skipped.
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 500
 B = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("BUILD_ROOT", "build")
+LAT = int(sys.argv[3]) if len(sys.argv) > 3 else 1   # CACHE_LAT of the run_hex build
 BIN = os.path.join(B, "vlt", "run_hex")
 RD = os.path.join(B, "rand")
 os.makedirs(RD, exist_ok=True)
@@ -31,7 +32,7 @@ for i in range(1, N + 1):
     bpath = os.path.join(RD, "p%d.bin" % i)
     h = hashlib.sha1(open(bpath, "rb").read()).hexdigest()
     st = os.path.join(RD, "p%d.state2" % i)
-    if prev.get(str(i)) == h and os.path.exists(os.path.join(RD, "%d.rtl.ok" % i)):
+    if prev.get("%d_lat%d" % (i, LAT)) == h and os.path.exists(os.path.join(RD, "%d_lat%d.rtl.ok" % (i, LAT))):
         continue
     todo.append((i, h))
 
@@ -68,13 +69,8 @@ def verify(t):
                        capture_output=True, text=True)
     if c.returncode != 0:
         return (i, "CMP FAIL " + (c.stdout + c.stderr).strip().replace("\n", " ")[:160])
-    open(os.path.join(RD, "%d.rtl.ok" % i), "w").write("1")
+    open(os.path.join(RD, "%d_lat%d.rtl.ok" % (i, LAT)), "w").write("1")
     return (i, "ok")
-
-with ThreadPoolExecutor(max_workers=8) as ex:
-    for i, m in ex.map(verify, [t[0] for t in todo]):
-        if m != "ok":
-            fails.append((i, m))
 
 verified_ok = set()
 with ThreadPoolExecutor(max_workers=8) as ex:
@@ -89,11 +85,11 @@ for i, m in simfail + fails:
 with open(STATE, "w") as f:
     todo_ids = {i for i, _ in todo}
     for k, v in prev.items():
-        if int(k) not in todo_ids:
+        if int(k.split("_lat")[0]) not in todo_ids:
             f.write("%s %s\n" % (k, v))
     for i, h in todo:
         if i in verified_ok:
-            f.write("%d %s\n" % (i, h))
+            f.write("%d_lat%d %s\n" % (i, LAT, h))
 if simfail or fails:
     print("REGRESS FAILED: %d seeds" % (len(simfail) + len(fails)))
     raise SystemExit(1)
