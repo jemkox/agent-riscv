@@ -1,4 +1,4 @@
-RTL := rtl/top_pipe.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/cache32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv rtl/clint_dev.sv
+RTL := rtl/top_pipe.sv rtl/mmu.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_fast.sv rtl/cache32.sv rtl/regs32.sv rtl/btb.sv rtl/ldext.sv rtl/branch.sv rtl/store.sv rtl/fwd.sv rtl/ldst.sv rtl/bpif.sv rtl/ifdec.sv rtl/csrs_pipe.sv rtl/fetch_pred.sv rtl/csrs.sv rtl/clint_dev.sv
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
@@ -19,7 +19,12 @@ COREMARK_REV ?= 1f483d5b8316753a742cbf5590caf5bd0a4e4777
 FREERTOS_URL ?= https://github.com/FreeRTOS/FreeRTOS-Kernel.git
 ARCHTEST_URL ?= https://github.com/riscv/riscv-arch-test.git
 ARCHTEST_REV ?= eb66181dd27ff7847e2c3a010705b13490b0bf75
+# Optional offline fallback: ../../downloads/riscv-arch-test only if it sits exactly at
+# the pinned ARCHTEST_REV (rev guard; a mismatched tree is never used).
+AT_OFFLINE_OK := $(if $(filter $(ARCHTEST_REV),$(shell git -C ../../downloads/riscv-arch-test rev-parse HEAD 2>/dev/null)),../../downloads/riscv-arch-test,)
+ARCHTEST_DIR ?= $(firstword $(if $(wildcard deps/riscv-arch-test-3.9.1/riscv-test-suite),deps/riscv-arch-test-3.9.1) $(AT_OFFLINE_OK) deps/riscv-arch-test-3.9.1)
 SAIL_URL ?= https://github.com/riscv/sail-riscv/releases/download/0.16/sail-riscv-Linux-x86_64.tar.gz
+SAIL_SHA256 ?= f9bb8a32b8f3eddbdf69b3a29d96dff4ba1e77f45877165e0478418367da6bee
 FREERTOS_TAG ?= V11.2.0
 WAD_SHA1 := 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d
 B ?= build
@@ -76,7 +81,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu mmu
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -90,8 +95,9 @@ deps:
 	@if [ ! -d deps/coremark ]; then git clone -q $(COREMARK_URL) deps/coremark && git -C deps/coremark checkout -q $(COREMARK_REV); fi
 	@if [ ! -d deps/FreeRTOS-Kernel ]; then git -c advice.detachedHead=false clone -q --depth 1 --branch $(FREERTOS_TAG) $(FREERTOS_URL) deps/FreeRTOS-Kernel; fi
 	@if [ ! -f deps/sail-riscv-0.16-Linux-x86_64.tar.gz ]; then curl -sL -o deps/sail-riscv-0.16-Linux-x86_64.tar.gz $(SAIL_URL); fi
+	@if [ -f deps/sail-riscv-0.16-Linux-x86_64.tar.gz ]; then sh=$$(sha256sum deps/sail-riscv-0.16-Linux-x86_64.tar.gz | cut -d' ' -f1); [ "$$sh" = "$(SAIL_SHA256)" ] || { echo "SAIL_SHA256 mismatch: bad fetch"; exit 1; }; fi
 	@if [ ! -d deps/sail-riscv-0.16/sail-riscv-Linux-x86_64 ]; then mkdir -p deps/sail-riscv-0.16 && tar -xzf deps/sail-riscv-0.16-Linux-x86_64.tar.gz -C deps/sail-riscv-0.16 && chmod +x deps/sail-riscv-0.16/sail-riscv-Linux-x86_64/bin/sail_riscv_sim; fi
-	@if [ ! -d deps/riscv-arch-test-3.9.1 ]; then \
+	@if [ ! -d deps/riscv-arch-test-3.9.1 ] && [ x$(AT_OFFLINE_OK) = x ]; then \
 	  git clone -q --depth 1 --no-checkout $(ARCHTEST_URL) deps/riscv-arch-test-3.9.1 ; \
 	  git -C deps/riscv-arch-test-3.9.1 fetch -q origin $(ARCHTEST_REV) --depth 1 ; \
 	  git -C deps/riscv-arch-test-3.9.1 sparse-checkout set riscv-test-suite/env riscv-test-suite/rv32i_m/I riscv-test-suite/rv32i_m/M riscv-test-suite/rv32i_m/A riscv-test-suite/rv32i_m/Zifencei riscv-test-suite/rv32i_m/privilege ; \
@@ -285,6 +291,33 @@ ui: $(UI_BINS) $(UI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ui $(B)/ui/logs
 
 $(B)/vlt/run_hex_lat$(CACHE_LAT): $(RTL) $(TB) | $(B) $(B)/vlt
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=$(CACHE_LAT) --Mdir $(B)/vlt -o run_hex_lat$(CACHE_LAT) $(RTL) $(TB)
+
+$(B)/mmu:
+	@mkdir -p $(B)/mmu
+$(B)/vlt_mmu:
+	@mkdir -p $(B)/vlt_mmu
+$(B)/mmu/logs:
+	@mkdir -p $(B)/mmu/logs
+
+MMU_TESTS := t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence
+
+$(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
+
+$(B)/vlt_mmudbg/run_mmu_dbg: $(RTL) $(TB) | $(B) $(B)/vlt_mmudbg
+	verilator --binary --Wall --timing -O2 -DTOPPIPE -DSCDBG -DSCDBG2 -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmudbg -o run_mmu_dbg $(RTL) $(TB)
+
+$(B)/vlt_mmudbg:
+	@mkdir -p $(B)/vlt_mmudbg
+
+mmu: $(B)/vlt_mmu/run_mmu $(B)/mmu $(B)/mmu/logs $(foreach t,$(MMU_TESTS),$(B)/$(t).bin $(B)/$(t).hex $(B)/$(t).elf) | $(B)
+	@bad=0; for t in $(MMU_TESTS); do \
+	  cp $(B)/$$t.hex $(B)/p.hex; \
+	  ./$(B)/vlt_mmu/run_mmu > $(B)/mmu/logs/$$t.rtl.log; \
+	  python3 iss/iss.py --quiet --pass --log $(B)/mmu/logs/$$t.iss.log $(B)/$$t.bin > /dev/null; \
+	  python3 tools/cmp.py $(B)/mmu/logs/$$t.rtl.log $(B)/mmu/logs/$$t.iss.log || bad=$$((bad+1)); \
+	  riscv64-unknown-elf-objdump -t $(B)/$$t.elf | python3 tools/mmuself.py tests/$$t.S $(B)/mmu/logs/$$t.rtl.log || bad=$$((bad+1)); \
+	 done; if [ $$bad -eq 0 ]; then echo "MMU ALL PASS"; else echo "MMU $$bad FAILS"; exit 1; fi
 
 $(B)/vlt/run_hex: $(B)/vlt/run_hex_lat$(CACHE_LAT)
 	@cp -f $< $@

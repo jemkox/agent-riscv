@@ -1539,7 +1539,7 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 ### Metrics (L5, measured this session)
 | item | value |
 |---|---|
-| `all_tests` | `ALL TESTS DONE`; suites: test LAT1/5, `ui um mi ua si`, regress N=500, m7, doom, mpp_ret_gate, FPGA gates |
+| `all_tests` | `ALL TESTS DONE` (carried from L5 session; suite components verified green in review clone; re-run at L6 close); suites: test LAT1/5, `ui um mi ua si`, regress N=500, m7, doom, mpp_ret_gate, FPGA gates |
 | `si` | `ALL SI PASS` (official rv32si with `__MACHINE_MODE`) |
 | `riscof` | `SUITE I/M/A/Zifencei/privilege: PASS` (5/5 suites, `riscv-arch-test 3.9.1`, sail_cSim pinned noC/noH config, `--testfile` flow, `--no-browser`) |
 | `mi` | `ALL MI PASS` |
