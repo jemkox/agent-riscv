@@ -1607,3 +1607,18 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 | `all_tests` | `ALL TESTS DONE` (all 8 suites incl. doom 31 frames + mpp_ret + fpga gates) |
 | `lat20` / `coremark` / `freertos` | ALL PASS / COREMARK PASS (CRCs validated, CoreMark/MHz = 3.193) / FREERTOS PASS |
 
+## Linux L7: OpenSBI + Sv32 Linux images built, QEMU reference boot OK (2026-11-07, L7 step 1 of 2)
+### Worked
+- Fresh Buildroot out-of-tree build `~/agent-workspace/build-linux/mmu3` from the project defconfig `linux/configs/qemu_riscv32_virt_mmu_defconfig` (uclibc-ng 1.0.59, **static** ILP32 rv32, kernel 6.12.27 `rv32` defconfig + `linux-isa-min.config`+`linux-mmu.fragment` fragments, OpenSBI 1.6 generic plat, BusyBox 1.37.0). Symlink `downloads/buildroot-2025.02.19/configs/qemu_riscv32_virt_mmu_defconfig -> project defconfig` so `make qemu_riscv32_virt_mmu_defconfig` picks ours. Stages ran green: busybox `make busybox` (cached), `make linux -j2` (Image installed), `make opensbi` (fw_dynamic/fw_jump installed), `make all -j2` (rootfs cpio+ext2+tar, post-image).
+- `linux/configs/board/qemu/riscv32-virt/post-build-mmu.sh` strips `/lib/modules` (~16 MB loadable-module tree, never used, would not fit the 64 MB window), udev/zoneinfo/ppp and `etc/init.d/S40network` (the L4 UART-polling reason).
+- QEMU reference boot (`linux_mmu_qemu` target): `timeout 240 ... printf "root\nls /\nuname -a\ncat /proc/cpuinfo\n" | hdl qemu-system-riscv32 -M virt -m 64M -nographic -bios images/fw_dynamic.bin -kernel images/Image -initrd images/rootfs.cpio` -> `build-linux/mmu3/qemu_boot.log` (237 lines): line 2 `OpenSBI v1.6`, `[ 1.006270] Run /init as init process`, ends `buildroot login:`. Target gate prints `L7 QEMU BOOT OK: OpenSBI banner + login prompt`. (The QEMU process itself needs the `timeout` guard: after stdin EOF the interactive guest idles; the log + gate prove the boot.)
+- Chose `fw_dynamic.bin` for QEMU: the `fw_jump.elf` Buildroot builds links at 0x0 and QEMU reports ROM overlap / exits — `fw_dynamic` is the position-independent image QEMU virt hands to OpenSBI.
+- Honest reproducibility note: `make all` regenerates `rootfs.cpio` with fresh cp timestamps (sha changes per run: `7512b458...`, `8cd39c07...`, `fbeff497...`). Kernel `Image` sha is stable (`6588a31e...`), `fw_dynamic.elf` stable (`5545c897...`). A canonical (L4-style pinned) cpio filter for L8's pinned-sha gate is pending, like `tools/rootfs_drop_network.py` did for L4.
+- Not yet done (L7 step 2): booting this same OpenSBI+kernel image set on OUR CPU (`linux_sim` with `linux/linux_mmu.dtb` + fw at its load address); that needs `tb/run_linux.cpp` to load OpenSBI/Kernel/initrd/DTB and start in M-mode with `a0=argc/fdt`.
+
+### Metrics (L7 step 1, measured this session)
+| item | value |
+|---|---|
+| `linux_mmu_build` stages | busybox+linux+opensbi+all green in mmu3; Image sha `6588a31e24e3d318ee1956ca7555db2b1cf69ba8bb96ad3c4bd0752b8bbf9fe4`, fw_dynamic.elf sha `5545c89714c07e896cd1a6b8ca5f4937634fc1c37e51f503a0b53eefcbe683f9`, Image 31040000 bytes, rootfs.cpio ~1.25 MB |
+| `linux_mmu_qemu` | `L7 QEMU BOOT OK: OpenSBI banner + login prompt` (log 237 lines, `qemu_boot.log`) |
+

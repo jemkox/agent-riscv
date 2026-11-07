@@ -927,3 +927,29 @@ riscof: $(B)/vlt_riscof/run_hex_sig
 	  f=$$(grep -c ": Failed" $$wd/run.log); \
 	  if [ $$p = $$n ] && [ $$f = 0 ]; then echo "SUITE $$s: PASS ($$p/$$n)"; else echo "SUITE $$s: FAIL (passed $$p/$$n, failed $$f)"; fi ; \
 	 done
+
+# --- L7: OpenSBI generic + Sv32 Linux, built out-of-tree at
+# build-linux/mmu3 from linux/configs/qemu_riscv32_virt_mmu_defconfig
+# (uclibc static ILP32; symlinked into the BR configs/ dir so `make
+# qemu_riscv32_virt_mmu_defconfig` picks OUR defconfig, not the upstream one) ---
+BR_MMU_OUT ?= ../../build-linux/mmu3
+BR_MMU_NAME ?= qemu_riscv32_virt_mmu_defconfig
+
+linux/linux_mmu.dtb: rtl/linux_mmu.dts linux | $(B)
+	@mkdir -p linux
+	@dtc -I dts -O dtb -o linux/linux_mmu.dtb rtl/linux_mmu.dts
+
+linux_mmu_build: linux | $(BR_MMU_OUT)
+	@ln -sf $(CURDIR)/linux/configs/$(BR_MMU_NAME) $(BR_ROOT)/configs/$(BR_MMU_NAME)
+	@cp $(CURDIR)/linux/configs/board/qemu/riscv32-virt/linux-mmu.fragment $(BR_ROOT)/board/qemu/riscv32-virt/linux-mmu.fragment
+	@cp $(CURDIR)/linux/configs/board/qemu/riscv32-virt/post-build-mmu.sh $(BR_ROOT)/board/qemu/riscv32-virt/post-build-mmu.sh
+	@chmod +x $(BR_ROOT)/board/qemu/riscv32-virt/post-build-mmu.sh
+	$(MAKE) -s -C $(BR_ROOT) O=$(BR_MMU_OUT) $(BR_MMU_NAME)
+	$(MAKE) -s -C $(BR_ROOT) O=$(BR_MMU_OUT) all -j2
+	@sha256sum $(BR_MMU_OUT)/images/fw_dynamic.elf $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio
+
+linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
+	@timeout 240 sh -c 'printf "root\nls /\nuname -a\ncat /proc/cpuinfo\n" | hdl qemu-system-riscv32 -M virt -m 64M -nographic -bios $(BR_MMU_OUT)/images/fw_dynamic.bin -kernel $(BR_MMU_OUT)/images/Image -initrd $(BR_MMU_OUT)/images/rootfs.cpio > $(BR_MMU_OUT)/qemu_boot.log' || true
+	@echo "QEMU boot log: $(BR_MMU_OUT)/qemu_boot.log"
+	@if grep -q "OpenSBI v1.6" $(BR_MMU_OUT)/qemu_boot.log && grep -q "buildroot login:" $(BR_MMU_OUT)/qemu_boot.log; then echo "L7 QEMU BOOT OK: OpenSBI banner + login prompt"; else echo "L7 QEMU BOOT FAIL"; exit 1; fi
+	@grep -m 5 -a "OpenSBI\|Run /init as init\|login" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true

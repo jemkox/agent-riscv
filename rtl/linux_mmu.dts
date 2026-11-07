@@ -1,0 +1,70 @@
+/dts-v1/;
+
+/* L7: same machine as rtl/linux.dts, but the cpu node declares Sv32
+ * paging so the S-mode (OpenSBI-launched) kernel turns satp on. */
+
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	 model = "rv32cpu,linux-mmu";
+	 compatible = "riscv-virtio";
+
+	 chosen {
+	 bootargs = "console=ttyS0 earlycon=ns16550,mmio,0x10000000 initramfs_async=0";
+	 stdout-path = "/soc/serial@10000000";
+	 stdin-path = "/soc/serial@10000000";
+	};
+
+	 memory@80000000 {
+	 device_type = "memory";
+	 reg = <0x00 0x80000000 0x00 0x4000000>;
+	};
+
+	 cpus {
+	 #address-cells = <1>;
+	 #size-cells = <0>;
+	 timebase-frequency = <0x989680>;
+
+	 cpu0: cpu@0 {
+		 device_type = "cpu";
+	 reg = <0>;
+	 status = "okay";
+	 compatible = "riscv";
+	 riscv,isa = "rv32imaz_zicsr_zifencei";
+	 mmu-type = "riscv,sv32";
+
+	 intc: interrupt-controller {
+			 #interrupt-cells = <1>;
+	 interrupt-controller;
+	 compatible = "riscv,cpu-intc";
+	 };
+	 };
+
+	 cpu-map {
+	 cluster0 {
+	 core0 {
+	 cpu = <&cpu0>;
+	 };
+	 };
+	 };
+	};
+
+	 soc {
+	 #address-cells = <2>;
+	 #size-cells = <2>;
+	 compatible = "simple-bus";
+	 ranges;
+
+	 serial@10000000 {
+	 clock-frequency = <230400>;
+	 reg = <0x00 0x10000000 0x00 0x100>;
+	 compatible = "ns16550a";
+	 };
+
+	 clint@2000000 {
+	 interrupts-extended = <&intc 0x3 &intc 0x7>;
+	 reg = <0x00 0x2000000 0x00 0x10000>;
+	 compatible = "sifive,clint0", "riscv,clint0";
+	 };
+	};
+};
