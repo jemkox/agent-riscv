@@ -1554,7 +1554,7 @@ NETLIST_BASELINE LUT4=3076 FLOPS=1082 explained: FPGA atomics/CSR forwarding cur
 ### Next
 L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging differential tests. Keep L5/S-mode official `si` and `mi` passing while adding paging.
 
-## L6: Sv32 MMU (2026-11-06, WIP)
+## L6: Sv32 MMU (2026-11-06, COMPLETE: directed MMU tests + paging regress green)
 ### Worked
 - Added `rtl/mmu.sv`: Sv32 two-level page-table walker + 4-entry direct-mapped TLB per side (I/D), 7-bit entry flags `{lvl[6],A[5],D[4],R[3],W[2],X[1],U[0]}`, PA mega/lvl split. Shared D-cache + I-cache port arbitration with priority `data-write > data-read > fetch-read > fetch-write`; walker latches PTE (`pv_i/pv_d`) on read-issue, evaluates next cycle. Per-side state `s` (0 idle / 1 pending-read / 2 pending-write / 3 fault-hold) with restart on new demand and CSR-change self-heal: a fault-hold whose latched PTE becomes permitted after an `mstatus` (SUM/MXR/priv) change re-checks the latched PTE (`heal_i/heal_d`) and fills instead of re-faulting, matching the reference model that re-walks every access.
 - `rtl/top_pipe.sv`: wired mmu into fetch (`fetch_pa` from TLB/walk PA) and the D-cache request; `satp`-off keeps the whole path inert (`mode=0` → `mm_act=0`, original L5 pins). Reworked D-cache pins so the walker request is exclusive when it uses the shared port: `.idex_valid((...) || mm_act)`, `.idex_ld(mm_act ? mm_pld : idex_ld)`, `.idex_st(mm_act ? mm_pwe : idex_st)` (this fixes a stale-store-on-walk-read corruption in `t33`).
