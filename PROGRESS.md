@@ -1726,7 +1726,10 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 ## Review fixes on aa14d88 (2026-11-08, fixes committed as this batch)
 - Review verdict PASS-WITH-ISSUES (items 1-4). Item 1: `$(B)/spike:` dir rule added (`@mkdir -p $@`)
   + fresh-clone check (`tools/fresh_clone_check.sh` over `test`, `mmu`, `mmu5`, `spike_tests`,
-  `fpga_full FPGA_FREQ=13 FPGA_SEED=4`) run against this commit - result: see below.
+  `fpga_full FPGA_FREQ=13 FPGA_SEED=4`) run against this commit: FRESH-CLONE CHECK PASSED
+  (clean clone tmp/fresh_rv32cpu, seeded riscv-tests/coremark/FreeRTOS-Kernel/riscv-arch-test
+  copies; mmu=13 incl t43 89 instrs LAT1, mmu5 LAT5, spike 10 from scratch incl $(B)/spike dir
+  rule, fpga pins 3360/1259 @15.91/15.58 MHz).
 - Item 2: MXR x-only rescue now gated at S-effective priv in ISS (`eff == 1 and x and MXR`) and
   RTL (`rtl/mmu.sv:69 pr == 2'b01 && x && mx`); U-eff loads are `r` only. Directed test
   `tests/t43_sv32_mprv_umxr.S` added to TESTS+MMU_TESTS (satp + MPRV + MPP=U + MXR load of an
