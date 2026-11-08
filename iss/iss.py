@@ -53,7 +53,8 @@ def main(argv):
                    0x180,
                    0xb00,0xb02,0xb82,0xc01,0xc02,0xc81,0xc82,
                    0xc00,0xc80,0x306,0xf11,0xf12,0xf13,0xf14,
-                   0x7a0,0x7a1,0x7a2,0x7a3,0x7a4,0x7a5,0x7a6,0x7a7,0x270,0x144}
+                   0x7a0,0x7a1,0x7a2,0x7a3,0x7a4,0x7a5,0x7a6,0x7a7,0x270,0x144,
+                   0x310}
     CSR_RO = {0xc00,0xc80,0xc01,0xc81,0xc02,0xc82}   # Zicntr read-only views
     def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
@@ -160,7 +161,7 @@ def main(argv):
     # typ: 0 fetch, 1 load (incl LR), 2 store (incl SC/AMO). Returns PA, or None for
     # a page fault. With satp.MODE=0 addresses are identity (pre-L6 behavior intact).
     def xlate(v, typ):
-        if not (cs.get(0x180,0) & 0x80000000): return v
+        if not (cs.get(0x180,0) & 0x80000000) or priv == 3: return v   # M-mode: physical (spike)
         root = (cs[0x180] & 0x3FFFFF) << 12
         vpn = ((v >> 12) & 0x3FF, (v >> 22) & 0x3FF)   # vpn[1] = bits 31:22, vpn[0] = bits 21:12
         pte = 0; addr = 0; lvl = 0; leaf = False
