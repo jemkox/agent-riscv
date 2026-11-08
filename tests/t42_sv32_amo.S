@@ -1,7 +1,9 @@
-# t42: atomics through the page table (satp + MPRV, MPP=S). vpn3 PA0x3000 leaf R|W|A|D|V:
-# lr.w old=0x1111, sc.w succeeds (rd=0), reload sees 0x2222; lr 0x3004 cleared by a plain
-# store -> sc.w FAILS rd=1 and the word keeps the store value 0x9999 (sc value 0x7777 NOT
-# written); amoadd.w (t0) rd=old 0x2222 and mem=0x2229. vpn4 PA0x4000 leaf R|A|V (no W):
+# t42: atomics through the page table (satp + MPRV, MPP=S). lr.w VA0x3000 old=0x1111; sc.w
+# succeeds rd=0 and 0x2222 is visible; lr 0x3004 + successful sc.w (0x3333 visible) then a SECOND
+# sc.w at the same address with NO LR between - the spec-mandated must-fail: rd=1 and the word
+# keeps 0x3333 (our SC-clears-reservation + no-reservation-SC-fails rule; both goldens implement
+# it; a plain-store between LR/SC is NOT pinned - a spurious failure is legal and t19 pins OUR
+# clear-on-store choice); amoadd.w (t0) rd=old 0x2222 mem=0x2229; amoadd.w into an R|A|V (no W)
 # amoadd.w faults PF15 mtval 0x4000 (handler counts exactly 1, skips), then a load sees
 # 0x6666 UNCHANGED (the faulting AMO stored nothing). gp=1.
 /* MMU_CODE_VPN: 0 for tests/link.ld; 0x20 for the spike build (see t30). */
@@ -58,14 +60,19 @@ _start:
   bne t3, t1, fail   # 0x2222 written by sc
   li t2, 0x3004
   lr.w t3, 0(t2)
-  li t6, 0x9999
-  sw t6, 0(t2)       # plain store to the reserved word clears it
-  li a5, 0x7777
-  sc.w t5, a5, 0(t2)
-  li t4, 1
-  bne t5, t4, fail   # reservation cleared -> rd=1
+  li t4, 0x5555
+  bne t3, t4, fail     # lr old value pinned
+  li a5, 0x3333
+  sc.w t5, a5, 0(t2)   # first SC succeeds and CLEARS the reservation
+  bnez t5, fail
   lw t3, 0(t2)
-  bne t3, t6, fail   # word keeps 0x9999 (sc wrote nothing)
+  bne t3, a5, fail     # 0x3333 visible
+  li a6, 0x7777
+  sc.w t6, a6, 0(t2)   # spec-mandated: no reservation -> SC MUST fail rd=1
+  li t4, 1
+  bne t6, t4, fail
+  lw t3, 0(t2)
+  bne t3, a5, fail     # second SC wrote NOTHING (word keeps 0x3333)
   li a1, 7
   amoadd.w a2, a1, 0(t0)
   li t4, 0x2222      # rd = old value
@@ -73,10 +80,19 @@ _start:
   lw t3, 0(t0)
   li t4, 0x2229
   bne t3, t4, fail
+  li t0, 0x1800      # re-arm data mode: mret leaves MPP=M (sail); pin eff=S for the
+  csrc mstatus, t0   # RO-leaf probe so the PF15 fires in EVERY mret-MPP semantics
+  li t0, 0x20800     # MPRV + MPP=S
+  csrs mstatus, t0
   li t0, 0x4000
   li a1, 1
   amoadd.w a2, a1, 0(t0)   # read-only leaf -> PF15, handler skips
   nop
+  li t0, 0x1800      # post-mret re-arm: spike mrets with MPP=00, our/sail restore MPP=M;
+  csrc mstatus, t0   # pin eff=S here so the tail load runs translated in EVERY model
+  li t0, 0x20800     # MPRV + MPP=S
+  csrs mstatus, t0
+  li t0, 0x4000
   lw t3, 0(t0)
   li t4, 0x6666      # faulting AMO stored NOTHING
   bne t3, t4, fail

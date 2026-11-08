@@ -6,8 +6,10 @@
 # main tree hides (e.g. $(B)/spike: had no rule -> pattern rule %.elf under it failed
 # only in a clean clone). Extend the list as suites grow.
 set -eu
-SRC=/home/jemko/agent-workspace/hdl/rv32cpu
-CLONE=/home/jemko/agent-workspace/tmp/fresh_rv32cpu
+# no absolute literals: SRC = repo containing tools/ (env SRC overrides), CLONE = a sibling
+# scratch dir next to it (env CLONE overrides).
+SRC="${SRC:-$(cd "$(dirname "$0")/.." && pwd)}"
+CLONE="${CLONE:-${SRC%/*}/fresh_${SRC##*/}_clone}"
 rm -rf "$CLONE"
 git clone -q "file://$SRC" "$CLONE"
 mkdir -p "$CLONE/deps"

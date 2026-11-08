@@ -1004,15 +1004,18 @@ linux_mmu_spike: linux_mmu_build spike_pin_check | $(B)/linux/logs
 # NO privilege gate - it lets an MPRV+MPP=U+MXR load of an x-only U page through (its
 # commit log shows mem 0x00003000 read), while the spec (sail 0.16 access-control table
 # "MXR applies when the effective privilege is s") faults it with cause 13. t43's U
-# phase pins the SPEC side (ISS+RTL, against sail); keeping it in the spike suite would
-# make that golden-model deviation red. Spike additionally mrets with MPP:=00 instead
-# of restoring MPP=M after an M trap (c768_mstatus 0xe0080 after mret in that log) -
-# both t43 quirks recorded here; the CPU/ISS pins stay spec-gated (pr==01 && mx in pbad).
-# t42_sv32_amo is EXCLUDED too: Spike 1.1.1-dev does not clear the LR reservation on an
-# intervening plain store to the reserved word (its log shows lr 0x3004; sw 0x9999; sc
-# 0x7777 -> x30=0 mem=0x7777), while sail 0.16 (and our CPU/ISS, pinned by unpaged t19)
-# destroys it -> sc rd=1 and the word must keep 0x9999.
-SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t42_sv32_amo t43_sv32_mprv_umxr,$(MMU_TESTS))
+# phase pins the SPEC side (ISS+RTL, against the spec); keeping it in the spike suite would
+# make that golden-model deviation red. On the MPRV+MPP=U+MXR x-page LOAD path BOTH golden
+# models deviate from the spec: spike 1.1.1-dev implements the load check as r || (x && mxr)
+# with NO privilege gate, and pinned sail 0.16 likewise rescues it - while the spec (MXR
+# applies when the EFFECTIVE privilege is s) faults it PF13. t42_sv32_amo is now INCLUDED:
+# it pins only the spec-mandated must-fail SC rule (a second SC with no LR between MUST fail
+# rd=1, both goldens implement SC-clears-reservation); an SC failing after an intervening
+# plain store (our choice, pinned by self-written unpaged t19) is a legal spurious failure
+# that both goldens are free to pass - not pinned in t42 any more. Spike mrets with MPP:=00
+# instead of restoring MPP=M (c768_mstatus 0xe0080); tests re-arm MPP explicitly where it
+# matters (t43/t42 do).
+SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr,$(MMU_TESTS))
 $(B)/spike:
 	@mkdir -p $@
 $(B)/spike/%.elf: tests/%.S tests/link_spike.ld | $(B)/spike

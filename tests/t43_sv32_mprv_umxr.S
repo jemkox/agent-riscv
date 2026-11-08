@@ -40,7 +40,7 @@ _start:
   sw t1, ((MMU_CODE_VPN+1)&0xFF)*4(t0)
   li t1, 0xC59        # vpn0 3 -> PA0x3000 | X|A|U|V (xwr=100, u=1)
   sw t1, 12(t0)
-  li t1, 0x10AF       # vpn0 4 -> PA0x4000 | R|W|A|D|U|V
+  li t1, 0x10D7       # vpn0 4 -> PA0x4000 | R|W|A|D|U|V
   sw t1, 16(t0)
   li t0, 0x80000008   # satp: sv32, root PPN 0x8 (PA0x8000)
   csrw satp, t0
@@ -63,7 +63,9 @@ _start:
   nop
   bnez t5, fail       # if MXR wrongly rescued at U, t5=0x1111 -> fail
   # RW page at eff=U must work normally (r=1,w=1,u=1)
-  li t0, 0x4000
+  li t0, 0x1800       # mret restored MPP=M (sail semantics): re-arm MPP=U (00) so these
+  csrc mstatus, t0    # RW-leaf checks really run at eff=U under MPRV (they did before:
+  li t0, 0x4000       # handler #2 just skipped the faulting load)
   lw t3, 0(t0)
   li t4, 0x2222
   bne t3, t4, fail

@@ -1703,9 +1703,10 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 
 ### Spike quirks recorded (1.1.1-dev, from the t43 commit log)
 - Load check is `r || (x && mxr)` with NO privilege gate: an MPRV+MPP=U+MXR load of an
-  x-only U page READS (log line `lw t5 -> x30 0x00001111 mem 0x00003000`) where spec/sail
-  faults cause 13. t43_sv32_mprv_umxr pins the SPEC side (ISS+RTL `pr == 2'b01 && mx` gate)
-  and is EXCLUDED from SPIKE_MMU_TESTS for exactly that reason (like t31).
+  x-only U page READS (log line `lw t5 -> x30 0x00001111 mem 0x00003000`). On this MPRV path
+  BOTH golden models deviate the same way (pinned sail 0.16 rescues it too, per review); only
+  the privileged SPEC (MXR applies when the EFFECTIVE privilege is S) faults it cause 13. t43
+  pins the SPEC side (ISS+RTL `pr == 2'b01 && mx` gate) and is EXCLUDED from SPIKE_MMU_TESTS.
 - Spike mret after an M-mode trap writes `c768_mstatus 0x000e0080` (MPP bits cleared to
   00=U instead of restoring MPP=M) - an RV32-MPP quirk of 1.1.1-dev; our CPU/ISS restore
   MPP=M per sail/sail 0.16 (t16/mpp_ret_gate pins stay spec).
@@ -1713,7 +1714,8 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
   exact installed 1.1.1-dev binary at ~/.local/bin/spike from
   https://github.com/riscv-software-src/riscv-isa-sim/) is a prerequisite of
   `spike_tests`, `linux_mmu_spike`, `linux_mmu_spike_log`; drift = hard fail.
-- `tools/fresh_clone_check.sh`: fresh `git clone` of HEAD into ~/agent-workspace/tmp/fresh_rv32cpu,
+- `tools/fresh_clone_check.sh`: fresh `git clone` of HEAD into a sibling scratch dir derived from
+  the repo location (env `SRC`/`CLONE` override; no absolute literals in the script),
   seeds pinned deps (riscv-tests copy, no network), then rebuilds `test`, `mmu`, `mmu5`,
   `spike_tests`, `fpga_full FPGA_FREQ=13 FPGA_SEED=4` from scratch - catches Makefile
   order-only/dir-rule breakage that the dirty main tree hides (the `$(B)/spike:` rule
@@ -1755,14 +1757,37 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
   `pte=0000004b` = the identity CODE leaf - a SINGLE table page used as both root and L0 makes the
   root-level code leaf (VPN[1]=0, R|X set, PPN 16-aligned) a 4 MiB MEGA-PAGE that shadows every data
   VA in bits 0..21. t30-t33 use the correct 2-table layout (root@0x8000 entry0=0x2401 -> L0@0x9000,
-  satp PPN 8); t42/t43 were rewritten to it. t43's U-eff "fault" was earlier a FALSE pass (u=0 identity
-  page, not the X-only leaf); with L0 leaves (0xC59 X|A|U|V @vpn0 3, 0x10AF R|W|A|D|U|V @vpn0 4) the
-  intended pin now really fires. t35/t30/t33 verified to already use the 2-table layout.
-- Spike side for t42: EXCLUDED with the recorded quirk: 1.1.1-dev does NOT clear the LR reservation on
-  an intervening plain store to the reserved word (log: lr 0x3004, sw 0x9999, sc 0x7777 -> x30=0 and
-  mem=0x7777), while sail 0.16 (and our CPU/ISS, pinned unpaged by t19) destroys it -> rd=1. The other
-  t42 pins (sc success, amo rd/old, RO-leaf PF15) spike passes identically (they run before that pin).
+   satp PPN 8); t42/t43 were rewritten to it. t43's U-eff "fault" was earlier a FALSE pass (u=0 identity
+   page, not the X-only leaf); with L0 leaves (0xC59 X|A|U|V @vpn0 3, 0x10D7 R|W|A|D|U|V @vpn0 4) the
+   intended pin now really fires. t35/t30/t33 verified to already use the 2-table layout.
+- SC corner honesty: an SC failing after an intervening PLAIN store to the reserved word is OUR
+  implementation choice (a legal spurious-failure per spec); pinned only by self-written t19 (CPU+ISS
+  agree), while the spec only MANDATES failure for a second SC with no LR between (reservation cleared
+  by the first SC). t42 was re-cut to pin only the spec-mandated must-fail form, so it now runs in the
+  spike suite too (both goldens implement SC-clears-reservation + no-reservation-SC-fails).
 - Linux L7 status unchanged (boot still stops after the "ASID allocator disabled" banner) but the
   paged-atomics gap is now CLOSED on CPU+ISS+MMU5 at LAT1/LAT5; next: paged sfence.fence + protection
   storm, then re-run the boot chain. Gates: `mmu` ALL PASS (14), `mmu5` ALL PASS, `spike_tests`
-  SPIKE_MMU_OK (11 tests), `all_tests` ALL TESTS DONE, ISS debug (XDBG print) reverted before commit.
+  SPIKE_MMU_OK (11 tests after t42 re-inclusion - see review-fix section below), `all_tests` ALL TESTS DONE, ISS debug (XDBG print) reverted before commit.
+
+## Review fixes on d05c847 (2026-11-08, committed as `review fixes: ...`)
+1. t42 exclusion reason was wrong (pinned sail 0.16 behaves like spike on plain-store-clears
+   - an SC failing after a plain store is OUR legal spurious-failure choice, pinned only by
+   self-written t19). t42 re-cut: second SC block is now the SPEC-mandated must-fail (lr 0x3004
+   -> sc 0x3333 success visible -> sc 0x7777 same addr no LR between MUST rd=1, word keeps
+   0x3333); both goldens implement it -> t42 RE-INCLUDED in SPIKE_MMU_TESTS (suite back to 11,
+   SPIKE_MMU_OK). Makefile + PROGRESS wording fixed ("deviation of BOTH golden models" on the
+   MPRV-U MXR path - item 5 too: sail 0.16 rescues MPRV+MPP=U+MXR x-page loads like spike 1.1;
+   only the SPEC faults it PF13, t43 pins the spec side).
+2. t43: RW-leaf flags 0x10AF -> 0x10D7 (drop stray X + reserved bit5), and MPP re-armed
+   (`csrc mstatus,0x1800`) after handler #2's mret (sail restores MPP=M after an M trap) so the
+   RW U-leaf load/store pins really run at eff=U - before, they verified M-identity accesses.
+   Also added a post-mret MPRV|MPP=S re-arm before the t42 tail load (spike mret MPP:=00 quirk
+   made the RO-page tail fault PF13 there); deterministic in both mret semantics.
+3. fresh_clone_check.sh: no absolute literals - `SRC=${SRC:-repo-of-script}`,
+   `CLONE=${CLONE:-sibling fresh_<repo>_clone}`, env-overridable.
+4. "(11 tests)" -> real count; suite is 11 now (t42 re-included); older section says 11 after
+   the fix (kept truthful per stage).
+5. Gates after this round: mmu 14/14, mmu5 LAT5 ALL PASS, spike_tests 11 SPIKE_MMU_OK,
+   all_tests ALL TESTS DONE, fresh-clone check PASSED (fpga pins SB_LUT4 3360 / SB_DFF 1259
+   unchanged), t19 (unpaged, our clear-on-store choice) untouched and still green.
