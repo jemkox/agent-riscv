@@ -1741,4 +1741,28 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 - Item 4: paged lr/sc/amo honesty kept (this round adds no atomics under satp; documented above).
 - Gates: `mmu`/`mmu5` ALL PASS (13 directed), `test` ALL PASS, `spike_tests` SPIKE_MMU_OK (10),
   `all_tests` ALL TESTS DONE, fresh-clone check + `fpga_full FPGA_FREQ=13 FPGA_SEED=4` SB_LUT4
-  3360 SB_DFF 1259 (unchanged). (banner=1 runinit=0 login=0 halt=0, loglen 6475) with checkpoint `build/linux/boot_ckpt.bin` sha eac9e379... . Next probe: directed paged `lr.w`/`sc.w`/`amoadd.w` under satp ISS-vs-CPU (Linux uses lr/sc in sbrk, futex, lockless lists) plus a paged sfence.fence + page-protection storm; fix cache32/top_pipe AMO rd sourcing if the directed test reproduces.
+  3360 SB_DFF 1259 (unchanged). (banner=1 runinit=0 login=0 halt=0, loglen   6475) with checkpoint `build/linux/boot_ckpt.bin` sha eac9e379... . Next probe: directed paged `lr.w`/`sc.w`/`amoadd.w` under satp ISS-vs-CPU (Linux uses lr/sc in sbrk, futex, lockless lists) plus a paged sfence.fence + page-protection storm; fix cache32/top_pipe AMO rd sourcing if the directed test reproduces.
+
+## Directed paged atomics: t42_sv32_amo + table-layout lesson (2026-11-08, same day)
+- The L7 "paged atomics" probe is now a directed pinned test: `tests/t42_sv32_amo.S` (satp + MPRV +
+  MPP=S so atomics run at eff=S through the real walk): lr.w old=0x1111; sc.w SUCCEEDS rd=0; reload
+  sees 0x2222; lr 0x3004 + plain store 0x9999 clears the reservation -> sc.w 0x7777 FAILS rd=1 and
+  the word keeps 0x9999 (sail 0.16 semantics, same pin t19 makes unpaged); amoadd.w +7 rd=old 0x2222
+  mem=0x2229; amoadd.w into an R|A|V (no W) leaf -> PF15 mtval VA, handler counts exactly 1 and skips,
+  later load shows the AMO stored NOTHING. Added to TESTS + MMU_TESTS; `mmu` 14/14 and `mmu5` LAT5
+  ALL PASS; `all_tests` ALL TESTS DONE.
+- TABLE-BUG LESSON (why t42 first failed `gp=3`): the XDBG ISS trace showed the store walking a
+  `pte=0000004b` = the identity CODE leaf - a SINGLE table page used as both root and L0 makes the
+  root-level code leaf (VPN[1]=0, R|X set, PPN 16-aligned) a 4 MiB MEGA-PAGE that shadows every data
+  VA in bits 0..21. t30-t33 use the correct 2-table layout (root@0x8000 entry0=0x2401 -> L0@0x9000,
+  satp PPN 8); t42/t43 were rewritten to it. t43's U-eff "fault" was earlier a FALSE pass (u=0 identity
+  page, not the X-only leaf); with L0 leaves (0xC59 X|A|U|V @vpn0 3, 0x10AF R|W|A|D|U|V @vpn0 4) the
+  intended pin now really fires. t35/t30/t33 verified to already use the 2-table layout.
+- Spike side for t42: EXCLUDED with the recorded quirk: 1.1.1-dev does NOT clear the LR reservation on
+  an intervening plain store to the reserved word (log: lr 0x3004, sw 0x9999, sc 0x7777 -> x30=0 and
+  mem=0x7777), while sail 0.16 (and our CPU/ISS, pinned unpaged by t19) destroys it -> rd=1. The other
+  t42 pins (sc success, amo rd/old, RO-leaf PF15) spike passes identically (they run before that pin).
+- Linux L7 status unchanged (boot still stops after the "ASID allocator disabled" banner) but the
+  paged-atomics gap is now CLOSED on CPU+ISS+MMU5 at LAT1/LAT5; next: paged sfence.fence + protection
+  storm, then re-run the boot chain. Gates: `mmu` ALL PASS (14), `mmu5` ALL PASS, `spike_tests`
+  SPIKE_MMU_OK (11 tests), `all_tests` ALL TESTS DONE, ISS debug (XDBG print) reverted before commit.

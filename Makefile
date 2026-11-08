@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/mmu.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_f
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t40_sv32_midentity t41_mprv_satp t43_sv32_mprv_umxr t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -165,6 +165,9 @@ $(B)/%.o: tests/%.S | $(B)
 
 # t19: atomics need the A extension (rv32ima) in the assembler march
 T19_CCFLAGS := -march=rv32ima_zicsr -mabi=ilp32
+$(B)/t42_sv32_amo.o: tests/t42_sv32_amo.S | $(B)
+	$(CC) $(UA_CCFLAGS) -c $< -o $(B)/t42_sv32_amo.rvo
+	$(OC) -O elf32-littleriscv $(B)/t42_sv32_amo.rvo $@
 $(B)/t19_amo.o: tests/t19_amo.S | $(B)
 	$(CC) $(T19_CCFLAGS) -c $< -o $(B)/t19_amo.rvo
 	$(OC) -O elf32-littleriscv $(B)/t19_amo.rvo $@
@@ -311,7 +314,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t40_sv32_midentity t41_mprv_satp t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
+MMU_TESTS := t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -1004,12 +1007,17 @@ linux_mmu_spike: linux_mmu_build spike_pin_check | $(B)/linux/logs
 # phase pins the SPEC side (ISS+RTL, against sail); keeping it in the spike suite would
 # make that golden-model deviation red. Spike additionally mrets with MPP:=00 instead
 # of restoring MPP=M after an M trap (c768_mstatus 0xe0080 after mret in that log) -
-# both quirks recorded here; the CPU/ISS pins stay spec-gated (pr==01 && mx in pbad).
-SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr,$(MMU_TESTS))
+# both t43 quirks recorded here; the CPU/ISS pins stay spec-gated (pr==01 && mx in pbad).
+# t42_sv32_amo is EXCLUDED too: Spike 1.1.1-dev does not clear the LR reservation on an
+# intervening plain store to the reserved word (its log shows lr 0x3004; sw 0x9999; sc
+# 0x7777 -> x30=0 mem=0x7777), while sail 0.16 (and our CPU/ISS, pinned by unpaged t19)
+# destroys it -> sc rd=1 and the word must keep 0x9999.
+SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t42_sv32_amo t43_sv32_mprv_umxr,$(MMU_TESTS))
 $(B)/spike:
 	@mkdir -p $@
 $(B)/spike/%.elf: tests/%.S tests/link_spike.ld | $(B)/spike
 	$(CC) $(CCFLAGS) -DMMU_CODE_VPN=0x20 -DCODE_FLAGS=0x4B -nostdlib -Wl,-Ttests/link_spike.ld -Wl,-m,elf32lriscv -o $@ $<
+$(B)/spike/t42_sv32_amo.elf: CCFLAGS := $(UA_CCFLAGS)
 spike_tests: $(foreach t,$(SPIKE_MMU_TESTS),$(B)/spike/$(t).elf) spike_pin_check | $(B)
 	@mkdir -p $(B)/spike/logs
 	@bad=0; \
