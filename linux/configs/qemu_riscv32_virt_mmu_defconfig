@@ -25,5 +25,9 @@ BR2_TARGET_OPENSBI=y
 BR2_TARGET_OPENSBI_CUSTOM_VERSION=y
 BR2_TARGET_OPENSBI_CUSTOM_VERSION_VALUE="1.6"
 BR2_TARGET_OPENSBI_PLAT="generic"
+# Our CPU is rv32imaz_zicsr_zifencei (no RVC): OpenSBI generic would default
+# to rv32imafdc and emit compressed insns, so pin the ISA for the fw build.
+# (gcc 13 rejects the legacy single-letter 'z'; rv32ima_... is enough for OpenSBI.)
+BR2_TARGET_OPENSBI_ADDITIONAL_VARIABLES="PLATFORM_RISCV_XLEN=32 PLATFORM_RISCV_ABI=ilp32 PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei"
 BR2_PACKAGE_HOST_QEMU=y
 BR2_PACKAGE_HOST_QEMU_SYSTEM_MODE=y

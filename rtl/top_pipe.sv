@@ -95,6 +95,8 @@ module top_pipe (
   logic        read_a, read_b, ce_bsel, ce_ld, ce_st, ce_br, ce_jal, ce_jalr, ce_lui, ce_auipc, ce_opi, ce_op;
   logic        ce_sys, ce_fence, ce_ill, ce_m, ceif_ill, ceif_m, ce_csr, ce_sret, exmem_csr_en, exmem_csr_wen;
   logic [1:0]  ce_csr_req;
+  logic        csr_def_id;
+  logic        csr_ro_id;
   logic        idex_csr_en, idex_csr_wen, idex_trap, trap_flush, timer_flush, halt_out, mret_flush, sret_flush, ce_mret;
   logic [31:0] cs_sepc;
 `ifdef FPGA
@@ -253,7 +255,7 @@ module top_pipe (
             .is_jal(ce_jal), .is_jalr(ce_jalr), .is_lui(ce_lui), .is_auipc(ce_auipc),
             .is_opi(ce_opi), .is_op(ce_op),              .is_sys(ce_sys), .is_fence(ce_fence),
               .is_m(ce_m), .m_op(ce_m_op),              .is_mret(ce_mret), .is_ill(ce_ill),
-              .is_sret(ce_sret), .is_csr(ce_csr), .csr_req(ce_csr_req), .csr_num(), .is_wfi(ce_wfi),
+              .is_sret(ce_sret), .is_csr(ce_csr), .csr_req(ce_csr_req), .csr_def(csr_def_id), .csr_ro(csr_ro_id), .csr_num(), .is_wfi(ce_wfi),
              .is_amo(ce_amo), .is_lr(ce_lr), .is_sc(ce_sc), .amo5(ce_amo5), .i(idex_insn));
 `ifdef FPGA
   mdiu_fpga MD(.clk(clk), .reset(reset), .idex_valid(idex_valid), .is_m(idex_m_go), .is_ill(1'b0),
@@ -275,7 +277,7 @@ module top_pipe (
               .is_br(ceif_br), .is_jal(), .is_jalr(ceif_jalr),
                .is_lui(), .is_auipc(), .is_opi(ceif_opi), .is_op(ceif_op),
                .is_sys(), .is_fence(), .is_m(ceif_m), .m_op(),
-                .is_mret(), .is_sret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .csr_req(),
+                .is_mret(), .is_sret(), .is_ill(ceif_ill), .is_csr(ceif_csr), .csr_req(), .csr_def(), .csr_ro(),
                 .is_wfi(),
                 .is_amo(ceif_amo), .is_lr(), .is_sc(), .amo5(), .csr_num(), .i(ifid_insn));
   /* verilator lint_on PINCONNECTEMPTY */
@@ -435,7 +437,7 @@ module top_pipe (
 
   csrs_pipe CSR1(.clk(clk), .reset(reset), .halt(halt),
             .idex_valid(idex_valid), .idex_insn(idex_insn), .idex_pc(idex_pc),
-            .ce_sys(ce_sys), .ce_ill(ce_ex_ill), .ce_fetch_bad(idex_fetch_bad), .ce_mret(ce_mret), .ce_sret(ce_sret), .ce_csr(ce_csr), .ce_csr_req(ce_csr_req), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
+            .ce_sys(ce_sys), .ce_ill(ce_ex_ill), .ce_fetch_bad(idex_fetch_bad), .ce_mret(ce_mret), .ce_sret(ce_sret), .ce_csr(ce_csr), .ce_csr_req(ce_csr_req), .ce_csr_def(csr_def_id), .ce_csr_ro(csr_ro_id), .ce_f3(ce_f3), .ce_rs1(ce_rs1),
             .ld_ok(ld_ok), .st_ok(st_ok), .stall(stall), .m_stall(m_stall),
             .exmem_valid(exmem_valid), .exmem_csr_en(exmem_csr_en), .exmem_csr_wen(exmem_csr_wen),
             .exmem_insn(exmem_insn), .exmem_pc(exmem_pc), .exmem_f3(exmem_f3), .exmem_r1(exmem_r1),

@@ -29,6 +29,8 @@ module ctrl (
   output logic         is_ill,
   output logic         is_csr,
   output logic [1:0]   csr_req,     // required privilege of the id CSR op
+  output logic         csr_def,     // CSR number is implemented; else the CSR op faults
+  output logic         csr_ro,      // read-only CSR (Zicntr views); write -> illegal
   output logic         is_wfi,      // WFI builder aliases: 0x100 (x10000073) and 0x105 (x10500073)
   output logic         is_amo,      // A: LR/SC/AMO*.w (simulation CPU only; FPGA: 0)
   output logic         is_lr,       // LR.W
@@ -52,6 +54,8 @@ module ctrl (
   assign is_sret  = (opc == 7'b1110011 && i[14:12] == 3'b000 &&
                      (i[31:20] == 12'h102 || i[31:20] == 12'h106));
   assign csr_req  = (csr_num == 12'h3ff) ? 2'b00 : csr_num[9:8];
+  assign csr_def  = csr_defined(csr_num);
+  assign csr_ro   = is_csr_readonly(csr_num);
 `ifdef FPGA
   assign is_wfi   = 1'b0;           // FPGA never executes WFI (no OS on the card;
                                      // keeps SYSTEM f3=0 decode shape for Fmax seed4)
@@ -187,4 +191,26 @@ module ctrl (
     if (is_st && (f3 == 3'b011 || f3 == 3'b110 || f3 == 3'b111)) is_ill = 1;
     if (is_opi && (f3 == 3'b001 || f3 == 3'b101) && (i[25])) is_ill = 1;
   end
+
+  function bit csr_defined;   // implemented CSR numbers (aligned to spike banner)
+    input bit [11:0] c;
+    csr_defined = (c == 12'h300 || c == 12'h301 || c == 12'h302 || c == 12'h303 ||
+            c == 12'h304 || c == 12'h305 || c == 12'h308 || c == 12'h320 ||
+            c == 12'h340 || c == 12'h341 || c == 12'h342 || c == 12'h343 ||
+            c == 12'h344 || c == 12'h3ff || c == 12'h100 || c == 12'h104 ||
+            c == 12'h105 || c == 12'h106 || c == 12'h140 || c == 12'h141 ||
+            c == 12'h142 || c == 12'h143 || c == 12'h180 || c == 12'hb00 ||
+            c == 12'hb02 || c == 12'hb82 || c == 12'hc01 || c == 12'hc02 ||
+            c == 12'hc81 || c == 12'hc82 || c == 12'hc00 || c == 12'hc80 ||
+            c == 12'h306 || c == 12'hf11 || c == 12'hf12 || c == 12'hf13 ||
+            c == 12'hf14 || c == 12'h7a0 || c == 12'h7a1 || c == 12'h7a2 ||
+            c == 12'h7a3 || c == 12'h7a4 || c == 12'h7a5 || c == 12'h7a6 ||
+            c == 12'h7a7 || c == 12'h270 || c == 12'h144);
+  endfunction
+
+  function bit is_csr_readonly;   // Zicntr read-only views: write -> illegal
+    input bit [11:0] c;
+    is_csr_readonly = (c == 12'hc00 || c == 12'hc80 || c == 12'hc01 ||
+            c == 12'hc81 || c == 12'hc02 || c == 12'hc82);
+  endfunction
 endmodule

@@ -10,7 +10,7 @@ _start:
   csrrw x0,mstatus,x0
   csrrw x0,mtvec,x0
   li t2,5
-  csrrw x0,0x705,t2
-  csrr t3,0x705
+  csrrw x0,mscratch,t2
+  csrr t3,mscratch
   sw t3,4(t0)
   addi x30,x0,1; li gp, 1; csrrw x0,0x3ff,x30

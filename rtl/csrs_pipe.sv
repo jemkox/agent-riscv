@@ -13,6 +13,8 @@ module csrs_pipe (
   input  logic        ce_sret,
   input  logic        ce_csr,
   input  logic [1:0]  ce_csr_req,    // required privilege of the id CSR op
+  input  logic        ce_csr_def,    // CSR number implemented; when 0 the CSR op faults
+  input  logic        ce_csr_ro,     // read-only CSR number (write attempt faults)
   input  logic [2:0]  ce_f3,
   input  logic [4:0]  ce_rs1,
   input  logic        ld_ok,
@@ -65,6 +67,10 @@ module csrs_pipe (
   logic        trap_en, mret_active, mret_en, sret_en, sret_active, irq_due, trap_to_sup, priv_viol;
   logic [31:0] trap_cause, irq_cause;
   logic [1:0]  priv_cur;
+  logic        csr_watt;   // id-view CSR op attempts a write (rs1/uimm nonzero)
+  assign csr_watt = (ce_f3 == 3'b001) || (ce_f3 == 3'b101) ||
+                    ((ce_f3 == 3'b010 || ce_f3 == 3'b011) && ce_rs1 != 5'd0) ||
+                    ((ce_f3 == 3'b110 || ce_f3 == 3'b111) && idex_insn[19:15] != 5'd0);
   /* verilator lint_off UNUSEDSIGNAL */
   logic [31:0] mstatus_next, mie_next, mtvec_next, mepc_next, stvec_next, sepc_next;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -99,7 +105,9 @@ module csrs_pipe (
             .priv_cur(priv_cur), .cs_medeleg(cs_medeleg), .cs_mideleg(cs_mideleg), .halt_out(halt_out),
             .mmu_mode(mmu_mode), .mmu_ppn(mmu_ppn), .cs_satp_wr(cs_satp_wr)
 `ifndef FPGA
-            , .cs_mip_sw(mip_sw_next)
+            , .cs_mip_sw(mip_sw_next), .cs_time_mt64(clint_mt)
+`else
+            , .cs_time_mt64(64'b0)
 `endif
             );
 
@@ -136,6 +144,8 @@ module csrs_pipe (
                               (ce_sret && (priv_cur == 2'b00 ||
                                (priv_cur == 2'b01 && ((mstatus_next & 32'h0040_0000) != 0)))) ||
                               (ce_csr && (priv_cur < ce_csr_req)) ||
+                              (ce_csr && !ce_csr_def) ||
+                              (ce_csr && ce_csr_ro && csr_watt) ||
                               // SFENCE.VMA: illegal in U; illegal in S when mstatus.TVM (rv32 bit20).
                               ((idex_insn[31:25] == 7'b0001001) && (idex_insn[11:7] == 5'b0) &&
                                (priv_cur == 2'b00 ||

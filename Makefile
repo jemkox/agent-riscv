@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/mmu.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_f
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -480,6 +480,7 @@ LINUX_CKPT_LATER_CYCLE ?= 90000000
 LINUX_CKPT_HASH ?= $(shell sha256sum $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb | sha256sum | cut -d' ' -f1)
 LINUX_DBG_CYCLES ?= 150000000
 LINUX_SHELL_CYCLES ?= 800000000
+LINUX_SIM_CYCLES ?= 3000000000
 linux:
 	@mkdir -p linux $(B)/linux
 $(B)/linux/logs:
@@ -942,6 +943,7 @@ linux/linux_mmu.dtb: rtl/linux_mmu.dts linux | $(B)
 linux_mmu_build: linux | $(BR_MMU_OUT)
 	@ln -sf $(CURDIR)/linux/configs/$(BR_MMU_NAME) $(BR_ROOT)/configs/$(BR_MMU_NAME)
 	@cp $(CURDIR)/linux/configs/board/qemu/riscv32-virt/linux-mmu.fragment $(BR_ROOT)/board/qemu/riscv32-virt/linux-mmu.fragment
+	@cp $(CURDIR)/linux/configs/board/qemu/riscv32-virt/linux-isa-min.config $(BR_ROOT)/board/qemu/riscv32-virt/linux-isa-min.config
 	@cp $(CURDIR)/linux/configs/board/qemu/riscv32-virt/post-build-mmu.sh $(BR_ROOT)/board/qemu/riscv32-virt/post-build-mmu.sh
 	@chmod +x $(BR_ROOT)/board/qemu/riscv32-virt/post-build-mmu.sh
 	$(MAKE) -s -C $(BR_ROOT) O=$(BR_MMU_OUT) $(BR_MMU_NAME)
@@ -955,3 +957,18 @@ linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
 	@echo "QEMU boot log: $(BR_MMU_OUT)/qemu_boot.log"
 	@if grep -q "OpenSBI v1.6" $(BR_MMU_OUT)/qemu_boot.log && grep -q "buildroot login:" $(BR_MMU_OUT)/qemu_boot.log && grep -q "reboot: Power down" $(BR_MMU_OUT)/qemu_boot.log; then echo "L7 QEMU BOOT OK: OpenSBI banner + login + commands + clean poweroff"; else echo "L7 QEMU BOOT FAIL"; exit 1; fi
 	@grep -m 5 -a "OpenSBI\|Run /init as init\|login\|Power down" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true
+
+$(B)/vlt_openboot/run_openboot: $(RTL) tb/run_linux.sv tb/run_openboot.cpp | $(B)
+	verilator --cc --exe --Wall -O2 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
+	$(MAKE) -C $(B)/vlt_openboot -f Vrun_linux.mk OPT_FAST="-O2" run_openboot -j 4
+
+linux_mmu_spike: linux_mmu_build | $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs
+	@rm -f $(B)/linux/logs/linux_mmu_spike.out
+	@timeout 300 sh -c '(sleep 70; printf "root\n"; sleep 5; printf "uname -a\n"; sleep 5; printf "cat /proc/cpuinfo\n"; sleep 5; printf "poweroff\n"; sleep 5) | /home/jemko/.local/bin/spike --isa=rv32ima_zicsr_zifencei_zicntr -m64 --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio --bootargs="console=ttyS0 earlycon" $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike.out'
+	@if grep -q "OpenSBI v1.6" $(B)/linux/logs/linux_mmu_spike.out && grep -q "Run /init as init" $(B)/linux/logs/linux_mmu_spike.out && grep -q "login:" $(B)/linux/logs/linux_mmu_spike.out; then echo "L7 SPIKE BOOT OK: OpenSBI banner + init + login (reference for the CPU boot)"; else echo "L7 SPIKE BOOT FAIL"; exit 1; fi
+
+linux_mmu_sim: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mmu_build | $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs
+	@./$(B)/vlt_openboot/run_openboot $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt | tee $(B)/linux/logs/openboot.out
+	@grep -q "^OPENBOOT OK" $(B)/linux/logs/openboot.out || { echo "L7 OPENBOOT SIM FAILED"; exit 1; }

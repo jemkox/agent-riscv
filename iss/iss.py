@@ -37,7 +37,7 @@ def main(argv):
     # CPU in M mode this is identical to the pre-L5 M/U model, so L1-L4 and the
     # rv32mi suite behavior is unchanged; misa advertises S and U (bit18/bit20).
     cs = {0x300:0x1800,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
-          0x340:0,0x301:0x40001101,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0,
+          0x340:0,0x301:0x40141101,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0,0x306:0,
           0x302:0,0x303:0,0x306:0,
           0x100:0,0x104:0,0x105:0,0x106:0,0x140:0,0x141:0,0x142:0,0x143:0,0x144:0,0x180:0,
           0x32d:0,0x32e:0,0x32f:0}
@@ -47,6 +47,14 @@ def main(argv):
     MPP_MASK = 0x1800; SPP_BIT = 0x100; MPIE_BIT = 0x80; SPIE_BIT = 0x20
     MIE_BIT = 0x8; SIE_BIT = 0x2
     TSR_BIT = 0x00400000; TVM_BIT = 0x00100000
+    CSR_DEFINED = {0x300,0x301,0x302,0x303,0x304,0x305,0x308,0x320,
+                   0x340,0x341,0x342,0x343,0x344,0x3ff,
+                   0x100,0x104,0x105,0x106,0x140,0x141,0x142,0x143,
+                   0x180,
+                   0xb00,0xb02,0xb82,0xc01,0xc02,0xc81,0xc82,
+                   0xc00,0xc80,0x306,0xf11,0xf12,0xf13,0xf14,
+                   0x7a0,0x7a1,0x7a2,0x7a3,0x7a4,0x7a5,0x7a6,0x7a7,0x270,0x144}
+    CSR_RO = {0xc00,0xc80,0xc01,0xc81,0xc02,0xc82}   # Zicntr read-only views
     def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
         if n == 0x100:   return cs[0x300] & SSTATUS_MASK   # sstatus = mstatus view
@@ -434,10 +442,23 @@ def main(argv):
                     cause = 2; illegal = True   # CSR not accessible at current priv
                 elif csr_num == 0x180 and priv == 1 and (cs_get(0x300) & TVM_BIT):
                     cause = 2; illegal = True   # satp access illegal in S when mstatus.TVM
+                elif csr_num not in CSR_DEFINED:
+                    cause = 2; illegal = True   # Zicsr: unimplemented CSR numbers raise ILLEGAL
+                elif csr_num in CSR_RO and ((f3 in (1,5)) or
+                     (f3 in (2,3) and a0 != 0) or (f3 in (6,7) and zimm != 0)):
+                    cause = 2; illegal = True   # Zicntr: write to read-only counter
                 else:
                     if csr_num == 0x308 or csr_num == 0x344:   # mip: live bits, post-tick view like the RTL
                         old = ((((mtime + 1) >= mtpcmp) << 7) |
                                ((msip & 1) << 3) | (mip_sw & 0xFFFFFF77))
+                    elif csr_num == 0xc01:
+                        old = (mtime + 1) & mask          # time: post-tick view like the RTL
+                    elif csr_num == 0xc81:
+                        old = ((mtime + 1) >> 32) & mask  # timeh high half
+                    elif csr_num == 0xc00:
+                        old = cs[0xb00]                   # cycle (rv32 Zicntr view)
+                    elif csr_num == 0xc80:
+                        old = 0                           # cycleh high half (not tracked)
                     else:
                         old = cs_get(csr_num)
                     if f3 == 1: newv = a0

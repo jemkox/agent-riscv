@@ -32,6 +32,7 @@ module csrs (
   input  logic        retire_en,
   input  logic        idex_read_en,
   input  logic [11:0] idex_rsel,
+  input  logic [63:0] cs_time_mt64,   // CLINT mtime (time/timeh Zicntr view)
   output logic [31:0] cs_old_idex,
 `ifndef FPGA
   input  logic [31:0] mip_in,
@@ -83,6 +84,12 @@ module csrs (
   localparam CSR_SCNTR     = 12'h106;
   localparam CSR_SATP      = 12'h180;
   localparam CSR_SSTATUS   = 12'h100;
+  localparam CSR_TIME      = 12'hc01;   // read-only view of CLINT mtime (Zicntr)
+  localparam CSR_TIMEH     = 12'hc81;   // mtime[63:32]
+  localparam CSR_CYCLE     = 12'hc00;   // Zicntr cycle (rv32 view of mcycle)
+  localparam CSR_CYCLEH    = 12'hc80;   // cycleh high half (not tracked, reads 0)
+  localparam CSR_INSTRETH  = 12'hc82;   // instreth == INSTRET_H alias
+  localparam CSR_MCOUNTEREN= 12'h306;   // m-mode counter-enable bitmap
   localparam MSTATUS_MPP   = 32'h0000_1800;
   localparam MSTATUS_SPP   = 32'h0000_0100;
   localparam MSTATUS_MPIE  = 32'h0000_0080;
@@ -90,7 +97,9 @@ module csrs (
   localparam MSTATUS_MIE   = 32'h0000_0008;
   localparam MSTATUS_SIE   = 32'h0000_0002;
   localparam SSTATUS_MASK  = 32'h800C1922;
-  localparam MISA_VAL      = 32'h4000_1101;
+  // misa: MXL=RV32 + I M A (0x1101) + S(bit18) U(bit20) — we run Linux/OpenSBI
+  // in S|U so misa must advertise them (OpenSBI generic probes misa bit for 'S').
+  localparam MISA_VAL      = 32'h4014_1101;
 
   // ---- machine + supervisor architect state (all kept for synthesis) ----
   logic [31:0] st_mscratch = 0;
@@ -108,6 +117,7 @@ module csrs (
   (* keep *) logic [31:0] st_sscratch = 0;
   (* keep *) logic [31:0] st_sie = 0;
   logic [31:0] st_scntr = 0;
+  logic [31:0] st_mcounteren = 0;
   (* keep *) logic [31:0] st_satp = 0;   // satp: mode|ASID|PPN (L6 MMU)
   logic [31:0] st_mcycle;
   logic [31:0] st_minstret;
@@ -195,7 +205,7 @@ module csrs (
       st_mip_sw <= 32'h0;
 `endif
       st_stvec <= 0; st_sepc <= 0; st_scause <= 0; st_stval <= 0;
-      st_sscratch <= 0; st_sie <= 0; st_scntr <= 0;
+      st_sscratch <= 0; st_sie <= 0; st_scntr <= 0; st_mcounteren <= 0;
       st_mscratch <= 0;
       st_mcycle <= 0; st_minstret <= 0; st_minstret_hi <= 0; st_mcountinhibit <= 0;
       st_mie <= 0; st_halt <= 1'b0;
@@ -266,6 +276,7 @@ module csrs (
           CSR_SSCRATCH: st_sscratch <= newv;
           CSR_SIE: st_sie <= newv;
           CSR_SCNTR: st_scntr <= newv;
+          CSR_MCOUNTEREN: st_mcounteren <= newv;
           CSR_SATP: st_satp <= newv & 32'h803F_FFFF;
           CSR_MCYCLE: st_mcycle <= newv;
           CSR_MINSTRT, CSR_INSTRET: st_minstret <= newv;

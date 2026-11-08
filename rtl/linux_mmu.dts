@@ -13,6 +13,8 @@
 	 bootargs = "console=ttyS0 earlycon=ns16550,mmio,0x10000000 initramfs_async=0";
 	 stdout-path = "/soc/serial@10000000";
 	 stdin-path = "/soc/serial@10000000";
+ 	 linux,initrd-start = <0x00 0x82800000>;
+ 	 linux,initrd-end = <0x00 0x82931600>;
 	};
 
 	 memory@80000000 {

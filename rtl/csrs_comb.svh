@@ -26,7 +26,12 @@
             | (cs_rsel == CSR_MINSTRT || cs_rsel == CSR_INSTRET ? min_ref : 32'h0)
             | (cs_rsel == CSR_MINSTRT_H || cs_rsel == CSR_INSTRET_H ? minh_ref : 32'h0)
             | (cs_rsel == CSR_MCOUNTHI ? st_mcountinhibit : 32'h0)
-            | (cs_rsel == CSR_XHALT ? {31'b0, st_halt} : 32'h0);
+            | (cs_rsel == CSR_MCOUNTEREN ? st_mcounteren : 32'h0)
+            | (cs_rsel == CSR_CYCLE ? mc_ref : 32'h0)
+            | (cs_rsel == CSR_INSTRETH ? minh_ref : 32'h0)
+            | (cs_rsel == CSR_XHALT ? {31'b0, st_halt} : 32'h0)
+            | (cs_rsel == CSR_TIME ? cs_time_mt64[31:0] : 32'h0)
+            | (cs_rsel == CSR_TIMEH ? cs_time_mt64[63:32] : 32'h0);
     end
     newv = cs_wrs1;
     if (cs_wop == 3'b001) newv = cs_wrs1;
