@@ -58,11 +58,11 @@ module clint_dev (
   wire [31:0] ready   = mie_in & mip_all;
   wire [31:0] nd      = ready & ~mid;
   wire [31:0] dl      = ready & mid;
-  // Spec: an interrupt whose handler is MORE privileged than the current priv is
-  // taken regardless of that handler's enable bit (Spike-confirmed); the enable gate
-  // (MIE/SIE) only applies when priv == handler priv.
+  // Spec/Spike: interrupts handled by a MORE-privileged mode are taken regardless of
+  // that mode's enable bit; the enable gate (MIE/SIE) applies when priv == handler
+  // priv; interrupts delegated to a LESS-privileged handler are never taken at M.
   wire [31:0] sel     = (priv_cur == 2'b11)
-                      ? (((mstatus_in & 32'h0000_0008) != 0) ? (ready | dl) : 32'h0)
+                      ? (((mstatus_in & 32'h0000_0008) != 0) ? nd : 32'h0)
                       : ((ready & ~mid) |
                          (((priv_cur == 2'b01) ? ((mstatus_in & 32'h0000_0002) != 0)
                                                : 1'b1) ? dl : 32'h0));

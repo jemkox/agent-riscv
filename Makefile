@@ -2,12 +2,13 @@ RTL := rtl/top_pipe.sv rtl/mmu.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_f
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
 UI_CCFLAGS := -march=rv32i_zicsr_zifencei -mabi=ilp32
 OC := riscv64-unknown-elf-objcopy
+SPIKE ?= spike
 
 # External inputs (not in the repo). `make deps` clones the two public ones into deps/ at pinned
 # revisions; the DOOM shareware WAD you copy to deps/doom1.wad yourself. Any of them can also be
@@ -35,7 +36,7 @@ WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.w
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
 # Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
-FPGA_NETLIST_LUT4 ?= 3339
+FPGA_NETLIST_LUT4 ?= 3361
 FPGA_NETLIST_FLOPS ?= 1259
 # Pinned netlist for the documented fpga_csrtrap ROM (smaller, but it exercises
 # trap CSRs dynamically; see fpga_csrtrap_netlist target below).
@@ -299,7 +300,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
+MMU_TESTS := t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -481,6 +482,7 @@ LINUX_CKPT_HASH ?= $(shell sha256sum $(RTL) tb/run_linux.sv tb/run_linux.cpp lin
 LINUX_DBG_CYCLES ?= 150000000
 LINUX_SHELL_CYCLES ?= 800000000
 LINUX_SIM_CYCLES ?= 3000000000
+LINUX_STUCK_LIMIT ?= 25000
 linux:
 	@mkdir -p linux $(B)/linux
 $(B)/linux/logs:
@@ -940,6 +942,10 @@ linux/linux_mmu.dtb: rtl/linux_mmu.dts linux | $(B)
 	@mkdir -p linux
 	@dtc -I dts -O dtb -o linux/linux_mmu.dtb rtl/linux_mmu.dts
 
+MMU_KERNEL_SHA256 ?= 8e262f7bec39eb05f5d92f1cc14b3ed2b6f7be0a27d906ea96dbf9db7436b375
+MMU_FW_SHA256 ?= 1b5f194f55c2f743be9c26cc4c220a8d04e74f51e0e944023b9a5626e15fa7b7
+MMU_ROOTFS_CANON_SHA256 ?= c1692250c8f8d06eaa0baab7334839ea7c6ea3888f8f02e90986b9882487110f
+
 linux_mmu_build: linux | $(BR_MMU_OUT)
 	@ln -sf $(CURDIR)/linux/configs/$(BR_MMU_NAME) $(BR_ROOT)/configs/$(BR_MMU_NAME)
 	@cp $(CURDIR)/linux/configs/board/qemu/riscv32-virt/linux-mmu.fragment $(BR_ROOT)/board/qemu/riscv32-virt/linux-mmu.fragment
@@ -949,26 +955,53 @@ linux_mmu_build: linux | $(BR_MMU_OUT)
 	$(MAKE) -s -C $(BR_ROOT) O=$(BR_MMU_OUT) $(BR_MMU_NAME)
 	$(MAKE) -s -C $(BR_ROOT) O=$(BR_MMU_OUT) all -j2
 	@python3 tools/canonical_cpio.py $(BR_MMU_OUT)/images/rootfs.cpio $(BR_MMU_OUT)/rootfs_canon.cpio
-	@sha256sum $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/fw_dynamic.elf $(BR_MMU_OUT)/rootfs_canon.cpio
+	@python3 tools/mmu_pin_check.py $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/fw_dynamic.elf $(BR_MMU_OUT)/rootfs_canon.cpio $(MMU_KERNEL_SHA256),$(MMU_FW_SHA256),$(MMU_ROOTFS_CANON_SHA256)
 
 linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
 	@rm -f $(BR_MMU_OUT)/qemu_boot.log
-	@timeout 240 sh -c '(sleep 115; printf "root\n"; sleep 6; printf "ls /\n"; sleep 6; printf "uname -a\n"; sleep 6; printf "cat /proc/cpuinfo\n"; sleep 6; printf "poweroff\n") | hdl qemu-system-riscv32 -M virt -m 64M -nographic -bios $(BR_MMU_OUT)/images/fw_dynamic.bin -kernel $(BR_MMU_OUT)/images/Image -initrd $(BR_MMU_OUT)/images/rootfs.cpio > $(BR_MMU_OUT)/qemu_boot.log'
+	@timeout 240 sh -c '(sleep 115; printf "root\n"; sleep 6; printf "ls /\n"; sleep 6; printf "uname -a\n"; sleep 6; printf "cat /proc/cpuinfo\n"; sleep 6; printf "poweroff\n") | hdl qemu-system-riscv32 -M virt -m 128M -nographic -bios $(BR_MMU_OUT)/images/fw_dynamic.bin -kernel $(BR_MMU_OUT)/images/Image -initrd $(BR_MMU_OUT)/images/rootfs.cpio > $(BR_MMU_OUT)/qemu_boot.log'
 	@echo "QEMU boot log: $(BR_MMU_OUT)/qemu_boot.log"
 	@if grep -q "OpenSBI v1.6" $(BR_MMU_OUT)/qemu_boot.log && grep -q "buildroot login:" $(BR_MMU_OUT)/qemu_boot.log && grep -q "reboot: Power down" $(BR_MMU_OUT)/qemu_boot.log; then echo "L7 QEMU BOOT OK: OpenSBI banner + login + commands + clean poweroff"; else echo "L7 QEMU BOOT FAIL"; exit 1; fi
 	@grep -m 5 -a "OpenSBI\|Run /init as init\|login\|Power down" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true
 
 $(B)/vlt_openboot/run_openboot: $(RTL) tb/run_linux.sv tb/run_openboot.cpp | $(B)
-	verilator --cc --exe --Wall -O2 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
-	$(MAKE) -C $(B)/vlt_openboot -f Vrun_linux.mk OPT_FAST="-O2" run_openboot -j 4
+	verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast -DLINUX -DLINUX_DEBUG -DIFHDBG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
+	$(MAKE) -C $(B)/vlt_openboot -f Vrun_linux.mk OPT_FAST="-O2 -DLINUX_DEBUG " run_openboot -j 4
 
 linux_mmu_spike: linux_mmu_build | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
 	@rm -f $(B)/linux/logs/linux_mmu_spike.out
-	@timeout 300 sh -c '(sleep 70; printf "root\n"; sleep 5; printf "uname -a\n"; sleep 5; printf "cat /proc/cpuinfo\n"; sleep 5; printf "poweroff\n"; sleep 5) | /home/jemko/.local/bin/spike --isa=rv32ima_zicsr_zifencei_zicntr -m64 --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio --bootargs="console=ttyS0 earlycon" $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike.out'
+	@timeout 300 sh -c '(sleep 70; printf "root\n"; sleep 5; printf "uname -a\n"; sleep 5; printf "cat /proc/cpuinfo\n"; sleep 5; printf "poweroff\n"; sleep 5) | $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m64 --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio --bootargs="console=ttyS0 earlycon" $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike.out'
 	@if grep -q "OpenSBI v1.6" $(B)/linux/logs/linux_mmu_spike.out && grep -q "Run /init as init" $(B)/linux/logs/linux_mmu_spike.out && grep -q "login:" $(B)/linux/logs/linux_mmu_spike.out; then echo "L7 SPIKE BOOT OK: OpenSBI banner + init + login (reference for the CPU boot)"; else echo "L7 SPIKE BOOT FAIL"; exit 1; fi
+
+# Spike commit log (golden per-instruction reference): compare with build/linux/cpu_retire.bin.
+SPIKE_MAX_INS ?= 4750000
+linux_mmu_spike_log: linux_mmu_build | $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs
+	@rm -f $(B)/linux/logs/linux_mmu_spike_commits.log $(B)/linux/logs/linux_mmu_spike_c.out
+	@timeout 900 sh -c '(sleep 120; printf "root\n"; sleep 10; printf "uname -a\n"; sleep 10; printf "cat /proc/cpuinfo\n"; sleep 10; printf "poweroff\n"; sleep 10) | $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m64 --max-insn=$(SPIKE_MAX_INS) -l --log-commits --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio --bootargs="console=ttyS0 earlycon" $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike_c.out 2> $(B)/linux/logs/linux_mmu_spike_commits.log'
+	@if grep -q "System simulated" $(B)/linux/logs/linux_mmu_spike_c.out; then echo "SPIKE LOG OK (capped at $(SPIKE_MAX_INS) insns; commit log in linux_mmu_spike_commits.log)"; else echo "SPIKE LOG FAIL"; exit 1; fi
 
 linux_mmu_sim: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mmu_build | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
-	@./$(B)/vlt_openboot/run_openboot $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt | tee $(B)/linux/logs/openboot.out
+	@STUCK_LIMIT=$(LINUX_STUCK_LIMIT) TRACE_MINPC=$(LINUX_TRACE_MINPC) ./$(B)/vlt_openboot/run_openboot $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt | tee $(B)/linux/logs/openboot.out
 	@grep -q "^OPENBOOT OK" $(B)/linux/logs/openboot.out || { echo "L7 OPENBOOT SIM FAILED"; exit 1; }
+
+# L7 checkpoint: save the boot state at CKPT_CYCLES, then restore and continue.
+# OPENBOOT_HASH guards staleness: sha over every RTL file, the runner sources and
+# the *frozen* input copies made by linux_mmu_ckpt_save; a mismatch means something
+# changed since the save and restore refuses (#CKPT_STALE, exit 5).
+CKPT_CYCLES ?= 300000000
+linux_mmu_ckpt_save: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mmu_build | $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs $(B)/linux/inputs
+	@cp -p $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(B)/linux/inputs/
+	@rm -f $(B)/linux/boot_ckpt.bin
+	@H=$$(sha256sum $(RTL) tb/run_linux.sv tb/run_openboot.cpp $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb | sha256sum | cut -d' ' -f1); \
+	echo "$$H" > $(B)/linux/boot_ckpt.hash; \
+	time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(CKPT_CYCLES) - 0 save $(B)/linux/boot_ckpt.bin "$$H" | tee $(B)/linux/logs/ckpt_save.out
+	@grep -q "^#CKPT_SAVE" $(B)/linux/logs/ckpt_save.out || { echo "CKPT SAVE FAILED"; exit 1; }
+
+linux_mmu_ckpt_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
+	@time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) | tee $(B)/linux/logs/ckpt_restore.out
+	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/ckpt_restore.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
+	@grep -q "^OPENBOOT OK" $(B)/linux/logs/ckpt_restore.out || { echo "L7 CKPT-RESTORE SIM FAILED"; exit 1; }

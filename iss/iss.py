@@ -148,12 +148,14 @@ def main(argv):
                 (mip_sw & 0xFFFFFF77))
     def irq_bits():
         b = cs_get(0x304) & mip_bits()
+        m = cs.get(0x303,0)
+        nd = b & ~m
+        dl = b & m
         if priv == 3:
-            return b if (cs_get(0x300) & MIE_BIT) else 0
-        nd = b & ~cs.get(0x303,0)
-        dl = b & cs.get(0x303,0)
-        return ((nd if (cs_get(0x300) & MIE_BIT) else 0) |
-                (dl if (cs_get(0x300) & SIE_BIT) else 0)) & mask
+            return nd if (cs_get(0x300) & MIE_BIT) else 0
+        if priv == 1:
+            return (nd | (dl if (cs_get(0x300) & SIE_BIT) else 0)) & mask
+        return (nd | dl) & mask   # U: delegated handlers (S) are more privileged
     def tvec(v, c):
         base = v & ~1
         return (base | (((v & 1) * ((c & 31) << 2)))) & mask
@@ -161,7 +163,7 @@ def main(argv):
     # typ: 0 fetch, 1 load (incl LR), 2 store (incl SC/AMO). Returns PA, or None for
     # a page fault. With satp.MODE=0 addresses are identity (pre-L6 behavior intact).
     def xlate(v, typ):
-        if not (cs.get(0x180,0) & 0x80000000) or priv == 3: return v   # M-mode: physical (spike)
+        if not (cs.get(0x180,0) & 0x80000000): return v   # Sail 0.16: satp applies at all privs incl M
         root = (cs[0x180] & 0x3FFFFF) << 12
         vpn = ((v >> 12) & 0x3FF, (v >> 22) & 0x3FF)   # vpn[1] = bits 31:22, vpn[0] = bits 21:12
         pte = 0; addr = 0; lvl = 0; leaf = False

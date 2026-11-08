@@ -188,7 +188,7 @@ module csrs (
   assign cs_medeleg = after_medeleg;
   assign cs_mideleg = after_mideleg;
   assign halt_out = halt_wr;
-  assign mmu_mode = after_satp[31] && (after_priv != 2'b11);  // satp applies at S/U only; M is physical (spike)
+  assign mmu_mode = after_satp[31];  // Sail 0.16 (pinned L6 pins): satp translation applies at ALL privs incl M
   assign mmu_ppn = after_satp[21:0];
   assign cs_satp_wr = cs_write_en && (cs_wsel == 12'h180) && !halt_in && !reset;
 `ifndef FPGA
