@@ -66,7 +66,7 @@ module mmu (
       // the jalr even with SUM set). M may fetch anything permitted.
       if (u && pr == 2'b01) ok = 0;
     end else begin
-      if (rd && !(r || (x && mx))) ok = 0;   // MXR grants loads from xwr=100 pages (spec)
+      if (rd && !(r || (pr == 2'b01 && x && mx))) ok = 0;  // MXR rescues x-only loads at S-effective priv only (spec); U eff needs r (t43 pins via MPRV+MPP=U)
       if (wr && !w) ok = 0;
     end
     if (pr == 2'b00 && !u) ok = 0;

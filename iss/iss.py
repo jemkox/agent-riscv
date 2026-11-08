@@ -189,7 +189,7 @@ def main(argv):
             if not x: ok = False
             if u and eff == 1 and typ == 0: ok = False   # S NEVER fetches a U page; SUM applies to loads/stores only (arch-test Sv_sv32_upage_mstatus_sum_set_Smode faults the jalr even with SUM set)
         elif typ == 1:
-            if not (r or (x and (cs[0x300] & MXR_BIT))): ok = False  # MXR grants S loads from executable pages (xwr=100), per spec
+            if not (r or (eff == 1 and x and (cs[0x300] & MXR_BIT))): ok = False  # MXR is an S-effective knob: it grants loads from xwr=100 pages only at S priv (spec); at U eff the load needs r (t43 pins this with MPRV+MPP=U+MXR)
         else:
             if not w: ok = False
         if eff == 0 and not u: ok = False

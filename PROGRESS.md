@@ -1684,7 +1684,7 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 - Suspected blocker (PROGRESS line 1568): paged AMO/LR/SC under satp-on diverged (cache32 AMO rd sourcing); Linux uses lr/sc heavily - silent scheduler-lock corruption deadlocks the init thread. Next: directed paged lr/sc/amo test ISS-vs-CPU.
 
 ## Spike cross-check of the MMU directed suite + spec MXR load rule (2026-11-08, on b59e520)
-- New make target `spike_tests`: builds the SAME mmu-directed .S files with `tests/link_spike.ld` (ORIGIN 0x20000, VPNs 0x20/0x21) plus `-DMMU_CODE_VPN=0x20 -DCODE_FLAGS=0x4B`, runs each under Spike 1.1.1-dev with `-m0x2000:0x1FE000 --fetch3=0 --instruction-monitor=on --instructions=200000 --xenvault=3 -l --log=build/spike/logs/<t>.log` and greps the commit log for a numeric-named `x3  0x00000001` line (gp=1). Result: `SPIKE_MMU_OK` (10 tests).
+- New make target `spike_tests`: builds the SAME mmu-directed .S files with `tests/link_spike.ld` (ORIGIN 0x20000, VPNs 0x20/0x21) plus `-DMMU_CODE_VPN=0x20 -DCODE_FLAGS=0x4B`, runs each under Spike 1.1.1-dev with the exact recipe `$(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m0x2000:0x1FE000 --instructions=200000 --log-commits -l --log=build/spike/logs/<t>.log` (stdout to /dev/null; Spike's own -l log is unbuffered) and greps the commit log for a numeric-named `x3  0x00000001` line (gp=1). Result: `SPIKE_MMU_OK` (10 tests of the 13 in MMU_TESTS; t39/t31/t43 excluded with documented reasons).
   - Why spike-side macros: Spike's RV32 port has NO ADUE mechanism - it page-faults any leaf access with A=0 - so the spike build presets A on code leaves (`CODE_FLAGS=0x4B` = A|V|R|X); our CPU sets A silently on first use (both allowed by the spec). Interior (non-leaf) PTEs must keep A/D/U clear or Spike faults them (`L1_ENTRY=0x2401` stays for both builds).
   - `--instructions` counts page-walk micro-steps too; 4000 silently truncated tests (made spike look like it died at the first fault). 200000 is enough for all ten. Spike exits 0 at the cap and buffered stdout dies on cap/kill - Spike's own `-l --log` (unbuffered) is the reliable log.
   - xhalt CSR 0x3ff is an illegal-instruction trap in Spike; the test handler sets gp=3 then loops to the cap, so "gp reached 3 at halt" cannot be the spike pass criterion; gp=1 lines in the log are.
@@ -1701,5 +1701,41 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 | `all_tests` / `coremark` / `freertos` | ALL TESTS DONE / 41.504125 CRC PASS / FREERTOS PASS |
 | `fpga_full` seed4 | SB_LUT4 3360, SB_DFF 1259, 15.91/15.58 MHz PASS at 13 MHz (pins unchanged) |
 
-### Next step
-- Still L7 CPU boot: `run_openboot` stops after `ASID allocator disabled (0 bits)` (banner=1 runinit=0 login=0 halt=0, loglen 6475) with checkpoint `build/linux/boot_ckpt.bin` sha eac9e379... . Next probe: directed paged `lr.w`/`sc.w`/`amoadd.w` under satp ISS-vs-CPU (Linux uses lr/sc in sbrk, futex, lockless lists) plus a paged sfence.fence + page-protection storm; fix cache32/top_pipe AMO rd sourcing if the directed test reproduces.
+### Spike quirks recorded (1.1.1-dev, from the t43 commit log)
+- Load check is `r || (x && mxr)` with NO privilege gate: an MPRV+MPP=U+MXR load of an
+  x-only U page READS (log line `lw t5 -> x30 0x00001111 mem 0x00003000`) where spec/sail
+  faults cause 13. t43_sv32_mprv_umxr pins the SPEC side (ISS+RTL `pr == 2'b01 && mx` gate)
+  and is EXCLUDED from SPIKE_MMU_TESTS for exactly that reason (like t31).
+- Spike mret after an M-mode trap writes `c768_mstatus 0x000e0080` (MPP bits cleared to
+  00=U instead of restoring MPP=M) - an RV32-MPP quirk of 1.1.1-dev; our CPU/ISS restore
+  MPP=M per sail/sail 0.16 (t16/mpp_ret_gate pins stay spec).
+- Spike golden-model pin added: `SPIKE_SHA256 ?= 63628ab4...` + `spike_pin_check` (the
+  exact installed 1.1.1-dev binary at ~/.local/bin/spike from
+  https://github.com/riscv-software-src/riscv-isa-sim/) is a prerequisite of
+  `spike_tests`, `linux_mmu_spike`, `linux_mmu_spike_log`; drift = hard fail.
+- `tools/fresh_clone_check.sh`: fresh `git clone` of HEAD into ~/agent-workspace/tmp/fresh_rv32cpu,
+  seeds pinned deps (riscv-tests copy, no network), then rebuilds `test`, `mmu`, `mmu5`,
+  `spike_tests`, `fpga_full FPGA_FREQ=13 FPGA_SEED=4` from scratch - catches Makefile
+  order-only/dir-rule breakage that the dirty main tree hides (the `$(B)/spike:` rule
+  was added for exactly this: pattern rule `$(B)/spike/%.elf ... | $(B)/spike` had no
+  way to build `build/spike` in a clean clone).
+- Carried, NOT covered: paged lr.w/sc.w/amo* under satp still has no directed test (tools/gen.py
+  deliberately excludes atomics from PAG seeds); Linux boot suspicion stays open and is
+  NOT re-marked as covered by anything added this round.
+
+## Review fixes on aa14d88 (2026-11-08, fixes committed as this batch)
+- Review verdict PASS-WITH-ISSUES (items 1-4). Item 1: `$(B)/spike:` dir rule added (`@mkdir -p $@`)
+  + fresh-clone check (`tools/fresh_clone_check.sh` over `test`, `mmu`, `mmu5`, `spike_tests`,
+  `fpga_full FPGA_FREQ=13 FPGA_SEED=4`) run against this commit - result: see below.
+- Item 2: MXR x-only rescue now gated at S-effective priv in ISS (`eff == 1 and x and MXR`) and
+  RTL (`rtl/mmu.sv:69 pr == 2'b01 && x && mx`); U-eff loads are `r` only. Directed test
+  `tests/t43_sv32_mprv_umxr.S` added to TESTS+MMU_TESTS (satp + MPRV + MPP=U + MXR load of an
+  X-only U leaf -> PF13 mtval 0x3000; S-eff MPP=S+SUM+MXR same leaf loads fine; RW U leaf works
+  at U; exactly 2 traps: cause 15 then 13, mtval pinned both). Spike side: 1.1.1-dev deviates
+  (no priv gate) - excluded with the quirk recorded above, suite stays 10 green.
+- Item 3: PROGRESS spike recipe synced to the actual Makefile flags (above section); spike
+  binary pinned by sha256 + URL like sail (`spike_pin_check`).
+- Item 4: paged lr/sc/amo honesty kept (this round adds no atomics under satp; documented above).
+- Gates: `mmu`/`mmu5` ALL PASS (13 directed), `test` ALL PASS, `spike_tests` SPIKE_MMU_OK (10),
+  `all_tests` ALL TESTS DONE, fresh-clone check + `fpga_full FPGA_FREQ=13 FPGA_SEED=4` SB_LUT4
+  3360 SB_DFF 1259 (unchanged). (banner=1 runinit=0 login=0 halt=0, loglen 6475) with checkpoint `build/linux/boot_ckpt.bin` sha eac9e379... . Next probe: directed paged `lr.w`/`sc.w`/`amoadd.w` under satp ISS-vs-CPU (Linux uses lr/sc in sbrk, futex, lockless lists) plus a paged sfence.fence + page-protection storm; fix cache32/top_pipe AMO rd sourcing if the directed test reproduces.

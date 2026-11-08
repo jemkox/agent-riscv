@@ -2,13 +2,24 @@ RTL := rtl/top_pipe.sv rtl/mmu.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_f
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t40_sv32_midentity t41_mprv_satp t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t40_sv32_midentity t41_mprv_satp t43_sv32_mprv_umxr t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
 UI_CCFLAGS := -march=rv32i_zicsr_zifencei -mabi=ilp32
 OC := riscv64-unknown-elf-objcopy
 SPIKE ?= spike
+# Spike golden model pinned like the sail 0.16 below: the exact installed binary matters - a
+# drifted spec-confirmator would move the pins silently. Installed externally (see PROGRESS.md
+# L7 notes): riscv-isa-sim "1.1.1-dev" from https://github.com/riscv-software-src/riscv-isa-sim/
+# (any build of that revision), installed at ~/.local/bin/spike -> ~/.local/spike/bin/spike.
+SPIKE_SHA256 ?= 63628ab4d913c5c35586bcb9ac0afdedc5bf520d79d0e1fca1c4f2225cadcb0b
+SPIKE_URL := https://github.com/riscv-software-src/riscv-isa-sim/
+spike_pin_check:
+	@p=$$(command -v $(SPIKE)); \
+	 if [ -z "$$p" ]; then echo "SPIKE PIN FAIL: $(SPIKE) not on PATH - install riscv-isa-sim 1.1.1-dev from $(SPIKE_URL) first"; exit 1; fi; \
+	 s=$$(sha256sum "$$p" | cut -f1 -d" "); \
+	 [ "$$s" = "$(SPIKE_SHA256)" ] || { echo "SPIKE PIN FAIL: binary sha256 $$s != pinned $(SPIKE_SHA256) - golden model drift, do not trust this run (URL $(SPIKE_URL), 1.1.1-dev)"; exit 1; }
 
 # External inputs (not in the repo). `make deps` clones the two public ones into deps/ at pinned
 # revisions; the DOOM shareware WAD you copy to deps/doom1.wad yourself. Any of them can also be
@@ -82,7 +93,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu $(B)/vlt_mmu5/run_mmu5 mmu mmu5
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu $(B)/vlt_mmu5/run_mmu5 mmu mmu5 spike_pin_check spike_tests linux_mmu_spike linux_mmu_spike_log
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -300,7 +311,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t40_sv32_midentity t41_mprv_satp t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
+MMU_TESTS := t40_sv32_midentity t41_mprv_satp t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -968,7 +979,7 @@ $(B)/vlt_openboot/run_openboot: $(RTL) tb/run_linux.sv tb/run_openboot.cpp | $(B
 	verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast $(OPENBOOT_DBG) $(OPENBOOT_IFHDBG) -DLINUX -DLINUX_DEBUG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
 	$(MAKE) -C $(B)/vlt_openboot -f Vrun_linux.mk OPT_FAST="-O2 -DLINUX_DEBUG " run_openboot -j 4
 
-linux_mmu_spike: linux_mmu_build | $(B)/linux/logs
+linux_mmu_spike: linux_mmu_build spike_pin_check | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
 	@rm -f $(B)/linux/logs/linux_mmu_spike.out
 	@timeout 300 sh -c '(sleep 70; printf "root\n"; sleep 5; printf "uname -a\n"; sleep 5; printf "cat /proc/cpuinfo\n"; sleep 5; printf "poweroff\n"; sleep 5) | $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m64 --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio --bootargs="console=ttyS0 earlycon" $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike.out'
@@ -980,16 +991,26 @@ linux_mmu_spike: linux_mmu_build | $(B)/linux/logs
 # ORIGIN 0x20000 + -DMMU_CODE_VPN=0x20 makes the identity code-page leaves follow the
 # link) and run with RAM -m0x2000:0x1FE000. Spike logs gp as x3; xhalt (CSR 0x3ff) is
 # unknown to spike -> trap + loop, so the pin is "x3 0x00000001 appears in the commit
-# log" (pass reached before xhalt). -DCODE_FLAGS=0x8B presets A on the identity code
+# log" (pass reached before xhalt). -DCODE_FLAGS=0x4B presets A on the identity code
 # leaves: spike 1.1 has no ADUE mechanism on RV32 so it page-faults any access to a
 # leaf with A=0; our CPU sets A silently (both allowed by the spec). L1 (interior)
 # entries keep A/D/U clear - spike faults if a non-leaf PTE has them set (reserved).
 # Excluded: t39_irq_gate (our CLINT PA is plain RAM for spike) and t31_sv32_ad (its
-# whole pin IS the "walker sets A, no fault" behavior spike lacks).
-SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad,$(MMU_TESTS))
+# whole pin IS the "walker sets A, no fault" behavior spike lacks). t43_sv32_mprv_umxr
+# is EXCLUDED too: Spike 1.1.1-dev implements the load check as r || (x && mxr) with
+# NO privilege gate - it lets an MPRV+MPP=U+MXR load of an x-only U page through (its
+# commit log shows mem 0x00003000 read), while the spec (sail 0.16 access-control table
+# "MXR applies when the effective privilege is s") faults it with cause 13. t43's U
+# phase pins the SPEC side (ISS+RTL, against sail); keeping it in the spike suite would
+# make that golden-model deviation red. Spike additionally mrets with MPP:=00 instead
+# of restoring MPP=M after an M trap (c768_mstatus 0xe0080 after mret in that log) -
+# both quirks recorded here; the CPU/ISS pins stay spec-gated (pr==01 && mx in pbad).
+SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr,$(MMU_TESTS))
+$(B)/spike:
+	@mkdir -p $@
 $(B)/spike/%.elf: tests/%.S tests/link_spike.ld | $(B)/spike
 	$(CC) $(CCFLAGS) -DMMU_CODE_VPN=0x20 -DCODE_FLAGS=0x4B -nostdlib -Wl,-Ttests/link_spike.ld -Wl,-m,elf32lriscv -o $@ $<
-spike_tests: $(foreach t,$(SPIKE_MMU_TESTS),$(B)/spike/$(t).elf) | $(B)
+spike_tests: $(foreach t,$(SPIKE_MMU_TESTS),$(B)/spike/$(t).elf) spike_pin_check | $(B)
 	@mkdir -p $(B)/spike/logs
 	@bad=0; \
 	  for t in $(SPIKE_MMU_TESTS); do \
@@ -1001,7 +1022,7 @@ spike_tests: $(foreach t,$(SPIKE_MMU_TESTS),$(B)/spike/$(t).elf) | $(B)
 OPENBOOT_IFHDBG ?=
 OPENBOOT_DBG ?=
 SPIKE_MAX_INS ?= 4750000
-linux_mmu_spike_log: linux_mmu_build | $(B)/linux/logs
+linux_mmu_spike_log: linux_mmu_build spike_pin_check | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
 	@rm -f $(B)/linux/logs/linux_mmu_spike_commits.log $(B)/linux/logs/linux_mmu_spike_c.out
 	@timeout 900 sh -c '(sleep 120; printf "root\n"; sleep 10; printf "uname -a\n"; sleep 10; printf "cat /proc/cpuinfo\n"; sleep 10; printf "poweroff\n"; sleep 10) | $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m64 --max-insn=$(SPIKE_MAX_INS) -l --log-commits --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio --bootargs="console=ttyS0 earlycon" $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike_c.out 2> $(B)/linux/logs/linux_mmu_spike_commits.log'
