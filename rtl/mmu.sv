@@ -66,7 +66,7 @@ module mmu (
       // the jalr even with SUM set). M may fetch anything permitted.
       if (u && pr == 2'b01) ok = 0;
     end else begin
-      if (rd && !(r || (w && mx))) ok = 0;
+      if (rd && !(r || (x && mx))) ok = 0;   // MXR grants loads from xwr=100 pages (spec)
       if (wr && !w) ok = 0;
     end
     if (pr == 2'b00 && !u) ok = 0;

@@ -1,8 +1,19 @@
 # t37: permission-rule pins against the spec (rv32 § access-control rules).
-# e6: W-only page (R=0): M load w/o MXR -> PF13; handler sets MXR and re-execs
-# the load -> returns 0x6161.  e7: R-only page (W=0): M store -> PF15, handler
-# skips the store (mepc+4).  R|W page load still ok.  s0 must be 2 (both faults
-# seen with the right mtval), a6 pins the fault count; gp=1.
+# After an mret to S (satp translates S/U only): e6: X-only page (xwr=100): S
+# load w/o MXR -> PF13 (handler sets MXR at M and re-execs the load -> 0x6161).
+# e7: R-only page (W=0): S store -> PF15, handler skips the store (mepc+4).
+# R|W page load still ok.  s0 must be 2 (both faults seen with the right mtval),
+# a6 pins the fault count; gp=1.
+/* MMU_CODE_VPN: 0 for tests/link.ld; 0x20 for the spike build (see t30). */
+#ifndef MMU_CODE_VPN
+#define MMU_CODE_VPN 0
+#endif
+#ifndef L1_ENTRY
+#define L1_ENTRY 0x2401
+#endif
+#ifndef CODE_FLAGS
+#define CODE_FLAGS 0xB
+#endif
   .globl _start
   .option norvc
 _start:
@@ -11,18 +22,18 @@ _start:
   la t1, handler
   csrw mtvec, t1
   li t0, 0x8000
-  li t1, 0x2401          # L1[VPN1=0] -> L0 at PPN 9 (interior: perms 0, V+A+D)
+  li t1, L1_ENTRY          # L1[VPN_CODE>>8=0] -> L0 at PPN 9 (interior: perms 0, V+A+D)
   sw t1, 0(t0)
   li t0, 0x9000
-  li t1, 0xB             # vpn0 0: code PA0 identity R|X (A set by walker)
-  sw t1, 0(t0)
-  li t1, 0x40B           # vpn0 1: code PA0x1000 R|X A
-  sw t1, 4(t0)
+  li t1, (MMU_CODE_VPN<<10)|CODE_FLAGS         # code leaf VPN_CODE identity R|X (A set by walker)
+  sw t1, (MMU_CODE_VPN&0xFF)*4(t0)
+  li t1, ((MMU_CODE_VPN+1)<<10)|CODE_FLAGS     # code leaf VPN_CODE+1 identity R|X
+  sw t1, ((MMU_CODE_VPN+1)&0xFF)*4(t0)
   li t1, 0x24C7          # vpn0 9: L0 self page R|W A D
   sw t1, 36(t0)
   li t1, 0x30C7          # vpn0 5 (VA0x5000) -> PA0xC000 R|W A D
   sw t1, 20(t0)
-  li t1, 0x30C5          # vpn0 6 (VA0x6000) -> PA0xC000 W-only A D (R=0!)
+  li t1, 0x30C9          # vpn0 6 (VA0x6000) -> PA0xC000 X-only (xwr=100: X|A|D|V) (R=W=0!)
   sw t1, 24(t0)
   li t1, 0x30C3          # vpn0 7 (VA0x7000) -> PA0xC000 R-only A D (W=0!)
   sw t1, 28(t0)
@@ -40,7 +51,7 @@ _start:
   csrs mstatus, t0
   mret
 swalk:
-  # 1) W-only load at M w/o MXR -> PF13; handler sets MXR, mret retries
+  # 1) load to X-only page w/o MXR -> PF13; handler sets MXR, mret retries
   li t3, 0x6000
   lw t2, 0(t3)
   li t4, 0x6161

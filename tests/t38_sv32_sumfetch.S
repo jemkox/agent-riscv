@@ -7,6 +7,16 @@
 # sdone c), handler sets sepc=afterit and srets ->
 # S resumes in the identity code page, gp=1 (SUM=1 still rescues the LOAD/STORE
 # of U pages in t35 - that rule is untouched).
+/* MMU_CODE_VPN: 0 for tests/link.ld; 0x20 for the spike build (see t30). */
+#ifndef MMU_CODE_VPN
+#define MMU_CODE_VPN 0
+#endif
+#ifndef L1_ENTRY
+#define L1_ENTRY 0x2401
+#endif
+#ifndef CODE_FLAGS
+#define CODE_FLAGS 0xB
+#endif
   .globl _start
   .option norvc
 _start:
@@ -17,13 +27,13 @@ _start:
   li t0, 0x1000          # medeleg[12]: page-fetch fault -> S (S-mode handler)
   csrw medeleg, t0
   li t0, 0x8000
-  li t1, 0x2401          # L1[VPN1=0] -> L0 at PPN 9 (PA 0x9000), interior V+A
+  li t1, L1_ENTRY          # L1[VPN_CODE>>8=0] -> L0 at PPN 9 (PA 0x9000), interior V+A
   sw t1, 0(t0)
   li t0, 0x9000
-  li t1, 0xB             # vpn0 0: code identity PA 0, X|R (A set by walker)
-  sw t1, 0(t0)
-  li t1, 0x40B           # vpn0 1: code PA 0x1000, X|R (tail pages)
-  sw t1, 4(t0)
+  li t1, (MMU_CODE_VPN<<10)|CODE_FLAGS             # code leaf VPN_CODE identity, X|R (A set by walker)
+  sw t1, (MMU_CODE_VPN&0xFF)*4(t0)
+  li t1, ((MMU_CODE_VPN+1)<<10)|CODE_FLAGS         # code leaf VPN_CODE+1 identity, X|R
+  sw t1, ((MMU_CODE_VPN+1)&0xFF)*4(t0)
   li t1, 0x24C7          # vpn0 9: L0 self page R|W A D
   sw t1, 36(t0)
   li t1, 0x501B          # vpn0 4: VA 0x4000 -> PA 0x14000, X|R|U (no A/D yet)

@@ -1,8 +1,19 @@
-# t35: SUM/MXR and U pages (M and S). e5: U-page (R|W|U+A|D): S load w/o SUM ->
-# PF13 (handler sets SUM, mepc+4 retry ok). e6: W-only page (R=0!): S load w/o
-# MXR -> PF13 (handler sets MXR retry ok). e4: X|R|U page: jump from S -> IT
-# PF12 (handler redirects to after-it label). s0 must be 3 and both loads return
+# t35: SUM/MXR and U pages at S (satp translates S/U only -> mret to S first).
+# e5: U-page (R|W|U+A|D): S load w/o SUM -> PF13 (handler sets SUM, mepc+4
+# retry ok). e6: X-only page (xwr=100): S load w/o MXR -> PF13 (handler sets
+# MXR, retry ok). e4: X|R|U page: jump from S -> IT PF12 (supervisor may not exec
+# U; handler redirects to after-it label). s0 must be 3 and both loads return
 # the same value at PA0xA000.
+/* MMU_CODE_VPN: 0 for tests/link.ld; 0x20 for the spike build (see t30). */
+#ifndef MMU_CODE_VPN
+#define MMU_CODE_VPN 0
+#endif
+#ifndef L1_ENTRY
+#define L1_ENTRY 0x2401
+#endif
+#ifndef CODE_FLAGS
+#define CODE_FLAGS 0xB
+#endif
   .globl _start
   .option norvc
 _start:
@@ -11,18 +22,18 @@ _start:
   la t1, handler
   csrw mtvec, t1
   li t0, 0x8000
-  li t1, 0x2401
+  li t1, L1_ENTRY
   sw t1, 0(t0)
   li t0, 0x9000
-  li t1, 0xB           # e0 code identity R|X
-  sw t1, 0(t0)
-  li t1, 0x40B         # e1 code identity R|X
-  sw t1, 4(t0)
+  li t1, (MMU_CODE_VPN<<10)|CODE_FLAGS           # code leaf VPN_CODE identity R|X
+  sw t1, (MMU_CODE_VPN&0xFF)*4(t0)
+  li t1, ((MMU_CODE_VPN+1)<<10)|CODE_FLAGS       # code leaf VPN_CODE+1 identity R|X
+  sw t1, ((MMU_CODE_VPN+1)&0xFF)*4(t0)
   li t1, 0x24C7        # e9 L0 self page R|W
   sw t1, 36(t0)
   li t1, 0x2AD7        # e5: (0xA<<10)|R|W|U|A|D|V
   sw t1, 20(t0)
-  li t1, 0x28C5        # e6: (0xA<<10)|W|A|D|V (R=0)
+  li t1, 0x28C9        # e6: (0xA<<10)|X|A|D|V (xwr=100: X=1,R=W=0)
   sw t1, 24(t0)
   li t1, 0x285B        # e4: (0xA<<10)|X|R|U|A|V? U|X|R=0x18|0x8|0x2? U=0x10 X=8 R=2 =0x1A |A=0x40|V -> 0x5B? no D: 0x1A|0x40|1=0x5B
   sw t1, 16(t0)
@@ -47,7 +58,7 @@ afterit:
   lw t2, 0(t3)
   li t4, 0x6161
   bne t2, t4, fail
-  li t3, 0x6000        # W-only page: S load w/o MXR -> PF
+  li t3, 0x6000        # X-only page: S load w/o MXR -> PF
   lw t2, 0(t3)
   li t4, 0x6161
   bne t2, t4, fail

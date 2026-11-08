@@ -30,7 +30,8 @@ def main(argv):
     lines = []
     mask = 0xFFFFFFFF
     # RV32 privilege modes (L5): M=3, S=1, U=0.  mstatus.MPP holds the saved
-    # privilege (2 bits at [11:10]); mstatus.SPP (bit 8) the supervisor's saved
+    # privilege (2 bits at [12:11], mask 0x1800); mstatus.SPP (bit 8) the
+    # supervisor's saved privilege for SRET.
     # privilege for SRET.  Trap routing follows medeleg/mideleg so that U/S-mode
     # traps go to the S handler (stvec/sepc/scause/stval/spp) when delegated, and
     # machine-mode traps go to the M handler.  With medeleg=mideleg=0 and the
@@ -188,7 +189,7 @@ def main(argv):
             if not x: ok = False
             if u and eff == 1 and typ == 0: ok = False   # S NEVER fetches a U page; SUM applies to loads/stores only (arch-test Sv_sv32_upage_mstatus_sum_set_Smode faults the jalr even with SUM set)
         elif typ == 1:
-            if not (r or (w and (cs[0x300] & MXR_BIT))): ok = False
+            if not (r or (x and (cs[0x300] & MXR_BIT))): ok = False  # MXR grants S loads from executable pages (xwr=100), per spec
         else:
             if not w: ok = False
         if eff == 0 and not u: ok = False

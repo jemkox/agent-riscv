@@ -2,6 +2,16 @@
 # PA0xF000 flags R|W|A|D, no X). Handler checks mcause=12, mtval=0xF000, mepc
 # points at the JUMP (the faulting fetch is at 0xF000; mret would loop there,
 # so redirect mepc to the done marker and check counters).
+/* MMU_CODE_VPN: 0 for tests/link.ld; 0x20 for the spike build (see t30). */
+#ifndef MMU_CODE_VPN
+#define MMU_CODE_VPN 0
+#endif
+#ifndef L1_ENTRY
+#define L1_ENTRY 0x2401
+#endif
+#ifndef CODE_FLAGS
+#define CODE_FLAGS 0xB
+#endif
   .globl _start
   .option norvc
 _start:
@@ -9,13 +19,13 @@ _start:
   la t1, handler
   csrw mtvec, t1
   li t0, 0x8000
-  li t1, 0x2401
+  li t1, L1_ENTRY
   sw t1, 0(t0)
   li t0, 0x9000
-  li t1, 0xB
-  sw t1, 0(t0)
-  li t1, 0x40B
-  sw t1, 4(t0)
+  li t1, (MMU_CODE_VPN<<10)|CODE_FLAGS
+  sw t1, (MMU_CODE_VPN&0xFF)*4(t0)
+  li t1, ((MMU_CODE_VPN+1)<<10)|CODE_FLAGS
+  sw t1, ((MMU_CODE_VPN+1)&0xFF)*4(t0)
   li t1, 0x24C7
   sw t1, 36(t0)
   li t1, 0x3CE7        # eF: (0xF<<10)|(R|W|A|D|V)

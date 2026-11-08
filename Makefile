@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/mmu.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_f
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t40_sv32_midentity t41_mprv_satp t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -300,7 +300,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
+MMU_TESTS := t40_sv32_midentity t41_mprv_satp t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -975,13 +975,26 @@ linux_mmu_spike: linux_mmu_build | $(B)/linux/logs
 	@if grep -q "OpenSBI v1.6" $(B)/linux/logs/linux_mmu_spike.out && grep -q "Run /init as init" $(B)/linux/logs/linux_mmu_spike.out && grep -q "login:" $(B)/linux/logs/linux_mmu_spike.out; then echo "L7 SPIKE BOOT OK: OpenSBI banner + init + login (reference for the CPU boot)"; else echo "L7 SPIKE BOOT FAIL"; exit 1; fi
 
 # Spike confirmation of the S-mode MMU directed tests (spec: satp translates S/U only).
-# Spike faults unknown CSR 0x3ff (xhalt) -> the handler's fail path overwrites gp, so
-# the pin is "gp==1 appears in the trace" (the test reached pass/done before xhalt).
-spike_tests: $(foreach t,$(MMU_TESTS),$(B)/$(t).elf) | $(B)
+# Spike 1.1 reserves [0,0x2000) for boot/stack devices and refuses ELF loads there,
+# so these tests are rebuilt as spike variants ($(B)/spike/%.elf: tests/link_spike.ld
+# ORIGIN 0x20000 + -DMMU_CODE_VPN=0x20 makes the identity code-page leaves follow the
+# link) and run with RAM -m0x2000:0x1FE000. Spike logs gp as x3; xhalt (CSR 0x3ff) is
+# unknown to spike -> trap + loop, so the pin is "x3 0x00000001 appears in the commit
+# log" (pass reached before xhalt). -DCODE_FLAGS=0x8B presets A on the identity code
+# leaves: spike 1.1 has no ADUE mechanism on RV32 so it page-faults any access to a
+# leaf with A=0; our CPU sets A silently (both allowed by the spec). L1 (interior)
+# entries keep A/D/U clear - spike faults if a non-leaf PTE has them set (reserved).
+# Excluded: t39_irq_gate (our CLINT PA is plain RAM for spike) and t31_sv32_ad (its
+# whole pin IS the "walker sets A, no fault" behavior spike lacks).
+SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad,$(MMU_TESTS))
+$(B)/spike/%.elf: tests/%.S tests/link_spike.ld | $(B)/spike
+	$(CC) $(CCFLAGS) -DMMU_CODE_VPN=0x20 -DCODE_FLAGS=0x4B -nostdlib -Wl,-Ttests/link_spike.ld -Wl,-m,elf32lriscv -o $@ $<
+spike_tests: $(foreach t,$(SPIKE_MMU_TESTS),$(B)/spike/$(t).elf) | $(B)
 	@mkdir -p $(B)/spike/logs
-	@bad=0; for t in $(MMU_TESTS); do \
-	  $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr --max-steps=20000 $(B)/$(t).elf > $(B)/spike/logs/$$t.log 2>&1 || true; \
-	  grep -q "x_gp 0x00000001" $(B)/spike/logs/$$t.log || bad=$(($$bad+1)); \
+	@bad=0; \
+	  for t in $(SPIKE_MMU_TESTS); do \
+	  timeout 60 $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m0x2000:0x1FE000 --instructions=200000 --log-commits -l --log=$(B)/spike/logs/$${t}.log $(B)/spike/$${t}.elf >/dev/null 2>&1 || true; \
+	  grep -q "x3  0x00000001" $(B)/spike/logs/$${t}.log || bad=$$((bad+1)); \
 	 done; if [ $$bad -eq 0 ]; then echo "SPIKE_MMU_OK"; else echo "SPIKE_MMU $$bad FAILS"; exit 1; fi
 
 # Spike commit log (golden per-instruction reference): compare with build/linux/cpu_retire.bin.

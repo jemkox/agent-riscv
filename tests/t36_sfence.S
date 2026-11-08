@@ -1,18 +1,28 @@
 # t36: remap + SFENCE.VMA. e8 leaf maps VA0x8000 -> PA0xA000 (value 0x55AA).
 # Load ok. Then rewrite e8 to PA0xB000 (PA0xB000 holds 0x1234) through the
 # self-mapped L0 page, sfence.vma, reload -> must see 0x1234 (post-flush).
+/* MMU_CODE_VPN: 0 for tests/link.ld; 0x20 for the spike build (see t30). */
+#ifndef MMU_CODE_VPN
+#define MMU_CODE_VPN 0
+#endif
+#ifndef L1_ENTRY
+#define L1_ENTRY 0x2401
+#endif
+#ifndef CODE_FLAGS
+#define CODE_FLAGS 0xB
+#endif
   .globl _start
   .option norvc
 _start:
   li gp, 0
   li t0, 0x8000
-  li t1, 0x2401
+  li t1, L1_ENTRY
   sw t1, 0(t0)
   li t0, 0x9000
-  li t1, 0xB
-  sw t1, 0(t0)
-  li t1, 0x40B
-  sw t1, 4(t0)
+  li t1, (MMU_CODE_VPN<<10)|CODE_FLAGS
+  sw t1, (MMU_CODE_VPN&0xFF)*4(t0)
+  li t1, ((MMU_CODE_VPN+1)<<10)|CODE_FLAGS
+  sw t1, ((MMU_CODE_VPN+1)&0xFF)*4(t0)
   li t1, 0x24C7        # e9 self R|W
   sw t1, 36(t0)
   li t1, 0x28C7        # e8 -> PA0xA000

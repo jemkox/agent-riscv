@@ -40,10 +40,13 @@ random.seed(seed)
 K = random.randint(1, 15)
 Bn = random.randint(70, 400)
 # Paging class: seed%4==3 runs the body with Sv32 identity mapping on (satp set)
-# + periodic SFENCE.VMA, so the walker/TLB paths get a differential work-out too.
+# + MPRV|SUM|MXR armed (MPP=U so M data accesses get TRANSLATED under U rules)
+# + periodic SFENCE.VMA, so walker/TLB + MPRV paths get a differential work-out.
 PAG = (seed % 4 == 3)
 prog = ([U(0x80000, 5, 0x37), I(0x2, 5, 0, 5, 0x13),    # x5 = 0x80000002 (Sv32, root PPN 2)
-         I(0x180, 5, 1, 0, 0x73)]                       # csrrw x0, satp, x5
+         I(0x180, 5, 1, 0, 0x73),                       # csrrw x0, satp, x5
+         U(0xE0, 6, 0x37),                              # x6 = 0x000E0000 = MPRV|SUM|MXR, MPP=U
+         I(0x300, 6, 1, 0, 0x73)]                       # csrrw x0, mstatus, x6 (arm MPRV)
         if PAG else []) + [U(0x20 if PAG else 1, 28, 0x37), I(K, 31, 0, 31, 0x13)]
 loop_idx = len(prog)
 bne_idx = loop_idx + Bn + 1

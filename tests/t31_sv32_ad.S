@@ -1,17 +1,21 @@
 # t31: A/D bits hardware-update: e7 leaf PA0xA000 flags R|W only. Load sets A;
 # store sets D; PTE is re-read via the self-mapped L0 page (VA 0x9000, R|W).
+/* MMU_CODE_VPN: 0 for tests/link.ld; 0x20 for the spike build (see t30). */
+#ifndef MMU_CODE_VPN
+#define MMU_CODE_VPN 0
+#endif
   .globl _start
   .option norvc
 _start:
   li gp, 0
   li t0, 0x8000
-  li t1, 0x2401        # L1[0] -> L0@PA0x9000
+  li t1, 0x2401        # L1[VPN_CODE>>8=0] -> L0@PA0x9000
   sw t1, 0(t0)
   li t0, 0x9000
-  li t1, 0xB           # e0 code R|X
-  sw t1, 0(t0)
-  li t1, 0x40B         # e1 code R|X
-  sw t1, 4(t0)
+  li t1, (MMU_CODE_VPN<<10)|0xB             # code leaf VPN_CODE identity R|X
+  sw t1, (MMU_CODE_VPN&0xFF)*4(t0)
+  li t1, ((MMU_CODE_VPN+1)<<10)|0xB         # code leaf VPN_CODE+1 identity R|X
+  sw t1, ((MMU_CODE_VPN+1)&0xFF)*4(t0)
   li t1, 0x24C7        # e9 L0 self page R|W
   sw t1, 36(t0)
   li t1, 0x2807        # e7: (0xA<<10)|R|W|V (no A|D)
