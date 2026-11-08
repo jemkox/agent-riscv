@@ -1622,3 +1622,57 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 | `linux_mmu_build` stages | busybox+linux+opensbi+all green in mmu3; Image sha `6588a31e24e3d318ee1956ca7555db2b1cf69ba8bb96ad3c4bd0752b8bbf9fe4` (31040000 bytes), fw_dynamic.elf sha `5545c89714c07e896cd1a6b8ca5f4937634fc1c37e51f503a0b53eefcbe683f9`, canonical cpio sha `c1692250c8f8d06eaa0baab7334839ea7c6ea3888f8f02e90986b9882487110f` (two consecutive builds, identical) |
 | `linux_mmu_qemu` | `L7 QEMU BOOT OK: OpenSBI banner + login + commands + clean poweroff`; boot-log evidence lines `OpenSBI v1.6`, `[    1.009788] Run /init as init process`, `buildroot login: root`, `[  141.086078] reboot: Power down` |
 
+## L: spike-reference CSR alignment round (2026-11-08)
+
+### Worked
+- Spike installed at `/home/jemko/.local/bin/spike` (1.1.1-dev). `~/agent-workspace/uploads/spike-brief.md` (user-provided): the same Buildroot `Image` + `rootfs.cpio` + `fw_jump.elf` boots to BusyBox login on spike (`--isa=rv32ima_zicsr_zifencei_zicntr -m64`), so the L7 gap is CPU vs spike behavior, not the software stack. Reference logs kept in `~/agent-workspace/uploads/spike-ref/`.
+- Spike `linux_mmu_spike` target added to `Makefile`: boots the Buildroot images on spike, feeds `root`, `uname -a`, `cat /proc/cpuinfo`, `poweroff`; gate greps `OpenSBI v1.6` + `Run /init as init` + `login:` in `build/linux/logs/linux_mmu_spike.out`.
+- Diffed spike OpenSBI banner (spike-ref) against our CPU's OpenSBI banner: spike probes CSRs, so OpenSBI only lists what does NOT fault. The spike banner shows extensions `sdtrig` (debug trigger CSRs 0x7a0..0x7a7 present) and MIDELEG/MEDELEG values `0x00000222`/`0x0000b109`; our CPU had no CSR traps at all, so OpenSBI saw fake "present" extensions (`csrr`s to anything succeeded) and mis-detected features.
+- CSR semantics aligned with spike, in both RTL (`ctrl.sv` `csr_defined()`/`is_csr_readonly()` feeding `csr_def`/`csr_ro` outputs; `csrs_pipe.sv` `priv_viol` gains `(ce_csr && !ce_csr_def)` and `(ce_csr && ce_csr_ro && csr_watt)`; `top_pipe.sv`/`top_single.sv` rewired) and ISS (`CSR_DEFINED`, `CSR_RO`, trap `cause=2` for undefined numbers and for write attempts to read-only counters):
+  - Unimplemented CSR numbers now raise a real illegal-instruction trap (cause 2). Directed test `tests/t105_csr_undef.S` added to `TESTS`: reads 0x14d/0x30c/0x35c (all unimplemented), pins three cause-2 traps + `t6==3`, then two `csrr time` (0xc01) reads with `time` advancing between them (`bge` t4,t5 fail branch was the wrong direction; fixed) and `timeh==0`.
+  - Read-only Zicntr views (0xc00 cycle, 0xc80 cycleh, 0xc01/0xc81 time/timeh, 0xc02/0xc82 instret/instreth): a write attempt (csrrw/csrrwi always, csrrs/csrrsi nonzero rs1/uimm) traps cause 2 — `rv32mi/csr` test 14 (`csrrw a0,cycle,x0` in U) now passes.
+  - Defined set (RTL+ISS, identical lists) extended to the spike-present set: `cycle/cycleh/instreth/instreth_h` (0xc00/0xc80/0xc02/0xc82), `mcounteren` 0x306 (real 32-bit storage, writable, reads back), vendor CSRs 0xf11..0xf14 (`mvendorid`/`marchid`/`mimpid`/`mplatform` read 0 — `rv32mi/mcsr` U-section passes), debug CSRs 0x7a0..0x7a7 (`sdtrig`, read 0 / writes no-op — makes `rv32mi/breakpoint` pass like on spike), `sip` 0x144 + 0x270 (rv32 supervisor IP regs — makes `rv32si/wfi` pass). mcycle/minstret (0xb00/0xb02) stay writable (instret_overflow needs writable minstret).
+  - `time`/`timeh` are now real read-only views of the CLINT `mtime` (64-bit): ISS reads them as `(mtime+1)` so the old-value matches RTL's retire-stage view of `cs_time_mt64` (the CLINT tick happens at the same retire); `csrs_pipe.sv` passes `clint_mt` into `csrs.sv` (`cs_time_mt64` input; FPGA build stubs it to 0).
+  - `t09_csr.S` updated: its `csrrw x0,0x705,x0` (an unallocated CSR) now must trap, so the test reads `mscratch` instead.
+- misa is now 0x4014_1101 (rv32 + s,u, and previously zicsr/zifencei/m/a/t? bits kept) matching the S/U modes the CPU actually runs; the official `rv32mi/csr` "S" section (which was silently skipped while misa lacked S/U) now runs and needs the `csrrwi mcounteren,1` above-mentioned behavior.
+- Yosys 0.33 rejects SystemVerilog `return` inside `function` and `inside {..}` sets; the two new `ctrl.sv` functions use the old-style `input`-declared parameter list + assignment to the function name (Verilator and Yosys both accept this).
+- Re-run and green: `hdl make lint` clean; `hdl make mi` 15/15 `ALL MI PASS`; `hdl make si` `ALL SI PASS`; `hdl make all_tests` `ALL TESTS DONE` (incl. doom 31 frames, mpp_ret, fpga gates); `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` netlist sanity passed: SB_LUT4 3360 (+21 vs pinned 3339 baseline, caps still pass), SB_DFF 1259 (unchanged), trap-CSR DFF counts fine, post-route Max freq 15.45 MHz PASS at 13 MHz.
+- Committed `aed6f31`.
+
+### Metrics (this round)
+| item | value |
+|---|---|
+| `all_tests` | `ALL TESTS DONE` (ui 42, um 8, mi 15 incl. csr/mcsr/zicntr/breakpoint/instret_overflow, ua 11, si 5 incl. wfi, doom 31 frames, mpp_ret, fpga gates, mmu+lat) |
+| `fpga_full` seed4 | SB_LUT4 3360, SB_DFF 1259, post-route 15.45 MHz (13 MHz PASS) |
+| new pins | `t105_csr_undef`: undefined CSR traps (3x cause-2) + `time` advancing between two reads; `t09_csr`: mscratch instead of unallocated 0x705 |
+
+### Honest limitations
+- The spike `linux_mmu_spike` gate has not been run to `OK` yet in this session; spike itself boots the images (verified by user + `uploads/spike-ref/linux_mmu_spike_console.log`), but the `linux_mmu_build` dependency in the target rebuilds Buildroot stages — a full rerun is needed before L7 CPU boot.
+- Debug CSRs 0x7a0..0x7a7 are defined-but-inert stubs (read 0), matching spike's *presence* probes so OpenSBI/spike tests see `sdtrig`; no real trigger matching is implemented (not needed by the suites).
+
+### Next step
+- Run `hdl make linux_mmu_spike` to green (the reference spike boot through our Makefile gate), then boot the same images on our CPU: `tb/run_openboot.cpp` (fw_jump at its load addr, DTB `linux/linux_mmu.dtb`) -> BusyBox login -> `uname -a`/`cat /proc/cpuinfo`/`poweroff` -> `LINUX CPU: DONE`.
+
+
+## Review round on 40c5649 (2026-11-08, review PASS-WITH-ISSUES -> fixes committed)
+
+### Worked
+- IRQ gating unified to one rule in RTL (`rtl/clint_dev.sv`) and ISS (`iss/iss.py irq_bits`): at M only NON-delegated (`nd`) bits gated by MIE are taken (delegated-to-S handlers must not fire at M - review fix 3); at S, `nd` is ungated (handler-M is more privileged than S, so MIE/SIE do not apply - Spike behavior) and `dl` gated by SIE; at U, `dl` (handler S) ungated. Directed test `tests/t39_irq_gate.S` added to `TESTS` + `MMU_TESTS`: (A) M with mideleg[MTI]=1 + MIE + overdue mtimecmp must NOT trap; (B) at S (MPP=S via mret) with mideleg cleared + MIE hidden at S the pending MTI must trap despite SIE=0; wrong gating on either side routes to `fail` (gp=3) and fails ISS/RTL/cmp/mmucheck pins. mmucheck pins: a6==10 before lBmark/done; gp final==1.
+- Spec-revision decision (review fix 2): picked translation-at-M for the pinned L6 semantics - reverted `rtl/csrs.sv` `mmu_mode = after_satp[31]` and ISS `xlate` (no `priv==3` exemption), matching the pinned Sail 0.16 L6 pins (t30 walks while at M). Boot note: OpenSBI CLINT-at-M with kernel satp is now translated; revisit if L7 boot needs the other revision (option b: mret->S in t30-t37 + re-pin to a 2.0 Sail) - documented, not done.
+- `Makefile`: `SPIKE ?= spike` (PATH-resolved) replaces the hardcoded `/home/jemko/.local/bin/spike` in both spike targets.
+- L7 reproducibility: `tools/mmu_pin_check.py` + `MMU_KERNEL_SHA256` (8e262f7b...), `MMU_FW_SHA256` (1b5f194f...), `MMU_ROOTFS_CANON_SHA256` (c1692250...) pinned in `linux_mmu_build`; drift = rebuild produced different binaries -> fail with got-values (bump intentionally + note). The kernel sha drifted from the step-1 pinned `6588a31e...` when the mmu3 config rebuilt - that drift was pinned and is now recorded honestly.
+- QEMU overlap fixed: `linux_mmu_qemu` `-m 64M` -> `-m 128M` (kernel Image is now 0x80400000..0x825996a8 = 33.8 MB; QEMU's initrd slot 0x82400000 overlapped). Markers regenerate: `OpenSBI v1.6`, `Run /init as init process`, `buildroot login: root`, `reboot: Power down` - `L7 QEMU BOOT OK`.
+- Gates re-run green with all of the above: `hdl make mmu` / `hdl make mmu5` `ALL PASS` (incl. t39 with CACHE_LAT 1/5), `hdl make test` `ALL PASS`, `hdl make all_tests` `ALL TESTS DONE`, `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4`: SB_LUT4 3361 / SB_DFF 1259 (Makefile pin raised 3339 -> 3361; +22 LUT4 vs old baseline from the medeleg/mmu_mode CSR churn), route 17.33/16.77 MHz PASS at 13 MHz.
+
+### Metrics (this round)
+| item | value |
+|---|---|
+| `mmu`/`mmu5` | ALL PASS (10 directed incl. new t39_irq_gate at LAT1/LAT5) |
+| `all_tests` | ALL TESTS DONE |
+| `fpga_full` seed4 | SB_LUT4 3361, SB_DFF 1259, 17.33/16.77 MHz PASS at 13 MHz (pin 3361/1259) |
+| `linux_mmu_build` pins | Image 8e262f7b..., fw_dynamic.elf 1b5f194f..., rootfs_canon c1692250... |
+| `linux_mmu_qemu` | L7 QEMU BOOT OK (-m 128M cures Image/initrd overlap) |
+
+### Honest limitations
+- Optional review item 7 (extend `tools/gen.py` seeds to arm pending MTI across priv switches for the random lockstep suites) NOT done this round.
+- Translation-at-M chosen for pins; L7 CPU boot still needs OpenSBI-at-M CLINT handling - will revisit when the boot resumes.
