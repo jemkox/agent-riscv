@@ -169,7 +169,8 @@ module top_pipe (
   logic [3:0]  mm_dcause;
   logic mm_pld, mm_pwe, mm_act, mm_dmiss, mm_walk_i, mm_walk_d, mm_inject;
   logic [21:0] mm_sppn;
-  logic [1:0]  mm_priv;
+  logic [1:0]  mm_priv, mm_dpriv;
+  logic        mm_dmode;
   logic mm_sum_b, mm_mxr_b, mm_satpwr, mm_sfence;
   logic ifid_itpf, idex_itpf;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -186,7 +187,7 @@ module top_pipe (
   assign mm_act = mm_pld || mm_pwe;
   // A stalled EX instruction's EA is not valid yet (load-use forwarding), so it must
   // not drive a TLB walk (stale EA fills the wrong entry); same kill rules as the cache.
-  assign mm_dmiss = mm_mode && (idex_valid && !stall && !mem_kill_now && (ce_ld || ce_st || ce_amo)) && !mm_hit_d;
+  assign mm_dmiss = mm_dmode && (idex_valid && !stall && !mem_kill_now && (ce_ld || ce_st || ce_amo)) && !mm_hit_d;
   assign mm_walk_i = mm_st_i && !mm_fl_i && !(mm_fl_d && idex_valid && (ce_ld||ce_st||ce_amo));
   assign mm_walk_d = mm_st_d && !mm_fl_d && !(idex_itpf && idex_valid);
   assign mm_inject = mm_fl_i && !(idex_itpf && idex_valid) && !(ifid_itpf && ifid_valid);
@@ -237,8 +238,8 @@ module top_pipe (
 `endif
 );
 `ifndef FPGA
-  mmu MMU(.clk(clk), .reset(reset), .mode(mm_mode), .sppn(mm_sppn),
-          .priv(mm_priv), .sum(mm_sum_b), .mxr(mm_mxr_b),
+  mmu MMU(.clk(clk), .reset(reset), .mode(mm_mode), .dm(mm_dmode), .sppn(mm_sppn),
+          .priv(mm_priv), .dpriv(mm_dpriv), .sum(mm_sum_b), .mxr(mm_mxr_b),
            .flush(flush_now),
           .if_va(pc_if), .if_on(1'b1),
           .if_hit(mm_hit_i), .if_fault(mm_fl_i), .if_stall(mm_st_i), .if_pa(mm_pa_i),
@@ -449,7 +450,7 @@ module top_pipe (
 `ifndef FPGA
             .dpf(mm_fl_d), .dpf_cause(mm_dcause), .itpf(idex_itpf),
 `endif
-            .cs_sfence(mm_sfence), .mmu_mode(mm_mode), .mmu_ppn(mm_sppn),
+            .cs_sfence(mm_sfence), .mmu_mode(mm_mode), .mmu_dmode(mm_dmode), .mmu_dpriv(mm_dpriv), .mmu_ppn(mm_sppn),
             .cs_satp_wr(mm_satpwr), .cs_priv(mm_priv), .mmu_sum(mm_sum_b), .mmu_mxr(mm_mxr_b),
             .trap_flush(trap_flush), .timer_flush(timer_flush), .mret_flush(mret_flush), .sret_flush(sret_flush), .mret_pc(mret_pc),
             .idex_cs_old(idex_cs_old), .cs_old(cs_old), .cs_sepc(cs_sepc),
@@ -478,6 +479,13 @@ module top_pipe (
                mm_pld, mm_pwe, mm_paddr, mm_hit_i, mm_hit_d, mm_st_i, mm_st_d, mm_fl_i, mm_fl_d, mm_mode, pc_if,
                ldx_raw, idex_valid, idex_insn, stall, m_stall);
   end
+`endif
+`ifdef IFHDBG
+  always_comb
+    if (pc_if >= 32'h8000_0400 && pc_if < 32'h8000_0420)
+      $display("IFHIT pc=%08x mode=%b priv=%b hit=%b walk=%b fault=%b ifidv=%b ifidpc=%08x idexp=%08x st=%b mst=%b",
+               pc_if, mm_mode, mm_priv, mm_hit_i, mm_st_i, mm_fl_i, ifid_valid, ifid_pc, idex_pc,
+               stall, m_stall);
 `endif
   always_ff @(posedge clk) begin
     if (reset) begin

@@ -13,9 +13,11 @@
 `ifndef FPGA
 module mmu (
   input  logic        clk, reset,
-  input  logic        mode,
+  input  logic        mode,     // I-side Sv32 enable (spec: satp never translates M-mode fetches)
+  input  logic        dm,       // D-side Sv32 enable (also set for M+MPRV loads/stores)
   input  logic [21:0] sppn,
-  input  logic [1:0]  priv,
+  input  logic [1:0]  priv,     // I-side privilege
+  input  logic [1:0]  dpriv,    // D-side effective privilege (MPRV at M maps MPP's priv)
   input  logic        sum, mxr,
   input  logic        flush,
   input  logic [31:0] if_va,
@@ -50,7 +52,7 @@ module mmu (
   assign tag_d = df_va[31:12];
   logic hit_i, hit_d;
   assign hit_i = mode && tv_i[tag_i[1:0]] && (tg_i[tag_i[1:0]] == tag_i);
-  assign hit_d = mode && tv_d[tag_d[1:0]] && (tg_d[tag_d[1:0]] == tag_d);
+  assign hit_d = dm && tv_d[tag_d[1:0]] && (tg_d[tag_d[1:0]] == tag_d);
 
   function logic pbad (input [4:0] f, input logic rd, input logic wr,
                       input [1:0] pr, input logic sm, input logic mx);
@@ -74,7 +76,7 @@ module mmu (
 
   logic hb_i, hb_d, nw_i, nw_d, hit_ok_i, hit_ok_d;
   assign hb_i = hit_i && pbad(fg_i[tag_i[1:0]][3:0], 0, 0, priv, sum, mxr);
-  assign hb_d = hit_d && pbad(fg_d[tag_d[1:0]][3:0], df_r, df_w, priv, sum, mxr);
+  assign hb_d = hit_d && pbad(fg_d[tag_d[1:0]][3:0], df_r, df_w, dpriv, sum, mxr);
   // A/D bits live in entry flags [5:4]; a hit missing them must re-walk so the
   // PTE A/D update happens (parity with the reference model).
   assign nw_i = hit_i && !fg_i[tag_i[1:0]][5];
@@ -94,13 +96,13 @@ module mmu (
   logic heal_i, heal_d;
   assign heal_i = mode && if_on && s_i == 2'b11 && wt_i == tag_i && fcsr_i &&
                   !pbad({lvl_i, pv_i[1], pv_i[2], pv_i[3], pv_i[4]}, 0, 0, priv, sum, mxr);
-  assign heal_d = mode && df_on && s_d == 2'b11 && wt_d == tag_d && fcsr_d &&
-                  !pbad({lvl_d, pv_d[1], pv_d[2], pv_d[3], pv_d[4]}, df_r, df_w, priv, sum, mxr);
+  assign heal_d = dm && df_on && s_d == 2'b11 && wt_d == tag_d && fcsr_d &&
+                  !pbad({lvl_d, pv_d[1], pv_d[2], pv_d[3], pv_d[4]}, df_r, df_w, dpriv, sum, mxr);
   assign if_fault = (hit_ok_i && hb_i) || (mode && s_i == 2'b11 && wt_i == tag_i && !heal_i);
-  assign df_fault = df_on && ((hit_ok_d && hb_d) || (mode && s_d == 2'b11 && wt_d == tag_d && !heal_d));
+  assign df_fault = df_on && ((hit_ok_d && hb_d) || (dm && s_d == 2'b11 && wt_d == tag_d && !heal_d));
   assign df_cause = df_w ? 4'hF : 4'hD;
   assign if_stall = mode && if_on && !hit_ok_i;
-  assign df_stall = mode && df_on && !hit_ok_d;
+  assign df_stall = dm && df_on && !hit_ok_d;
 
   logic [9:0] vp1_i, vp0_i, vp1_d, vp0_d;
   logic [31:0] l1a_i, l1a_d;
@@ -143,7 +145,7 @@ module mmu (
     fcsr_ni = fcsr_i; fcsr_nd = fcsr_d;
 
     ev_i = mode && if_on && s_i == 2'b01 && own_i && tag_i == wt_i;
-    ev_d = mode && df_on && s_d == 2'b01 && own_d && tag_d == wt_d;
+    ev_d = dm && df_on && s_d == 2'b01 && own_d && tag_d == wt_d;
     if (ev_i) begin
       if (!pv_i[0]) fa = 1;
       else if (pv_i[3:1] != 0) begin
@@ -158,7 +160,7 @@ module mmu (
       if (!pv_d[0]) fd = 1;
       else if (pv_d[3:1] != 0) begin
         if (lvl_d && pv_d[19:10] != 0) fd = 1;
-        else if (pbad({lvl_d, pv_d[1], pv_d[2], pv_d[3], pv_d[4]}, df_r, df_w, priv, sum, mxr)) begin fd = 1; cperm_d = 1; end
+        else if (pbad({lvl_d, pv_d[1], pv_d[2], pv_d[3], pv_d[4]}, df_r, df_w, dpriv, sum, mxr)) begin fd = 1; cperm_d = 1; end
         else if (!pv_d[6] || (df_w && !pv_d[7])) fd = 2;
         else fd = 3;
       end else if (lvl_d) fd = 4;
@@ -182,15 +184,15 @@ module mmu (
         ffl_i = {lvl_i, pv_i[6], pv_i[7], pv_i[1], pv_i[2], pv_i[3], pv_i[4]};
       end
     end
-    if (s_d == 2'b00)                     wd_r = mode && df_on && !hit_ok_d;
+    if (s_d == 2'b00)                     wd_r = dm && df_on && !hit_ok_d;
     else if (s_d == 2'b01) begin
-      if (tag_d != wt_d || !own_d)        wd_r = mode && df_on;
-      else if (fd == 4)                   wd_r = mode && df_on;
+      if (tag_d != wt_d || !own_d)        wd_r = dm && df_on;
+      else if (fd == 4)                   wd_r = dm && df_on;
       else if (fd == 2)                   wd_w = 1;
     end else if (s_d == 2'b10) begin
-      if (!won_d)                         wd_w = mode && df_on;
+      if (!won_d)                         wd_w = dm && df_on;
     end else if (s_d == 2'b11) begin
-      if (tag_d != wt_d)                  wd_r = mode && df_on;      // restart / reissue
+      if (tag_d != wt_d)                  wd_r = dm && df_on;      // restart / reissue
       else if (heal_d) begin
         // CSR change since the fault made the latched PTE legal -> fill, proceed.
         ns_d = 2'b00; fi_d = 1; fpa_d = pv_d[31:10];

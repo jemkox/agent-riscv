@@ -32,6 +32,15 @@ _start:
   # enable Sv32: satp = mode|ppn8
   li t0, 0x80000008
   csrw satp, t0
+  # spec: satp translates S/U only -> enter S via mret (MPP=S)
+  la t2, swalk
+  csrw mepc, t2
+  li t0, 0x1800
+  csrc mstatus, t0
+  li t0, 0x800
+  csrs mstatus, t0
+  mret
+swalk:
   # load via translated VA 0x8000 -> PA 0xA000
   li t3, 0x8000
   lw t2, 0(t3)

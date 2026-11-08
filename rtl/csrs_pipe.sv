@@ -54,7 +54,9 @@ module csrs_pipe (
   output logic [31:0] cs_sepc,
   output logic [31:0] cs_trap_pc,
   output logic        halt_out,
-  output logic        mmu_mode,      // satp Sv32 on (L6)
+  output logic        mmu_mode,      // I-side Sv32 enable
+  output logic        mmu_dmode,     // D-side Sv32 enable (MPRV-aware)
+  output logic [1:0]  mmu_dpriv,     // D-side effective privilege
   output logic [21:0] mmu_ppn,       // satp PPN
   output logic        cs_satp_wr,    // satp write pulse (TLB flush)
   output logic [1:0]  cs_priv,       // current privilege (L6 MMU)
@@ -103,7 +105,7 @@ module csrs_pipe (
             .mstatus_next(mstatus_next), .mie_next(mie_next), .mtvec_next(mtvec_next),
             .mepc_next(mepc_next), .stvec_next(stvec_next), .sepc_next(sepc_next),
             .priv_cur(priv_cur), .cs_medeleg(cs_medeleg), .cs_mideleg(cs_mideleg), .halt_out(halt_out),
-            .mmu_mode(mmu_mode), .mmu_ppn(mmu_ppn), .cs_satp_wr(cs_satp_wr)
+            .mmu_mode(mmu_mode), .mmu_dmode(mmu_dmode), .mmu_dpriv(mmu_dpriv), .mmu_ppn(mmu_ppn), .cs_satp_wr(cs_satp_wr)
 `ifndef FPGA
             , .cs_mip_sw(mip_sw_next), .cs_time_mt64(clint_mt)
 `else
@@ -225,9 +227,15 @@ module csrs_pipe (
     if (timer_flush && idex_pc >= 32'h80473db4 && idex_pc < 32'h80473f80)
       $display("DBG IRQINHAND pc=%08x mstat=%08x mie=%08x mip=%08x mt=%016x cmp=%016x",
                idex_pc, mstatus_next, mie_next, clint_mip, clint_mt, clint_cmp);
+    if (timer_flush)
+      $display("DBG TIRQ pc=%08x cause=%08x tpc=%08x priv=%0b sup=%0b mip=%08x mstat=%08x mt=%016x cmp=%016x",
+               idex_pc, irq_cause, cs_trap_pc, priv_cur, trap_to_sup, clint_mip, mstatus_next,
+               clint_mt, clint_cmp);
     if (trap_flush)
-      $display("DBG TRAP pc=%08x insn=%08x cause=%08x mstat=%08x",
-               idex_pc, idex_insn, insn_cause, mstatus_next);
+      $display("DBG TRAP pc=%08x insn=%08x cause=%08x mstat=%08x tpc=%08x priv=%0b sup=%0b",
+               idex_pc, idex_insn, insn_cause, mstatus_next, cs_trap_pc, priv_cur, trap_to_sup);
+    if (idex_trap && (stall || m_stall) && dbg_ret[11:0] == 0)
+      $display("DBG TRAPSTALLED pc=%08x cause=%08x st=%b mst=%b", idex_pc, insn_cause, stall, m_stall);
   end
 `endif
 endmodule

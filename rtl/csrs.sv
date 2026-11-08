@@ -47,7 +47,9 @@ module csrs (
   output logic [31:0] cs_medeleg,
   output logic [31:0] cs_mideleg,
   output logic        halt_out,
-  output logic        mmu_mode,      // satp bit31: Sv32 enabled (L6)
+  output logic        mmu_mode,      // I-side Sv32 enable (spec: satp never translates M fetches)
+  output logic        mmu_dmode,     // D-side Sv32 enable (also set at M with MPRV and MPP != M)
+  output logic [1:0]  mmu_dpriv,     // D-side effective privilege (MPRV at M maps MPP's priv)
   output logic [21:0]   mmu_ppn,       // satp PPN
   output logic        cs_satp_wr     // satp CSR written this cycle (TLB flush)
 `ifndef FPGA
@@ -188,7 +190,10 @@ module csrs (
   assign cs_medeleg = after_medeleg;
   assign cs_mideleg = after_mideleg;
   assign halt_out = halt_wr;
-  assign mmu_mode = after_satp[31];  // Sail 0.16 (pinned L6 pins): satp translation applies at ALL privs incl M
+  assign mmu_mode = after_satp[31] && (after_priv != 2'b11);  // spec: satp translates S/U only
+  assign mmu_dmode = after_satp[31] && (after_priv != 2'b11 ||
+                     (after_mstatus[17] && after_mstatus[12:11] != 2'b11));  // MPRV: M loads/stores use MPP
+  assign mmu_dpriv = (after_priv == 2'b11 && after_mstatus[17]) ? after_mstatus[12:11] : after_priv;
   assign mmu_ppn = after_satp[21:0];
   assign cs_satp_wr = cs_write_en && (cs_wsel == 12'h180) && !halt_in && !reset;
 `ifndef FPGA

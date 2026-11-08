@@ -17,6 +17,11 @@
  	 linux,initrd-end = <0x00 0x82931600>;
 	};
 
+	 timers {
+	 riscv_timer {
+	 };
+	 };
+
 	 memory@80000000 {
 	 device_type = "memory";
 	 reg = <0x00 0x80000000 0x00 0x4000000>;
@@ -57,6 +62,8 @@
 	 compatible = "simple-bus";
 	 ranges;
 
+	 /* QEMU virt-style timers node: enables the kernel riscv_timer driver
+	 *  (drivers/clocksource/timer-riscv.c TIMER_OF_DECLARE name riscv_timer). */
 	 serial@10000000 {
 	 clock-frequency = <230400>;
 	 reg = <0x00 0x10000000 0x00 0x100>;

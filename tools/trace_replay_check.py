@@ -13,7 +13,16 @@ def s32(v): return sx(v, 32)
 trace, kern, dtbf, dtb_addr = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4], 16)
 max_rep = int(sys.argv[5]) if len(sys.argv) > 5 else 30
 mem = {}                                   # byte address -> value (known bytes only)
-for base, path in ((0x80000000, kern), (dtb_addr, dtbf)):
+# argv[2] loads at 0x80000000 (kernel for L4; fw_jump.bin for the L7 OpenSBI boot).
+# Extra optional pairs after max_rep: ADDR_HEX PATH... (e.g. 80400000 Image 82800000 rootfs.cpio)
+# The DTB loads LAST: the runner loads fw/kernel/initrd first and the DTB over the
+# kernel's .bss hole, so initial RAM at dtb_addr = DTB bytes, not kernel zeros.
+loads = [(0x80000000, kern)]
+extra = sys.argv[6:]
+for i in range(0, len(extra) - 1, 2):
+    loads.append((int(extra[i], 16), extra[i + 1]))
+loads.append((dtb_addr, dtbf))
+for base, path in loads:
     for i, b in enumerate(open(path, "rb").read()):
         mem[base + i] = b
 def rd_mem(a, n):
@@ -41,11 +50,19 @@ while True:
     if len(rec) < 32: break
     cyc, pc, insn, rdf, wv, st, ea, sd = struct.unpack("<8I", rec)
     n += 1
+    # fetch: the word the CPU fetched must match its reported insn (RAM window only;
+    # our ISA is uncompressed, so a misaligned pc still reads the 4-byte window).
+    fw = rd_mem(pc, 4) if 0x80000000 <= pc < 0x84000000 else None
+    if fw is not None and fw != insn:
+        report("FETCH", n, cyc, pc, insn, f"insn {insn:08x}, memory has {fw:08x}")
     # control flow: was this the instruction the previous one should lead to?
     if prev and prev[4] is not None and pc != prev[4]:
         mt = csr.get(0x305)
         if mt is not None and pc == (mt & ~3):
             csr[0x341] = prev[4]; stats["traps"] += 1   # trap entry: mepc = the instruction that did not run
+            if stats["traps"] <= 12:
+                print(f"TRAP n={n} cyc={cyc} pc={pc:08x} mepc={csr[0x341]:08x} mtvec={mt:08x} "
+                      f"prev_insn={prev[3]:08x} (cause unknown: read handler's csrrs)")
         else:
             report("PC", n, cyc, pc, insn, f"expected next pc {prev[4]:08x} after {prev[2]:08x} ({prev[3]:08x})")
     op = insn & 0x7F; rd = (insn >> 7) & 31; f3 = (insn >> 12) & 7; r1 = (insn >> 15) & 31; r2 = (insn >> 20) & 31; f7 = insn >> 25

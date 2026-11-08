@@ -36,7 +36,7 @@ WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.w
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
 # Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
-FPGA_NETLIST_LUT4 ?= 3361
+FPGA_NETLIST_LUT4 ?= 3360
 FPGA_NETLIST_FLOPS ?= 1259
 # Pinned netlist for the documented fpga_csrtrap ROM (smaller, but it exercises
 # trap CSRs dynamically; see fpga_csrtrap_netlist target below).
@@ -942,7 +942,7 @@ linux/linux_mmu.dtb: rtl/linux_mmu.dts linux | $(B)
 	@mkdir -p linux
 	@dtc -I dts -O dtb -o linux/linux_mmu.dtb rtl/linux_mmu.dts
 
-MMU_KERNEL_SHA256 ?= 8e262f7bec39eb05f5d92f1cc14b3ed2b6f7be0a27d906ea96dbf9db7436b375
+MMU_KERNEL_SHA256 ?= 09f4ae2c01a2c6b54cac7167ecd092e53a04ef775999f8bfaa24f2ccafb3c2c3
 MMU_FW_SHA256 ?= 1b5f194f55c2f743be9c26cc4c220a8d04e74f51e0e944023b9a5626e15fa7b7
 MMU_ROOTFS_CANON_SHA256 ?= c1692250c8f8d06eaa0baab7334839ea7c6ea3888f8f02e90986b9882487110f
 
@@ -965,7 +965,7 @@ linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
 	@grep -m 5 -a "OpenSBI\|Run /init as init\|login\|Power down" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true
 
 $(B)/vlt_openboot/run_openboot: $(RTL) tb/run_linux.sv tb/run_openboot.cpp | $(B)
-	verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast -DLINUX -DLINUX_DEBUG -DIFHDBG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
+	verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast $(OPENBOOT_DBG) $(OPENBOOT_IFHDBG) -DLINUX -DLINUX_DEBUG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
 	$(MAKE) -C $(B)/vlt_openboot -f Vrun_linux.mk OPT_FAST="-O2 -DLINUX_DEBUG " run_openboot -j 4
 
 linux_mmu_spike: linux_mmu_build | $(B)/linux/logs
@@ -974,7 +974,19 @@ linux_mmu_spike: linux_mmu_build | $(B)/linux/logs
 	@timeout 300 sh -c '(sleep 70; printf "root\n"; sleep 5; printf "uname -a\n"; sleep 5; printf "cat /proc/cpuinfo\n"; sleep 5; printf "poweroff\n"; sleep 5) | $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m64 --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio --bootargs="console=ttyS0 earlycon" $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike.out'
 	@if grep -q "OpenSBI v1.6" $(B)/linux/logs/linux_mmu_spike.out && grep -q "Run /init as init" $(B)/linux/logs/linux_mmu_spike.out && grep -q "login:" $(B)/linux/logs/linux_mmu_spike.out; then echo "L7 SPIKE BOOT OK: OpenSBI banner + init + login (reference for the CPU boot)"; else echo "L7 SPIKE BOOT FAIL"; exit 1; fi
 
+# Spike confirmation of the S-mode MMU directed tests (spec: satp translates S/U only).
+# Spike faults unknown CSR 0x3ff (xhalt) -> the handler's fail path overwrites gp, so
+# the pin is "gp==1 appears in the trace" (the test reached pass/done before xhalt).
+spike_tests: $(foreach t,$(MMU_TESTS),$(B)/$(t).elf) | $(B)
+	@mkdir -p $(B)/spike/logs
+	@bad=0; for t in $(MMU_TESTS); do \
+	  $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr --max-steps=20000 $(B)/$(t).elf > $(B)/spike/logs/$$t.log 2>&1 || true; \
+	  grep -q "x_gp 0x00000001" $(B)/spike/logs/$$t.log || bad=$(($$bad+1)); \
+	 done; if [ $$bad -eq 0 ]; then echo "SPIKE_MMU_OK"; else echo "SPIKE_MMU $$bad FAILS"; exit 1; fi
+
 # Spike commit log (golden per-instruction reference): compare with build/linux/cpu_retire.bin.
+OPENBOOT_IFHDBG ?=
+OPENBOOT_DBG ?=
 SPIKE_MAX_INS ?= 4750000
 linux_mmu_spike_log: linux_mmu_build | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs

@@ -163,7 +163,10 @@ def main(argv):
     # typ: 0 fetch, 1 load (incl LR), 2 store (incl SC/AMO). Returns PA, or None for
     # a page fault. With satp.MODE=0 addresses are identity (pre-L6 behavior intact).
     def xlate(v, typ):
-        if not (cs.get(0x180,0) & 0x80000000): return v   # Sail 0.16: satp applies at all privs incl M
+        eff = priv
+        if priv == 3 and typ != 0 and (cs[0x300] >> 17) & 1:   # MPRV: M loads/stores use MPP's priv
+            eff = (cs[0x300] & MPP_MASK) >> 11
+        if not (cs.get(0x180,0) & 0x80000000) or eff == 3: return v  # spec: satp translates S/U only (M physical)
         root = (cs[0x180] & 0x3FFFFF) << 12
         vpn = ((v >> 12) & 0x3FF, (v >> 22) & 0x3FF)   # vpn[1] = bits 31:22, vpn[0] = bits 21:12
         pte = 0; addr = 0; lvl = 0; leaf = False
@@ -183,13 +186,13 @@ def main(argv):
         ok = True
         if typ == 0:
             if not x: ok = False
-            if u and priv == 1 and typ == 0: ok = False   # S NEVER fetches a U page; SUM applies to loads/stores only (arch-test Sv_sv32_upage_mstatus_sum_set_Smode faults the jalr even with SUM set)
+            if u and eff == 1 and typ == 0: ok = False   # S NEVER fetches a U page; SUM applies to loads/stores only (arch-test Sv_sv32_upage_mstatus_sum_set_Smode faults the jalr even with SUM set)
         elif typ == 1:
             if not (r or (w and (cs[0x300] & MXR_BIT))): ok = False
         else:
             if not w: ok = False
-        if priv == 0 and not u: ok = False
-        if priv == 1 and u and typ != 0 and not (cs[0x300] & SUM_BIT): ok = False
+        if eff == 0 and not u: ok = False
+        if eff == 1 and u and typ != 0 and not (cs[0x300] & SUM_BIT): ok = False
         if not ok: return None
         if not (pte & 0x40) or (typ == 2 and not (pte & 0x80)):
             w32(addr, (pte | 0x40 | (0x80 if typ == 2 else 0)) & mask)  # A/D hardware update

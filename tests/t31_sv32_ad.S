@@ -21,6 +21,15 @@ _start:
   sw t1, 0(t0)
   li t0, 0x80000008
   csrw satp, t0
+  # spec: satp translates S/U only -> enter S via mret (MPP=S)
+  la t2, swalk
+  csrw mepc, t2
+  li t0, 0x1800
+  csrc mstatus, t0
+  li t0, 0x800
+  csrs mstatus, t0
+  mret
+swalk:
   li t3, 0x7000        # translated to PA0xA000
   lw t2, 0(t3)         # sets A
   li t4, 0x55AA

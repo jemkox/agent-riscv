@@ -152,9 +152,10 @@ int main(int argc, char **argv) {
     printf("openboot: fw %zu ins, kernel %zu ins, initrd %zu ins, dtb %zu ins (restore=%d)\n",
            fw.size(), kernel.size(), initrd.size(), dtb.size(), ckpt_restore ? 1 : 0);
     const uint64_t start_cyc = cyc;
-    const uint64_t save_cycle = ckpt_save ? max_cycles - 1 : 0ull;
+    const bool save_at_end = ckpt_save || ckpt_restore;
+    const uint64_t save_cycle = save_at_end ? start_cyc + max_cycles - 1 : 0ull;
     while (cyc - start_cyc < max_cycles) {
-        if (ckpt_save && cyc == save_cycle) {
+        if (save_at_end && cyc == save_cycle) {
             printf("#CKPT_SAVE cyc=%llu insns=%u file=%s hash=%s\n",
                    (unsigned long long)cyc, rec_n, ckpt_file.c_str(), ckpt_hash.c_str());
             VerilatedSave os;
