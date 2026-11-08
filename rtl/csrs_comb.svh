@@ -16,11 +16,16 @@
             | (cs_rsel == CSR_SCAUSE   ? st_scause : 32'h0)
             | (cs_rsel == CSR_STVAL    ? st_stval : 32'h0)
             | (cs_rsel == CSR_SSCRATCH ? st_sscratch : 32'h0)
-            | (cs_rsel == CSR_SIE      ? st_sie : 32'h0)
+            // sie/sip are spec-restricted views: sie = mie masked by mideleg,
+            // sip = mip (live CLINT + software pending) masked by mideleg.
+            | (cs_rsel == CSR_SIE      ? (st_mie & st_mideleg) : 32'h0)
+`ifndef FPGA
+            | (cs_rsel == CSR_SIP      ? (mip_live & st_mideleg) : 32'h0)
+`endif
             | (cs_rsel == CSR_SCNTR    ? st_scntr : 32'h0)
             | (cs_rsel == CSR_SATP     ? st_satp : 32'h0)
 `ifndef FPGA
-            | ((cs_rsel == CSR_MIP || cs_rsel == CSR_MIP_OLD) ? mip_live : 32'h0)
+            | (cs_rsel == CSR_MIP ? mip_live : 32'h0)
 `endif
             | (cs_rsel == CSR_MCYCLE   ? mc_ref : 32'h0)
             | (cs_rsel == CSR_MINSTRT || cs_rsel == CSR_INSTRET ? min_ref : 32'h0)
@@ -73,7 +78,7 @@
     after_scause = st_scause;
     after_stval = st_stval;
     after_sscratch = st_sscratch;
-    after_sie = st_sie;
+
     after_scntr = st_scntr;
     after_halt = st_halt;
     after_mscratch = st_mscratch;
@@ -102,6 +107,7 @@
       else if (cs_wsel == CSR_MEPC) after_mepc = newv;
       else if (cs_wsel == CSR_MCAUSE) after_mcause = newv;
       else if (cs_wsel == CSR_MIE) after_mie = newv;
+      else if (cs_wsel == CSR_SIE) after_mie = (st_mie & ~st_mideleg) | (newv & st_mideleg);
       else if (cs_wsel == CSR_MSCRATCH) after_mscratch = newv;
       else if (cs_wsel == CSR_MEDELEG) after_medeleg = newv;
       else if (cs_wsel == CSR_MIDELEG) after_mideleg = newv;
@@ -110,12 +116,13 @@
       else if (cs_wsel == CSR_SCAUSE) after_scause = newv;
       else if (cs_wsel == CSR_STVAL) after_stval = newv;
       else if (cs_wsel == CSR_SSCRATCH) after_sscratch = newv;
-      else if (cs_wsel == CSR_SIE) after_sie = newv;
       else if (cs_wsel == CSR_SCNTR) after_scntr = newv;
       else if (cs_wsel == CSR_SATP) after_satp = newv & 32'h803F_FFFF;
       else if (cs_wsel == CSR_XHALT) after_halt = newv[0] ? 1'b1 : after_halt;
 `ifndef FPGA
-      else if (cs_wsel == CSR_MIP || cs_wsel == CSR_MIP_OLD) after_mip_sw = newv & 32'hFFFF_FF77;
+      else if (cs_wsel == CSR_MIP) after_mip_sw = newv & 32'hFFFF_FF77;
+      else if (cs_wsel == CSR_SIP) after_mip_sw =
+          (st_mip_sw & ~(st_mideleg & 32'h2)) | (newv & (st_mideleg & 32'h2));
 `endif
       else if (cs_wsel == CSR_MCOUNTHI) after_mcountinhibit = newv & 32'h7;
       else begin
@@ -142,12 +149,14 @@
             | (idex_rsel == CSR_SCAUSE   ? after_scause : 32'h0)
             | (idex_rsel == CSR_STVAL    ? after_stval : 32'h0)
             | (idex_rsel == CSR_SSCRATCH ? after_sscratch : 32'h0)
-            | (idex_rsel == CSR_SIE      ? after_sie : 32'h0)
+            | (idex_rsel == CSR_SIE      ? (after_mie & st_mideleg) : 32'h0)
             | (idex_rsel == CSR_SCNTR    ? after_scntr : 32'h0)
             | (idex_rsel == CSR_SATP     ? after_satp : 32'h0)
 `ifndef FPGA
-             | ((idex_rsel == CSR_MIP || idex_rsel == CSR_MIP_OLD)
+             | ((idex_rsel == CSR_MIP)
                 ? (mip_in | (after_mip_sw & 32'hFFFF_FF77)) : 32'h0)
+             | ((idex_rsel == CSR_SIP)
+                ? ((mip_in | (after_mip_sw & 32'hFFFF_FF77)) & st_mideleg) : 32'h0)
 `endif
             | (idex_rsel == CSR_MCYCLE   ? after_mcycle : 32'h0)
             | (idex_rsel == CSR_MINSTRT || idex_rsel == CSR_INSTRET ? after_minstret : 32'h0)

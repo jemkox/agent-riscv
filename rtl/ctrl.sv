@@ -195,7 +195,7 @@ module ctrl (
   function bit csr_defined;   // implemented CSR numbers (aligned to spike banner)
     input bit [11:0] c;
     csr_defined = (c == 12'h300 || c == 12'h301 || c == 12'h302 || c == 12'h303 ||
-            c == 12'h304 || c == 12'h305 || c == 12'h308 || c == 12'h320 ||
+            c == 12'h304 || c == 12'h305 || c == 12'h320 ||
             c == 12'h340 || c == 12'h341 || c == 12'h342 || c == 12'h343 ||
             c == 12'h344 ||             c == 12'h3ff || c == 12'h100 || c == 12'h104 ||
             c == 12'h105 || c == 12'h106 || c == 12'h140 || c == 12'h141 ||

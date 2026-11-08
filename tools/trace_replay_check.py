@@ -12,13 +12,16 @@ def s32(v): return sx(v, 32)
 
 trace, kern, dtbf, dtb_addr = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4], 16)
 max_rep = int(sys.argv[5]) if len(sys.argv) > 5 else 30
+if len(sys.argv) >= 10 and all(x.isdigit() for x in sys.argv[-2:]):
+    nmin, nmax = map(int, sys.argv[-2:]); extra = sys.argv[6:-2]
+else:
+    nmin, nmax = 0, 10**18; extra = sys.argv[6:]
 mem = {}                                   # byte address -> value (known bytes only)
 # argv[2] loads at 0x80000000 (kernel for L4; fw_jump.bin for the L7 OpenSBI boot).
 # Extra optional pairs after max_rep: ADDR_HEX PATH... (e.g. 80400000 Image 82800000 rootfs.cpio)
 # The DTB loads LAST: the runner loads fw/kernel/initrd first and the DTB over the
 # kernel's .bss hole, so initial RAM at dtb_addr = DTB bytes, not kernel zeros.
 loads = [(0x80000000, kern)]
-extra = sys.argv[6:]
 for i in range(0, len(extra) - 1, 2):
     loads.append((int(extra[i], 16), extra[i + 1]))
 loads.append((dtb_addr, dtbf))
@@ -33,13 +36,14 @@ def wr_mem(a, n, v):
 
 reg = [0] + [None] * 31                    # None: not known yet
 csr = {}                                   # plain-storage CSRs we model
-PLAIN = {0x340: "mscratch", 0x305: "mtvec", 0x341: "mepc"}
+PLAIN = {0x340: "mscratch", 0x305: "mtvec", 0x341: "mepc", 0x105: "stvec"}
 reports = 0
 stats = {"res": 0, "adopt": 0, "ld": 0, "st": 0, "traps": 0, "mret": 0}
 def report(kind, n, cyc, pc, insn, msg):
     global reports
     reports += 1
-    print(f"#{reports} {kind} n={n} cyc={cyc} pc={pc:08x} insn={insn:08x}: {msg}", flush=True)
+    if nmin <= n <= nmax:
+        print(f"#{reports} {kind} n={n} cyc={cyc} pc={pc:08x} insn={insn:08x}: {msg}", flush=True)
     if reports >= max_rep:
         print(stats); sys.exit(0)
 
@@ -58,10 +62,11 @@ while True:
     # control flow: was this the instruction the previous one should lead to?
     if prev and prev[4] is not None and pc != prev[4]:
         mt = csr.get(0x305)
-        if mt is not None and pc == (mt & ~3):
-            csr[0x341] = prev[4]; stats["traps"] += 1   # trap entry: mepc = the instruction that did not run
+        sc = csr.get(0x105)
+        if (mt is not None and pc == (mt & ~3)) or (sc is not None and pc == (sc & ~3)):
+            csr[0x341] = prev[4]; stats["traps"] += 1   # trap entry (M or S): mepc = the instruction that did not run
             if stats["traps"] <= 12:
-                print(f"TRAP n={n} cyc={cyc} pc={pc:08x} mepc={csr[0x341]:08x} mtvec={mt:08x} "
+                print(f"TRAP n={n} cyc={cyc} pc={pc:08x} mepc={csr[0x341]:08x} vec={(mt if mt is not None and pc==(mt&~3) else sc):08x} "
                       f"prev_insn={prev[3]:08x} (cause unknown: read handler's csrrs)")
         else:
             report("PC", n, cyc, pc, insn, f"expected next pc {prev[4]:08x} after {prev[2]:08x} ({prev[3]:08x})")
@@ -87,7 +92,7 @@ while True:
             e = (a + iimm) & M32
             if e != ea: report("LD-ADDR", n, cyc, pc, insn, f"ea {ea:08x}, expected {e:08x}")
         size = {0: 1, 1: 2, 2: 4, 4: 1, 5: 2}[f3]
-        v = rd_mem(ea, size) if 0x80000000 <= ea < 0x84000000 else None
+        v = rd_mem(ea, size)
         if v is None: adopt = True
         else: res = (sx(v, 8 * size) & M32) if f3 in (0, 1) else v; stats["ld"] += 1
     elif op == 0x23:                       # stores

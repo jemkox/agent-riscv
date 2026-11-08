@@ -31,7 +31,7 @@ thdl:
   csrr t5,mepc
   sw t5,8(a1)                # expect the pc t0 was set to (w1)
   bne t5,t0,fail             # SELF-CHECK: mepc == the killed wfi pc
-  csrr t6,0x308              # mip inside handler (still pending)
+  csrr t6,0x344              # mip inside handler (still pending; mip = 0x344)
   sw t6,12(a1)
   li t4,0x80
   bne t6,t4,fail             # SELF-CHECK: mip == 0x80 in the handler
@@ -48,7 +48,7 @@ after:
   sw t1,20(a1)               # expect > value stored at 0x1810
   sltu t4,t3,t1
   beqz t4,fail               # SELF-CHECK: mcycle ticks across the wfi NOP
-  csrr t2,0x308              # mip now clear (mtpcmp pushed)
+  csrr t2,0x344              # mip now clear (mtpcmp pushed)
   sw t2,24(a1)
   bne t2,x0,fail             # SELF-CHECK: mip == 0 after mtpcmp push
   li gp,1                  # gp is x3: ISS --pass gate demands gp==1 on XHALT

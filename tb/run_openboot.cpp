@@ -19,8 +19,12 @@
 
 static const uint32_t FW_ADDR     = 0x80000000u;
 static const uint32_t KERNEL_ADDR = 0x80400000u;
-static const uint32_t DTB_ADDR      = 0x82200000u;
-static const uint32_t INITRD_ADDR = 0x82800000u;
+static uint32_t DTB_ADDR      = 0x82200000u;
+static uint32_t INITRD_ADDR = 0x82800000u;
+static void apply_addr_env() {
+    if (const char *e = getenv("DTB_ADDR"))    DTB_ADDR = (uint32_t)strtoul(e, nullptr, 16);
+    if (const char *e = getenv("INITRD_ADDR")) INITRD_ADDR = (uint32_t)strtoul(e, nullptr, 16);
+}
 static const uint32_t STUB_ADDR   = 0x00001000u;
 
 static bool load_bin(const char *path, std::vector<uint32_t> &words) {
@@ -46,6 +50,7 @@ int main(int argc, char **argv) {
         printf("usage: run_openboot <fw.bin> <Image> <rootfs.cpio> <dtb> [max_cycles] [prompt]\n");
         return 2;
     }
+    apply_addr_env();
     Verilated::commandArgs(argc, argv);
     std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
     std::unique_ptr<Vrun_linux> model{new Vrun_linux(contextp.get())};
@@ -87,7 +92,7 @@ int main(int argc, char **argv) {
         : (getenv("REC_START") ? strtoull(getenv("REC_START"), nullptr, 10) : 0ull);
     struct TEntry { uint32_t pc, insn, rd, wv, ea; };
     bool banner = false, runinit = false, login = false, hangseen = false;
-    bool stuckdumped = false;
+    bool stuckdumped = false, panicked = false, panicked_dumped = false;
     std::deque<TEntry> trace, trace_first;
     std::unordered_map<uint32_t, uint32_t> pcseen;
     const uint32_t stuck_limit = getenv("STUCK_LIMIT") ? (uint32_t)strtoul(getenv("STUCK_LIMIT"), 0, 10) : 25000u;
@@ -229,13 +234,20 @@ int main(int argc, char **argv) {
         banner = banner || scan("OpenSBI v");
         runinit = runinit || scan("Run /init as init process");
         login = login || scan("login:");
-        if ((login && prompt_stop) || model->halt) break;
+        panicked = panicked || scan("Kernel panic");
+        if (panicked && !panicked_dumped) {
+            panicked_dumped = true;
+            printf("#PANIC_CONTEXT (ring at first 'Kernel panic'):\n");
+            for (const auto &e : trace)
+                printf("#PANI %08x %08x r%u<-%08x ea=%08x\n", e.pc, e.insn, e.rd, e.wv, e.ea);
+        }
+        if ((login && prompt_stop) || panicked || model->halt) break;
         cyc++;
     }
 
-    printf("#OPENBOOT cyc=%llu banner=%d runinit=%d login=%d halt=%d loglen=%zu\n",
+    printf("#OPENBOOT cyc=%llu banner=%d runinit=%d login=%d halt=%d panic=%d loglen=%zu\n",
            (unsigned long long)cyc, banner ? 1 : 0, runinit ? 1 : 0,
-           login ? 1 : 0, model->halt ? 1 : 0, log.size());
+           login ? 1 : 0, model->halt ? 1 : 0, panicked ? 1 : 0, log.size());
     {
         FILE *f = fopen("../../build-linux/mmu3/cpu_boot.log", "w");
         if (f) { fwrite(log.data(), 1, log.size(), f);

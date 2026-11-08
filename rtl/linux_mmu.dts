@@ -13,8 +13,8 @@
 	 bootargs = "console=ttyS0 earlycon=ns16550,mmio,0x10000000 initramfs_async=0";
 	 stdout-path = "/soc/serial@10000000";
 	 stdin-path = "/soc/serial@10000000";
- 	 linux,initrd-start = <0x00 0x82800000>;
- 	 linux,initrd-end = <0x00 0x82931600>;
+	  linux,initrd-start = <0x00 0x83ecda00>;
+	  linux,initrd-end = <0x00 0x83fff000>;
 	};
 
 	 timers {
@@ -37,7 +37,9 @@
 	 reg = <0>;
 	 status = "okay";
 	 compatible = "riscv";
-	 riscv,isa = "rv32imaz_zicsr_zifencei";
+	 riscv,isa = "rv32ima_zicsr_zifencei_zicntr";
+		riscv,pmpregions = <0x0>;
+		clock-frequency = <0x989680>;
 	 mmu-type = "riscv,sv32";
 
 	 intc: interrupt-controller {
@@ -64,11 +66,24 @@
 
 	 /* QEMU virt-style timers node: enables the kernel riscv_timer driver
 	 *  (drivers/clocksource/timer-riscv.c TIMER_OF_DECLARE name riscv_timer). */
-	 serial@10000000 {
-	 clock-frequency = <230400>;
-	 reg = <0x00 0x10000000 0x00 0x100>;
-	 compatible = "ns16550a";
-	 };
+		plic: plic@c000000 {
+			compatible = "riscv,plic0";
+			#address-cells = <2>;
+			#interrupt-cells = <1>;
+			interrupt-controller;
+			interrupts-extended = <&intc 0x0b &intc 0x09>;
+			reg = <0x00 0xc000000 0x00 0x1000000>;
+			riscv,ndev = <0x1f>;
+			riscv,max-priority = <0x0f>;
+		};
+
+		serial: serial@10000000 {
+			clock-frequency = <0x989680>;
+			reg = <0x00 0x10000000 0x00 0x100>;
+			compatible = "ns16550a";
+			interrupt-parent = <&plic>;
+			interrupts = <0x04>;
+		};
 
 	 clint@2000000 {
 	 interrupts-extended = <&intc 0x3 &intc 0x7>;

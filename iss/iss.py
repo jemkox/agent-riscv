@@ -48,7 +48,7 @@ def main(argv):
     MPP_MASK = 0x1800; SPP_BIT = 0x100; MPIE_BIT = 0x80; SPIE_BIT = 0x20
     MIE_BIT = 0x8; SIE_BIT = 0x2
     TSR_BIT = 0x00400000; TVM_BIT = 0x00100000
-    CSR_DEFINED = {0x300,0x301,0x302,0x303,0x304,0x305,0x308,0x320,
+    CSR_DEFINED = {0x300,0x301,0x302,0x303,0x304,0x305,0x320,
                    0x340,0x341,0x342,0x343,0x344,0x3ff,
                    0x100,0x104,0x105,0x106,0x140,0x141,0x142,0x143,
                    0x180,
@@ -60,7 +60,9 @@ def main(argv):
     def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
         if n == 0x100:   return cs[0x300] & SSTATUS_MASK   # sstatus = mstatus view
-        if n == 0x308 or n == 0x344:   return mip_bits()
+        if n == 0x344:   return mip_bits()
+        if n == 0x144:   return mip_bits() & cs[0x303]     # sip: S view of mip, masked by mideleg
+        if n == 0x104:   return cs[0x304] & cs[0x303]      # sie: S view of mie, masked by mideleg
         if n == 0x32d:   return cs[0x300] & SPP_BIT
         if n == 0x32e:   return cs[0x300] & 0x10
         if n == 0x32f:   return cs[0x300] & SPIE_BIT
@@ -84,8 +86,12 @@ def main(argv):
         elif n == 0x180:   # satp: keep MODE(bit31) + PPN[21:0], drop ASID[30:22]
             cs[n] = ((v & 0x80000000) | (v & 0x3FFFFF)) & mask
             if v & 0x80000000: MMASK[0] = 0xFFFFF
-        elif n == 0x308 or n == 0x344:
+        elif n == 0x344:
             mip_sw = v & 0xFFFFFF77
+        elif n == 0x144:   # sip write: only delegated SSIP (bit1) changes mip.SSIP
+            mip_sw = (mip_sw & ~(cs[0x303] & 2)) | (v & cs[0x303] & 2)
+        elif n == 0x104:   # sie write: only delegated bits update mie (shared storage)
+            cs[0x304] = ((cs[0x304] & ~cs[0x303]) | (v & cs[0x303])) & mask
         elif n == 0xc02:
             cs[0xb02] = v & mask
         elif n == 0xc82:
@@ -455,9 +461,12 @@ def main(argv):
                      (f3 in (2,3) and a0 != 0) or (f3 in (6,7) and zimm != 0)):
                     cause = 2; illegal = True   # Zicntr: write to read-only counter
                 else:
-                    if csr_num == 0x308 or csr_num == 0x344:   # mip: live bits, post-tick view like the RTL
+                    if csr_num == 0x344:   # mip: live bits, post-tick view like the RTL
                         old = ((((mtime + 1) >= mtpcmp) << 7) |
                                ((msip & 1) << 3) | (mip_sw & 0xFFFFFF77))
+                    elif csr_num == 0x144:   # sip: same view masked by mideleg
+                        old = (((((mtime + 1) >= mtpcmp) << 7) |
+                               ((msip & 1) << 3) | (mip_sw & 0xFFFFFF77)) & cs[0x303])
                     elif csr_num == 0xc01:
                         old = (mtime + 1) & mask          # time: post-tick view like the RTL
                     elif csr_num == 0xc81:

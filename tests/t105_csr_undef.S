@@ -11,7 +11,8 @@ _start:
   csrrs t0, 0x14d, x0    # stimecmp: unimplemented -> cause 2
   csrrs t0, 0x30c, x0    # mstateen0: unimplemented -> cause 2
   csrrs t0, 0x35c, x0    # mtopi: unimplemented -> cause 2
-  li t3, 3
+  csrrs t0, 0x308, x0    # 0x308 is NOT mip on rv32 (mip = 0x344) -> cause 2
+  li t3, 4
   bne s0, t3, fail
   # time: read-only view of CLINT mtime; ticks per retired insn.
   csrr t4, 0xc01

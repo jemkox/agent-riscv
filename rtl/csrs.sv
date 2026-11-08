@@ -74,8 +74,8 @@ module csrs (
   localparam CSR_MEDELEG   = 12'h302;
   localparam CSR_MIDELEG   = 12'h303;
 `ifndef FPGA
-  localparam CSR_MIP       = 12'h308;   // modern mip CSR
-  localparam CSR_MIP_OLD   = 12'h344;   // riscv-tests legacy mip CSR alias
+  localparam CSR_MIP       = 12'h344;   // mip (ABI/spike number)
+  localparam CSR_SIP       = 12'h144;   // sip: S view of mip masked by mideleg
 `endif
   localparam CSR_STVEC     = 12'h105;
   localparam CSR_SEPC      = 12'h141;
@@ -117,8 +117,7 @@ module csrs (
   (* keep *) logic [31:0] st_scause = 0;
   (* keep *) logic [31:0] st_stval = 0;
   (* keep *) logic [31:0] st_sscratch = 0;
-  (* keep *) logic [31:0] st_sie = 0;
-  logic [31:0] st_scntr = 0;
+  (* keep *) logic [31:0] st_scntr = 0;
   logic [31:0] st_mcounteren = 0;
   (* keep *) logic [31:0] st_satp = 0;   // satp: mode|ASID|PPN (L6 MMU)
   logic [31:0] st_mcycle;
@@ -144,7 +143,7 @@ module csrs (
   (* keep *) logic [31:0] after_minstret_hi, after_mcountinhibit, after_mie;
   (* keep *) logic [31:0] after_medeleg;
   (* keep *) logic [31:0] after_mideleg;
-  (* keep *) logic [31:0] after_stvec, after_sepc, after_scause, after_stval, after_sscratch, after_sie, after_scntr;
+  (* keep *) logic [31:0] after_stvec, after_sepc, after_scause, after_stval, after_sscratch, after_scntr;
   (* keep *) logic [31:0] after_mtval;
   logic after_halt;
   logic [1:0] after_priv;
@@ -210,7 +209,7 @@ module csrs (
       st_mip_sw <= 32'h0;
 `endif
       st_stvec <= 0; st_sepc <= 0; st_scause <= 0; st_stval <= 0;
-      st_sscratch <= 0; st_sie <= 0; st_scntr <= 0; st_mcounteren <= 0;
+      st_sscratch <= 0; st_scntr <= 0; st_mcounteren <= 0;
       st_mscratch <= 0;
       st_mcycle <= 0; st_minstret <= 0; st_minstret_hi <= 0; st_mcountinhibit <= 0;
       st_mie <= 0; st_halt <= 1'b0;
@@ -270,7 +269,9 @@ module csrs (
           CSR_MTVAL: begin end
           CSR_MIE: st_mie <= newv;
 `ifndef FPGA
-          CSR_MIP, CSR_MIP_OLD: st_mip_sw <= newv & 32'hFFFF_FF77;
+          CSR_MIP: st_mip_sw <= newv & 32'hFFFF_FF77;
+          CSR_SIP: st_mip_sw <= (st_mip_sw & ~(st_mideleg & 32'h2)) |
+                              (newv & (st_mideleg & 32'h2));
 `endif
           CSR_MEDELEG: st_medeleg <= newv;
           CSR_MIDELEG: st_mideleg <= newv;
@@ -279,7 +280,7 @@ module csrs (
           CSR_SCAUSE: st_scause <= newv;
           CSR_STVAL: st_stval <= newv;
           CSR_SSCRATCH: st_sscratch <= newv;
-          CSR_SIE: st_sie <= newv;
+          CSR_SIE: st_mie <= (st_mie & ~st_mideleg) | (newv & st_mideleg);
           CSR_SCNTR: st_scntr <= newv;
           CSR_MCOUNTEREN: st_mcounteren <= newv;
           CSR_SATP: st_satp <= newv & 32'h803F_FFFF;

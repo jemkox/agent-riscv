@@ -166,6 +166,10 @@ module mmu (
       end else if (lvl_d) fd = 4;
       else fd = 1;
     end
+    if (fa == 1)
+      $display("MMUI va=%08x pv=%08x lvl=%b vp=%03x sppn=%05x priv=%b sum=%b mxr=%b perm=%b", if_va, pv_i, lvl_i, vp1_i, sppn, priv, sum, mxr, cperm_i);
+    if (fd == 1)
+      $display("MMUD va=%08x pv=%08x lvl=%b vp=%03x sppn=%05x priv=%b sum=%b mxr=%b rw=%b%b perm=%b", df_va, pv_d, lvl_d, vp1_d, sppn, dpriv, sum, mxr, df_r, df_w, cperm_d);
 
     // want flags (depend on state/pv only, never on port outputs)
     if (s_i == 2'b00)                     wi_r = mode && if_on && !hit_ok_i;
