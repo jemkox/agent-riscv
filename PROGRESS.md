@@ -1880,3 +1880,34 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
 - Re-run of boot probe after the fix: fresh save@300M-cycles run (cpu_retire.bin)
   vs fresh pinned-spike log (linux_mmu_spike_commits.log): compare 200k/400k insns
   0 mismatches (old BAD at 214442 csrrs-0xB03-trap is gone: pin matches spike).
+
+## L7 kernel-head satp-write pipeline flush (stall branch) (2026-11-09)
+- Root cause #3 of boot-vs-spike divergence at the kernel paging probe: the kernel-head
+  sequence `sfence.vma; csrw satp,a0(0x800824d1); <insn at 0x80400098>` writes satp at S
+  (mode bit set -> S/U Sv32 active). spike: after the satp write retires, fetch of 0x80400098
+  uses the NEW satp -> I-page-fault (perm=0 leaf) -> handler at stvec. RTL: the csrw satp
+  retired while a `m_stall` (TLB walk) was pending, so the branch chain went through the
+  `stall || m_stall` preserve branch, which had NO satp-pipeline flush -> the already-fetched
+  0x80400098/0x8040009c in idex/ifid kept the OLD (identity) translation -> RTL ran them at
+  identity and only faulted later (0x804000a0). The standalone `satp_now` branch (correctly
+  squashing pre-satp fetches) was UNREACHABLE because it sits AFTER the stall branch.
+- Fix (rtl/top_pipe.sv): fire the satp-write pipeline flush inside the `stall || m_stall`
+  branch: when `satp_now` (mm_satpwr && mm_mode && !stall, insn in exmem) override the
+  self-assign tail to drop idex+ifid (idex_valid/ifid_valid=0, idex_m_done=1) and set
+  pc_if <= idex_pc so the younger insns are re-fetched under the NEW satp. Kept the
+  standalone non-stall `satp_now` branch; removed now-dead duplicate flush blocks at the
+  tail of the `flush` and normal-advance branches (standalone catches every non-stall satp
+  write before those branches). Debug prints (SPOBS/BRSTALL/BRTRAP/BRFLUSH/BRNORM/FLUSHSP)
+  gated under LINUX_DEBUG.
+- Gates after fix (measured this session): `hdl make all_tests` ALL TESTS DONE;
+  `hdl make spike_tests` SPIKE_MMU_OK.
+- Boot compare after fix (measured): `compared 6026713 instructions; mismatches: 4`, first
+  BAD at n=5908196. Stall-branch FLUSHSP printed at spc=80400094 idexpc=80400098, then MMUI
+  walks va=80400098 under new satp (sppn=824d1, perm=0 -> ITPF), matching spike's fault at
+  0x80400098. The kernel now tracks spike ~2500 insns deeper than before (was diverging at
+  n~5905729 in the paging probe; now first divergence moved to n=5908196).
+- New divergence (next to fix): at n=5908196 pc=0xc008a938 insn=0x10017a73 = `csrrci s4,
+  sstatus, 2`. spike reads sstatus(0x700) old=0x00000100 (and sstatus->mstatus becomes 0x180);
+  RTL reads 0x00000900 (extra 0x800 bit leaked into the S-mode sstatus readback). So the S-mode
+  sstatus READ masking is wrong: RTL must mask mstatus down to the S-visible sstatus field
+  (drop the extra 0x800 bit that spike excludes). 4 mismatches all cluster here.

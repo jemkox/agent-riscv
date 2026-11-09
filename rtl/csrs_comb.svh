@@ -11,6 +11,7 @@
             | (cs_rsel == CSR_MIE      ? st_mie : 32'h0)
             | (cs_rsel == CSR_MEDELEG  ? st_medeleg : 32'h0)
             | (cs_rsel == CSR_MIDELEG  ? st_mideleg : 32'h0)
+            | (cs_rsel == 12'h202      ? st_smedelegh : 32'h0)   // smedelegh (spike-defined)
             | (cs_rsel == CSR_STVEC    ? st_stvec : 32'h0)
             | (cs_rsel == CSR_SEPC     ? st_sepc : 32'h0)
             | (cs_rsel == CSR_SCAUSE   ? st_scause : 32'h0)
@@ -32,6 +33,12 @@
             | (cs_rsel == CSR_MINSTRT_H || cs_rsel == CSR_INSTRET_H ? minh_ref : 32'h0)
             | (cs_rsel == CSR_MCOUNTHI ? st_mcountinhibit : 32'h0)
             | (cs_rsel == CSR_MCOUNTEREN ? st_mcounteren : 32'h0)
+            | (cs_rsel == CSR_MENVCFG ? st_menvcfg : 32'h0)
+            | (cs_rsel == 12'h7a0 ? st_tsel : 32'h0)    // spike ext-CSR probe group
+            | (cs_rsel == CSR_MCMASK0 ? st_mcm0 : 32'h0)
+            | (cs_rsel == CSR_MCMASK1 ? st_mcm1 : 32'h0)
+            | (cs_rsel == 12'h7a1 ? 32'hF0000000 : 32'h0)
+            | (cs_rsel == 12'h7a4 ? 32'h0100807C : 32'h0)
             | (cs_rsel == CSR_CYCLE ? mc_ref : 32'h0)
             | (cs_rsel == CSR_INSTRETH ? minh_ref : 32'h0)
             | (cs_rsel == CSR_XHALT ? {31'b0, st_halt} : 32'h0)
@@ -73,6 +80,7 @@
     after_mie = st_mie;
     after_medeleg = st_medeleg;
     after_mideleg = st_mideleg;
+    after_smedelegh = st_smedelegh;
     after_stvec = st_stvec;
     after_sepc = st_sepc;
     after_scause = st_scause;
@@ -109,8 +117,9 @@
       else if (cs_wsel == CSR_MIE) after_mie = newv;
       else if (cs_wsel == CSR_SIE) after_mie = (st_mie & ~st_mideleg) | (newv & st_mideleg);
       else if (cs_wsel == CSR_MSCRATCH) after_mscratch = newv;
-      else if (cs_wsel == CSR_MEDELEG) after_medeleg = newv;
-      else if (cs_wsel == CSR_MIDELEG) after_mideleg = newv;
+      else if (cs_wsel == CSR_MEDELEG) after_medeleg = newv & 32'h0000_b109;  // spike mask (banner 0x0000b109)
+      else if (cs_wsel == CSR_MIDELEG) after_mideleg = newv & 32'h0000_0222;  // spike mask (banner 0x00000222)
+      else if (cs_wsel == 12'h202) after_smedelegh = newv & 32'h0000_b109;   // smedelegh (spike)
       else if (cs_wsel == CSR_STVEC) after_stvec = newv;
       else if (cs_wsel == CSR_SEPC) after_sepc = newv;
       else if (cs_wsel == CSR_SCAUSE) after_scause = newv;
@@ -144,6 +153,7 @@
             | (idex_rsel == CSR_MIE      ? after_mie : 32'h0)
             | (idex_rsel == CSR_MEDELEG  ? after_medeleg : 32'h0)
             | (idex_rsel == CSR_MIDELEG  ? after_mideleg : 32'h0)
+            | (idex_rsel == 12'h202      ? after_smedelegh : 32'h0)
             | (idex_rsel == CSR_STVEC    ? after_stvec : 32'h0)
             | (idex_rsel == CSR_SEPC     ? after_sepc : 32'h0)
             | (idex_rsel == CSR_SCAUSE   ? after_scause : 32'h0)

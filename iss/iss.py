@@ -39,9 +39,10 @@ def main(argv):
     # rv32mi suite behavior is unchanged; misa advertises S and U (bit18/bit20).
     cs = {0x300:0x1800,0x305:0,0x341:0,0x342:0,0x343:0,0xb00:0,0xb02:0,0x3ff:0,
           0x340:0,0x301:0x40141101,0xb82:0,0x320:0,0xc02:0,0xc82:0,0x304:0,0x306:0,
-          0x302:0,0x303:0,0x306:0,
+          0x302:0,0x303:0,0x306:0,0x30a:0,
           0x100:0,0x104:0,0x105:0,0x106:0,0x140:0,0x141:0,0x142:0,0x143:0,0x144:0,0x180:0,
-          0x32d:0,0x32e:0,0x32f:0}
+          0x32d:0,0x32e:0,0x32f:0,
+          0x7a0:0,0x7a2:0,0x7a3:0,0x202:0,0x282:0}   # spike ext-CSR probe group
     priv = 3   # current privilege: 3 = M, 1 = S, 0 = U
     SSTATUS_MASK = 0x800C1922   # SD | SUM(18) | MXR(19) | MPP(12:11) | SPP | SPIE | SIE (rv32 encoding.h masks)
     SUM_BIT = 0x00040000; MXR_BIT = 0x00080000
@@ -49,13 +50,16 @@ def main(argv):
     MIE_BIT = 0x8; SIE_BIT = 0x2
     TSR_BIT = 0x00400000; TVM_BIT = 0x00100000
     CSR_DEFINED = ({0x300,0x301,0x302,0x303,0x304,0x305,0x320,
-                   0x340,0x341,0x342,0x343,0x344,0x3ff,
+                   0x340,0x341,0x342,0x343,0x344,0x3ff,0x30a,   # menvcfg: spike-implemented
                    0x100,0x104,0x105,0x106,0x140,0x141,0x142,0x143,
                    0x180,
                    0xb00,0xb02,0xb82,0xc01,0xc02,0xc81,0xc82,
                    0xc00,0xc80,0x7a0,0x7a1,0x7a2,0x7a3,0x7a4,0x7a5,0x7a6,0x7a7,
                    0x270,0x144,0x310,0x306,0xf11,0xf12,0xf13,0xf14} |
-                   set(range(0xb03,0xb20)))   # legacy mhpmcounter3..31, spike-defined
+                   set(range(0xb03,0xb20)) | {0xb80} | set(range(0xb83,0xba0)) | {0x31a} |
+                   {0x7a0,0x7a1,0x7a2,0x7a3,0x7a4,0x202,0x282})
+                   # legacy mhpmcounter3..31 + mcycleh + mhpmcounter3h..31h + menvcfgh
+                   # + spike smask-family 0x7a0-0x7a4 (mask-ext probe CSRs), spike-defined
     CSR_RO = {0xc00,0xc80,0xc01,0xc81,0xc02,0xc82}   # Zicntr read-only views
     def xret_num(n): return n in (0xb02,0xb82,0xc02,0xc82)
     def cs_get(n):
@@ -68,6 +72,9 @@ def main(argv):
         if n == 0x32f:   return cs[0x300] & SPIE_BIT
         if n == 0xb02 or n == 0xc02: return cs[0xb02]
         if n == 0xb82 or n == 0xc82: return cs[0xb82]
+        if n == 0x7a1: return 0xF0000000   # spike smask-family constants
+        if n == 0x7a4: return 0x0100807C
+        if n in (0x7a0,): return 0
         return cs.get(n,0)
     def cs_set(n,v):
         nonlocal mip_sw
@@ -83,6 +90,8 @@ def main(argv):
             cs[n] = ((v & ~MPP_MASK) | mpp) & mask
         elif n == 0x320:
             cs[n] = v & 0x7
+        elif n == 0x30a:   # menvcfg: spike keeps only bit0 (ST) in rv32
+            cs[n] = v & 0x1
         elif n == 0x180:   # satp: keep MODE(bit31) + PPN[21:0], drop ASID[30:22]
             cs[n] = ((v & 0x80000000) | (v & 0x3FFFFF)) & mask
             if v & 0x80000000: MMASK[0] = 0xFFFFF
@@ -96,6 +105,18 @@ def main(argv):
             cs[0xb02] = v & mask
         elif n == 0xc82:
             cs[0xb82] = v & mask
+        elif n == 0x7a0:
+            if v < 4: cs[n] = v   # spike rejects tselect >= 4 (keeps old)
+        elif n == 0x282:
+            cs[n] = 0             # medelegh: medeleg mask has no high bits -> always 0
+        elif n == 0x7a3:
+            cs[n] = v & 0xFE0FFFFC   # spike mask for this smask-family CSR
+        elif n == 0x302:
+            cs[n] = v & 0x0000B109   # spike medeleg mask (banner 0x0000b109)
+        elif n == 0x303:
+            cs[n] = v & 0x00000222   # spike mideleg mask (banner 0x00000222)
+        elif n == 0x202:
+            cs[n] = v & 0x0000B109   # spike smedelegh mask
         elif n in cs:
             cs[n] = v & mask
     def csr_priv(n):
@@ -105,8 +126,11 @@ def main(argv):
             return 0
         if 0x300 <= n <= 0x3ff or n in (0xb00,0xb80,0xb02,0xb82,0xc02,0xc82,0xf00):
             return 3
-        if 0xb03 <= n <= 0xb1f:   # legacy mhpmcounter3..31: spike makes them M-only
+        if 0xb03 <= n <= 0xb1f or (0xb83 <= n <= 0xb9f) or (0x7a0 <= n <= 0x7a4) or n == 0x282:
+            # legacy mhpmcounter{,N}h, spike smask-family, medelegh: M-only
             return 3
+        if n == 0x202:
+            return 1   # smedelegh: S-level (spike)
         if 0x100 <= n <= 0x1ff:
             return 1
         return 0

@@ -56,14 +56,18 @@ module ctrl (
   // Legacy mhpmcounter3..31 CSRs 0xB03-0xB1F: pinned spike defines them
   // machine-level (bits [9:8]=3), reads 0 / ignores writes. OpenSBI probes
   // mhint3=0xB03 while still in M; a strict "unimplemented CSR" decode traps
-  // there and diverges from the pin. 0xB00/0xB02 keep their own counters.
+  // there and diverges from the pin. 0xB00/0xB02/0xB82 keep their own counters;
+  // 0xB01/0xB81/0xB20/0xBA0 stay illegal (spike probes t48/t48b).
   function bit csr_hint;
     input bit [11:0] c;
-    csr_hint = (c >= 12'hb03) && (c <= 12'hb1f);
+    csr_hint = ((c >= 12'hb03) && (c <= 12'hb1f)) ||
+               (c == 12'hb80) || ((c >= 12'hb83) && (c <= 12'hb9f)) ||
+               (c == 12'h31a);   // menvcfgh: spike keeps it 0 (mask empty)
   endfunction
   assign csr_req  = (csr_num == 12'h3ff) ? 2'b00
-                   : csr_hint(csr_num) ? 2'b11        // spike: machine-only
-                   : csr_num[9:8];
+                    : csr_hint(csr_num) ? 2'b11        // spike: machine-only
+                    : (csr_num == 12'h282) ? 2'b11     // medelegh: machine-only (spike)
+                    : csr_num[9:8];
   assign csr_def  = csr_defined(csr_num);
   assign csr_ro   = is_csr_readonly(csr_num);
 `ifdef FPGA
@@ -176,10 +180,10 @@ module ctrl (
             else is_ill = 1;
 `else
             is_sys = (i[31:20] == 12'h000) || (i[31:20] == 12'h001);
-             if (!((i[31:20] == 12'h000) || (i[31:20] == 12'h001) ||
+              if (!((i[31:20] == 12'h000) || (i[31:20] == 12'h001) ||
                     (i[31:20] == 12'h302) || (i[31:20] == 12'h102) ||
                     (i[31:20] == 12'h100) || (i[31:20] == 12'h105) ||
-                    (i[31:20] == 12'h106) ||
+                    (i[31:20] == 12'h106) || (i[31:20] == 12'h120) ||
                     ((i[31:25] == 7'b0001001) && (i[11:7] == 5'b0)))) is_ill = 1;
 `endif
           end
@@ -212,11 +216,17 @@ module ctrl (
             c == 12'h142 || c == 12'h143 || c == 12'h180 || c == 12'hb00 ||
             c == 12'hb02 || c == 12'hb82 || c == 12'hc01 || c == 12'hc02 ||
             c == 12'hc81 || c == 12'hc82 ||             c == 12'hc00 || c == 12'hc80 ||
-            (c >= 12'hb03 && c <= 12'hb1f) ||   // system hints (spike-defined)
-            c == 12'h310 || c == 12'h306 || c == 12'hf11 || c == 12'hf12 || c == 12'hf13 ||
+            (c >= 12'hb03 && c <= 12'hb1f) ||   // legacy mhpmcounter3..31 (spike-defined)
+            c == 12'hb80 || (c >= 12'hb83 && c <= 12'hb9f) ||  // mcycleh + mhpmcounterNh
+            c == 12'hb80 || (c >= 12'hb83 && c <= 12'hb9f) || // mcycleh + mhpmcounterNh
+            c == 12'h310 || c == 12'h306 || c == 12'h30a ||   // mstatush,mcounteren,menvcfg
+            c == 12'h31a ||                                  // menvcfgh (always 0, spike)
+            ((c >= 12'h7a0) && (c <= 12'h7a4)) ||            // spike smask-family CSRs
+            c == 12'hf11 || c == 12'hf12 || c == 12'hf13 ||
             c == 12'hf14 || c == 12'h7a0 || c == 12'h7a1 || c == 12'h7a2 ||
             c == 12'h7a3 || c == 12'h7a4 || c == 12'h7a5 || c == 12'h7a6 ||
-            c == 12'h7a7 || c == 12'h270 || c == 12'h144);
+            c == 12'h7a7 || c == 12'h270 || c == 12'h144 ||
+            c == 12'h202 || c == 12'h282);   // smedelegh / medelegh (spike)
   endfunction
 
   function bit is_csr_readonly;   // Zicntr read-only views: write -> illegal

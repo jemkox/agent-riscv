@@ -1035,7 +1035,7 @@ OPENBOOT_DBG ?=
 SPIKE_MAX_INS ?= 4750000
 # runner load addresses (must match the chosen/initrd + reg-clk nodes in the dtb)
 INITRD_ADDR ?= 0x83ecda00
-DTB_ADDR ?= 0x82200000
+DTB_ADDR ?= 0x83e00000   # 0x82200000 collides with the 34MB kernel Image tail
 SPIKE_CMP_MAX ?= 40000000
 LINUX_CMP_ANCHOR ?= 0x80000000
 linux_mmu_spike_log: linux_mmu_build spike_pin_check | $(B)/linux/logs

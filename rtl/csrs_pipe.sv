@@ -135,7 +135,8 @@ module csrs_pipe (
 `else
   assign dpf_g = dpf; assign itpf_g = itpf; assign dpc_g = dpf_cause;
   assign cs_sfence = idex_valid && (idex_insn[31:25] == 7'b0001001) &&
-                     (idex_insn[11:7] == 5'b0) && !priv_viol;
+                     (idex_insn[11:7] == 5'b0) &&
+                     (idex_insn[6:0] == 7'b1110011) && (idex_insn[14:12] == 3'b000) && !priv_viol;
 `endif
   always_comb begin
     idex_ld = idex_valid && ld_ok && !dpf_g;

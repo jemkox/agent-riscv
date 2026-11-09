@@ -193,12 +193,22 @@ module top_pipe (
   assign mm_inject = mm_fl_i && !(idex_itpf && idex_valid) && !(ifid_itpf && ifid_valid);
   assign fetch_pa = (mm_mode && mm_hit_i) ? mm_pa_i : pc_if;
 `endif
-`ifndef FPGA
   // The SFENCE.VMA / satp-write flush must fire ONCE, on the cycle the CSR/SFENCE
   // insn actually advances (retires); pulsing it every cycle while the insn sits in
   // EX would cancel an in-progress TLB walk forever (deadlock).
-  logic flush_now;
-  assign flush_now = (mm_sfence || mm_satpwr) && !stall && !m_stall;
+`ifdef FPGA
+  /* verilator lint_off UNUSEDSIGNAL */
+`endif
+  logic flush_now, sf_now, satp_now;
+`ifdef FPGA
+  /* verilator lint_on UNUSEDSIGNAL */
+`endif
+`ifndef FPGA
+  assign flush_now = (mm_sfence || mm_satpwr) && !stall && !m_stall; // mmu TLB flush pulse
+  assign sf_now    = mm_sfence && !stall && !m_stall;   // pipeline flush: sfence in idex
+  assign satp_now  = mm_satpwr && mm_mode && !stall;  // satp wr pulse (S/U): pipe flush (idempotent across m_stall cycles)
+`else
+  assign flush_now = 1'b0; assign sf_now = 1'b0; assign satp_now = 1'b0;
 `endif
   cache32 MM(.clk(clk), .reset(reset), .halt(halt), .lwe(lwe), .lwa(lwa), .lwd(lwd),
 `ifdef DOOM_BIG
@@ -488,6 +498,9 @@ module top_pipe (
                stall, m_stall);
 `endif
   always_ff @(posedge clk) begin
+`ifdef LINUX_DEBUG
+    if (mm_satpwr && mm_mode) $display("SPOBS expc=%08x idexp=%08x st=%b ms=%b t=%b sf=%b f=%b", exmem_pc, idex_pc, stall, m_stall, trap_flush, sf_now, flush);
+`endif
     if (reset) begin
 `ifdef LINUX
       pc_if <= 32'h8000_0000;
@@ -540,6 +553,9 @@ module top_pipe (
         ifid_valid <= conflict ? 1'b0 : ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
         ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
       end else if (stall || m_stall) begin
+`ifdef LINUX_DEBUG
+        if (mm_satpwr) $display("BRSTALL spc=%08x idexp=%08x ms=%b st=%b", exmem_pc, idex_pc, m_stall, stall);
+`endif
         // Keep the forwarded operands: a value forwarded from MEM/WB this cycle is gone next cycle
         // (e.g. lw s6; lw a5; blt a5,s6 - s6 leaves WB during the load-use stall on a5).
         exmem_valid <= 1'b0; idex_valid <= idex_valid; idex_m_done <= idex_m_done;
@@ -549,7 +565,22 @@ module top_pipe (
         idex_pc <= idex_pc; idex_insn <= idex_insn; idex_r1 <= a_ex; idex_r2 <= b_ex;
         ifid_valid <= ifid_valid; ifid_pc <= ifid_pc; ifid_insn <= ifid_insn;
         ifid_pred_taken <= ifid_pred_taken; ifid_pred_tgt <= ifid_pred_tgt; pc_if <= pc_if;
+        if (satp_now) begin
+          // satp write sitting in exmem (stalled): insns in idex/ifid were fetched under
+          // the OLD satp -> drop them and re-fetch from idex_pc under the NEW satp state.
+`ifdef LINUX_DEBUG
+          $display("FLUSHSP spc=%08x idexpc=%08x (stall branch)", exmem_pc, idex_pc);
+`endif
+          idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
+`ifdef FPGA
+          idex_m_go <= 1'b0;
+`endif
+          pc_if <= idex_pc & 32'hFFFFFFFE;
+        end
       end else if (trap_flush || timer_flush || mret_flush || sret_flush) begin
+`ifdef LINUX_DEBUG
+        if (mm_satpwr) $display("BRTRAP spc=%08x tf=%b mret=%b sret=%b t=%b", exmem_pc, timer_flush, mret_flush, sret_flush, trap_flush);
+`endif
         exmem_valid <= mret_flush || sret_flush;
         exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= 5'd0;
         exmem_wben <= 1'b0; exmem_ld <= 1'b0; exmem_st <= 1'b0; exmem_stop <= 1'b0;
@@ -561,7 +592,42 @@ module top_pipe (
         idex_m_go <= 1'b0;
 `endif
         pc_if <= mret_flush ? mret_pc : (sret_flush ? cs_sepc : cs_trap_pc);
+      end else if (sf_now) begin
+        // SFENCE.VMA in idex: promote it (it retires next cycle) and squash the two
+        // younger insns that may have been fetched/translated under the old page sets.
+`ifdef LINUX_DEBUG
+        $display("FLUSHSF sfpc=%08x", idex_pc);
+`endif
+        exmem_valid <= idex_valid;
+        exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= ce_rd;
+        exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;
+        exmem_f3 <= ce_f3; exmem_ea <= idex_ea;
+        exmem_sd_log <= idex_sd_log; exmem_sbe <= idex_sbe;
+        exmem_wbval <= idex_wbval; exmem_result <= idex_csr_en ? idex_cs_old : idex_wbval;
+        exmem_csr_en <= idex_csr_en; exmem_csr_wen <= idex_csr_wen;
+        exmem_r1 <= a_ex;
+        idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
+`ifdef FPGA
+        idex_m_go <= 1'b0;
+`endif
+        pc_if <= (idex_pc + 32'd4) & 32'hFFFFFFFE;
+      end else if (satp_now) begin
+        // satp write is retiring (it sits in exmem): its WB already happened this
+        // cycle, so do not promote idex (stale pre-satp fetch) -- squash idex+ifid and
+        // re-fetch from idex_pc so the next insns translate under the NEW satp.
+`ifdef LINUX_DEBUG
+        $display("FLUSHSP spc=%08x idexpc=%08x", exmem_pc, idex_pc);
+`endif
+        exmem_valid <= 1'b0;
+        idex_valid <= 1'b0; ifid_valid <= 1'b0; idex_m_done <= 1'b1;
+`ifdef FPGA
+        idex_m_go <= 1'b0;
+`endif
+        pc_if <= idex_pc & 32'hFFFFFFFE;
       end else if (flush) begin
+`ifdef LINUX_DEBUG
+        if (mm_satpwr) $display("BRFLUSH spc=%08x idexp=%08x brtgt=%08x", exmem_pc, idex_pc, br_tgt_ex);
+`endif
         exmem_valid <= idex_valid;
         exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= ce_rd;
         exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;
@@ -581,6 +647,9 @@ module top_pipe (
 `endif
         pc_if <= br_tgt_ex & 32'hFFFFFFFE;
       end else begin
+`ifdef LINUX_DEBUG
+        if (mm_satpwr) $display("BRNORM spc=%08x idexp=%08x ms=%b st=%b", exmem_pc, idex_pc, m_stall, stall);
+`endif
         exmem_valid <= idex_valid;
         exmem_pc <= idex_pc; exmem_insn <= idex_insn; exmem_rd <= ce_rd;
         exmem_wben <= idex_wben; exmem_ld <= idex_ld; exmem_st <= idex_st; exmem_stop <= idex_stop;

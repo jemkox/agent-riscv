@@ -92,6 +92,9 @@ module csrs (
   localparam CSR_CYCLEH    = 12'hc80;   // cycleh high half (not tracked, reads 0)
   localparam CSR_INSTRETH  = 12'hc82;   // instreth == INSTRET_H alias
   localparam CSR_MCOUNTEREN= 12'h306;   // m-mode counter-enable bitmap
+  localparam CSR_MENVCFG = 12'h30a;    // spike-implemented; only ST(bit0) kept
+  localparam CSR_MCMASK0 = 12'h7a2;    // spike ext CSR (tselect group): full RW
+  localparam CSR_MCMASK1 = 12'h7a3;    // spike ext CSR: masked RW (0xFE0FFFFC)
   localparam MSTATUS_MPP   = 32'h0000_1800;
   localparam MSTATUS_SPP   = 32'h0000_0100;
   localparam MSTATUS_MPIE  = 32'h0000_0080;
@@ -113,12 +116,16 @@ module csrs (
   (* keep *) logic [31:0] st_mtval = 0;
   (* keep *) logic [31:0] st_medeleg = 0;
   (* keep *) logic [31:0] st_mideleg = 0;  (* keep *) logic [31:0] st_stvec = 0;
+  (* keep *) logic [31:0] st_smedelegh = 0;  // spike smedelegh (0x202)
   (* keep *) logic [31:0] st_sepc = 0;
   (* keep *) logic [31:0] st_scause = 0;
   (* keep *) logic [31:0] st_stval = 0;
   (* keep *) logic [31:0] st_sscratch = 0;
   (* keep *) logic [31:0] st_scntr = 0;
   logic [31:0] st_mcounteren = 0;
+  logic [31:0] st_menvcfg = 0;   // menvcfg low half (bit0 ST kept, like spike)
+  logic [31:0] st_mcm0 = 0, st_mcm1 = 0;  // spike ext CSRs 0x7a2/0x7a3
+  logic [31:0] st_tsel = 0;               // 0x7a0 tselect: spike accepts only <4
   (* keep *) logic [31:0] st_satp = 0;   // satp: mode|ASID|PPN (L6 MMU)
   logic [31:0] st_mcycle;
   logic [31:0] st_minstret;
@@ -143,6 +150,7 @@ module csrs (
   (* keep *) logic [31:0] after_minstret_hi, after_mcountinhibit, after_mie;
   (* keep *) logic [31:0] after_medeleg;
   (* keep *) logic [31:0] after_mideleg;
+  (* keep *) logic [31:0] after_smedelegh;
   (* keep *) logic [31:0] after_stvec, after_sepc, after_scause, after_stval, after_sscratch, after_scntr;
   (* keep *) logic [31:0] after_mtval;
   logic after_halt;
@@ -195,6 +203,10 @@ module csrs (
   assign mmu_dpriv = (after_priv == 2'b11 && after_mstatus[17]) ? after_mstatus[12:11] : after_priv;
   assign mmu_ppn = after_satp[21:0];
   assign cs_satp_wr = cs_write_en && (cs_wsel == 12'h180) && !halt_in && !reset;
+`ifdef LINUX_DEBUG
+  always_comb if (cs_write_en && cs_wsel == 12'h180)
+    $display("CSWSATP pc=%08x we=%b halt=%b rst=%b priv=%b afterpriv=%b satp=%08x mode=%b", cs_pc, cs_write_en, halt_in, reset, priv_cur, after_priv, after_satp, mmu_mode);
+`endif
 `ifndef FPGA
   assign cs_mip_sw = after_mip_sw;
 `endif
@@ -204,12 +216,13 @@ module csrs (
       st_mstatus <= 32'h0000_1800;
       st_priv <= 2'b11;
       st_mtvec <= 0; st_mepc <= 0; st_mcause <= 0; st_mtval <= 0;
-      st_medeleg <= 0; st_mideleg <= 0;
+      st_medeleg <= 0; st_mideleg <= 0; st_smedelegh <= 0;
 `ifndef FPGA
       st_mip_sw <= 32'h0;
 `endif
       st_stvec <= 0; st_sepc <= 0; st_scause <= 0; st_stval <= 0;
-      st_sscratch <= 0; st_scntr <= 0; st_mcounteren <= 0;
+      st_sscratch <= 0; st_scntr <= 0; st_mcounteren <= 0; st_menvcfg <= 0;
+      st_mcm0 <= 0; st_mcm1 <= 0;
       st_mscratch <= 0;
       st_mcycle <= 0; st_minstret <= 0; st_minstret_hi <= 0; st_mcountinhibit <= 0;
       st_mie <= 0; st_halt <= 1'b0;
@@ -283,6 +296,10 @@ module csrs (
           CSR_SIE: st_mie <= (st_mie & ~st_mideleg) | (newv & st_mideleg);
           CSR_SCNTR: st_scntr <= newv;
           CSR_MCOUNTEREN: st_mcounteren <= newv;
+          CSR_MENVCFG: st_menvcfg <= newv & 32'h1;
+          12'h7a0: if (newv < 32'd4) st_tsel <= newv;  // spike rejects sel >= 4
+          CSR_MCMASK0: st_mcm0 <= newv;
+          CSR_MCMASK1: st_mcm1 <= newv & 32'hFE0FFFFC;
           CSR_SATP: st_satp <= newv & 32'h803F_FFFF;
           CSR_MCYCLE: st_mcycle <= newv;
           CSR_MINSTRT, CSR_INSTRET: st_minstret <= newv;
@@ -295,6 +312,7 @@ module csrs (
       st_medeleg <= after_medeleg;
       st_satp <= after_satp;
       st_mideleg <= after_mideleg;
+      st_smedelegh <= after_smedelegh;
 `ifdef FPGA
       // impossible-counter XOR guards: architecturally unreachable, but they keep
       // mtvec/mie/mepc/mcause D-inputs dynamic in the yosys netlist.

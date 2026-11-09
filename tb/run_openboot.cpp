@@ -19,7 +19,7 @@
 
 static const uint32_t FW_ADDR     = 0x80000000u;
 static const uint32_t KERNEL_ADDR = 0x80400000u;
-static uint32_t DTB_ADDR      = 0x82200000u;
+static uint32_t DTB_ADDR      = 0x83e00000u;
 static uint32_t INITRD_ADDR = 0x82800000u;
 static void apply_addr_env() {
     if (const char *e = getenv("DTB_ADDR"))    DTB_ADDR = (uint32_t)strtoul(e, nullptr, 16);
