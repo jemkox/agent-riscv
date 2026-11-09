@@ -1850,3 +1850,18 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
   make spike_tests SPIKE_MMU_OK (14 variants); make all_tests ALL TESTS DONE.
 - Boot chain boot6 relaunched with the fixed runner (save@700M, restore+login,
   spike compare 25M) - /tmp/opencode/boot6_main.out pending.
+
+## L7 low-RAM backing fix (cache32 LOW window)
+- Root cause #2 of boot-vs-spike divergence: pinned spike puts the fw_jump
+  stub + --dtb blob at RAM 0x1000/0x1020 (a1=0x1020); our LINUX cache32 only
+  backed RAM 0x80000000-0x83FFFFFF so the OpenSBI scan-from-a1 saw zeros (old
+  boot6 hung at fw_platform_init wfi 0x8000bc04); load_words(0x1020) had
+  silently written into the aliased FW page. Fix: cache32 adds a 2 MB LOW
+  backing window lrw[0:512K words) under ifdef LINUX (low_ok = addr[31:21]==0)
+  routed through rbwb/lwe/icache-fill/dcache-fill/store/AMO. Non-LINUX builds
+  unchanged (mmu gates re-passed after the edit).
+- Probe boot8: save@3M cycles then 100k-insn compare vs *fresh* spike log
+  (/tmp/opencode/sp8_commits.log, current dtb+--pmpregions=0): 0 mismatches
+  through the whole save run (compared 286000 of 600k spike insns, 0 BAD).
+- boot9 restore from ckpt 4f96abd1... running (LINUX_SIM_CYCLES default);
+  log reached ALSA / kernel-running at 80M cycles -> /tmp/opencode/boot9.out.

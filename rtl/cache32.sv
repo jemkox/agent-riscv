@@ -99,16 +99,25 @@ module cache32 (
   localparam int LINE_BYTES = 16;
   localparam int LINE_SHIFT = 4;
 
-  // L4 Linux platform: RAM is exactly 64 MB at 0x8000_0000; anything else is
-  // unmapped (QEMU-style: loads read 0, stores are dropped) so tp-relative
-  // low-address scratch writes cannot alias kernel RAM.
+  // L4 Linux platform: RAM is exactly 64 MB at 0x8000_0000 plus a 2 MB LOW
+  // window at 0x0 (pinned spike puts its boot stub + --dtb blob at 0x1000/0x1020
+  // and OpenSBI scans RAM from a1=0x1020, so low RAM must be real RAM, not
+  // aliased into the kernel window). CLINT/PLIC/UART pages keep their MMIO
+  // paths; other unmapped addresses still read 0 / drop stores.
 `ifdef LINUX
-  logic ram_ok, ic_ram_ok;
+  localparam int LOW_WORDS = 512 * 1024;   // 2 MB low RAM
+  localparam int LOW_BYTES = LOW_WORDS * 4;
+  localparam int LOW_MASK  = LOW_BYTES - 1;
+  logic ram_ok, ic_ram_ok, low_ok, ic_low_ok;
   assign ram_ok    = ((ea >> 26) == 6'h20);
   assign ic_ram_ok = (pc_if[31:26] == 6'h20);
+  assign low_ok    = (ea[31:21] == 11'd0);
+  assign ic_low_ok = (pc_if[31:21] == 11'd0);
 `else
   localparam bit ram_ok = 1;
   localparam bit ic_ram_ok = 1;
+  localparam bit low_ok = 1;
+  localparam bit ic_low_ok = 1;
 `endif
 
   // P2 speed: backing + cache lines are WORD arrays (VlUnpacked<uint32_t>):
@@ -116,6 +125,9 @@ module cache32 (
   // rbwb/rb_ic/rb_dc word merge + lane-masked RMW stores. Byte order little
   // endian within the word (byte b == rw[b>>2] lane (b&3)*8).
   (* BRAM = 1 *) logic [31:0] rw  [0:BACK_WORDS-1];
+`ifdef LINUX
+  (* BRAM = 1 *) logic [31:0] lrw [0:LOW_WORDS-1];   // LOW RAM backing (boot stub+DTB)
+`endif
   (* BRAM = 1 *) logic [31:0] icw [0:IC_LINES*4-1];
   (* BRAM = 1 *) logic [31:0] dcw [0:DC_LINES*4-1];
   (* BRAM = 1 *) logic [31:0] ic_tag [0:IC_LINES-1];
@@ -161,9 +173,23 @@ module cache32 (
   function [31:0] rbwb;
     input int addr;
     int w, s;
+`ifdef LINUX
+    if (addr[31:21] == 11'd0) begin
+      w = (addr >> 2) & (LOW_WORDS - 1);
+      s = (addr & 3) * 8;
+      rbwb = (s == 0) ? lrw[w] :
+             ((lrw[w] >> s) | (lrw[(w + 1) & (LOW_WORDS - 1)] << (32 - s)));
+    end else if (addr[31:26] == 6'h20) begin
+      w = (addr >> 2) & (BACK_WORDS - 1);
+      s = (addr & 3) * 8;
+      rbwb = (s == 0) ? rw[w] :
+             ((rw[w] >> s) | (rw[(w + 1) & (BACK_WORDS - 1)] << (32 - s)));
+    end else rbwb = 32'h0;
+`else
     w = (addr >> 2) & (BACK_WORDS - 1);
     s = (addr & 3) * 8;
     rbwb = (s == 0) ? rw[w] : ((rw[w] >> s) | (rw[(w + 1) & (BACK_WORDS - 1)] << (32 - s)));
+`endif
   endfunction
 
   function [31:0] rb_ic;
@@ -285,6 +311,20 @@ module cache32 (
 
   always_ff @(posedge clk) begin
     if (lwe) begin
+`ifdef LINUX
+      if (lwa[31:21] == 11'd0) begin
+        sb = lwa & LOW_MASK;
+        w0 = sb >> 2; sft = (lwa & 3) * 8;
+        if (sft == 0) lrw[w0] = lwd;
+        else begin
+          lrw[w0] = (lrw[w0] & ~(32'hFFFF_FFFF << sft)) | (lwd << sft);
+          lrw[(w0 + 1) & (LOW_WORDS - 1)] =
+            (lrw[(w0 + 1) & (LOW_WORDS - 1)]
+             & ~(32'hFFFF_FFFF >> (32 - sft))) | (lwd >> (32 - sft));
+        end
+      end else
+`endif
+      begin
       sb = lwa & BACK_MASK;
       w0 = sb >> 2; sft = (lwa & 3) * 8;
       if (sft == 0) rw[w0] = lwd;
@@ -293,6 +333,7 @@ module cache32 (
         rw[(w0 + 1) & (BACK_WORDS - 1)] =
           (rw[(w0 + 1) & (BACK_WORDS - 1)]
            & ~(32'hFFFF_FFFF >> (32 - sft))) | (lwd >> (32 - sft));
+      end
       end
     end
 
@@ -321,7 +362,9 @@ module cache32 (
           for (int w = 0; w < LINE_BYTES/4; w++)
             icw[i_idx*4+w] =
 `ifdef LINUX
-              ic_ram_ok ? rw[((((pc_if & 32'hFFFFFFF0) >> 2) + w)) & (BACK_WORDS - 1)] : 32'h0;
+              ic_ram_ok ? rw[((((pc_if & 32'hFFFFFFF0) >> 2) + w)) & (BACK_WORDS - 1)]
+                        : (ic_low_ok ? lrw[((((pc_if & 32'hFFFFFFF0) >> 2) + w))
+                                     & (LOW_WORDS - 1)] : 32'h0);
 `else
               rw[((((pc_if & 32'hFFFFFFF0) >> 2) + w)) & (BACK_WORDS - 1)];
 `endif
@@ -356,24 +399,38 @@ module cache32 (
               for (int w = 0; w < LINE_BYTES/4; w++)
                 dcw[d_idx*4+w] =
 `ifdef LINUX
-                  ram_ok ? rw[((((ea & 32'hFFFFFFF0) >> 2)) + w) & (BACK_WORDS - 1)] : 32'h0;
+                  ram_ok ? rw[((((ea & 32'hFFFFFFF0) >> 2)) + w) & (BACK_WORDS - 1)]
+                         : (low_ok ? lrw[((((ea & 32'hFFFFFFF0) >> 2)) + w)
+                                    & (LOW_WORDS - 1)] : 32'h0);
 `else
                   rw[((((ea & 32'hFFFFFFF0) >> 2)) + w) & (BACK_WORDS - 1)];
 `endif
               dc_ep[d_idx] = epoch;
               dc_tag[d_idx] = d_tag;
             end
-            if (idex_st && ram_ok) begin
+            if (idex_st && (ram_ok || low_ok)) begin
               w0  = (ea >> 2) & (BACK_WORDS - 1);
               sft = (ea & 3) * 8;
               nby = (ssz == 2'b00) ? 1 : (ssz == 2'b01) ? 2 : 4;
               msk = (nby == 4) ? 32'hFFFF_FFFF
                                : ((32'h1 << (nby * 8)) - 32'h1);
+`ifdef LINUX
+              if (low_ok) begin
+                w0 = w0 & (LOW_WORDS - 1);
+                lrw[w0] = (lrw[w0] & ~(msk << sft)) | (sd_raw << sft);
+                if ((ea & 3) + nby > 4)
+                  lrw[(w0 + 1) & (LOW_WORDS - 1)] =
+                    (lrw[(w0 + 1) & (LOW_WORDS - 1)] & ~(msk >> (32 - sft))) |
+                    (sd_raw >> (32 - sft));
+              end else
+`endif
+              begin
               rw[w0] = (rw[w0] & ~(msk << sft)) | (sd_raw << sft);
               if ((ea & 3) + nby > 4)
                 rw[(w0 + 1) & (BACK_WORDS - 1)] =
                   (rw[(w0 + 1) & (BACK_WORDS - 1)] & ~(msk >> (32 - sft))) |
                   (sd_raw >> (32 - sft));
+              end
               if (d_off <= 12) begin
                 dcw[d_idx*4+(d_off>>2)] =
                   (dcw[d_idx*4+(d_off>>2)] & ~(msk << sft)) | (sd_raw << sft);
@@ -402,9 +459,9 @@ module cache32 (
             end
 `ifndef FPGA
             if (idex_st) begin
-              if (ea == res_a && ram_ok) res_v <= 1'b0;   // matching store clears the LR reservation
+              if (ea == res_a && (ram_ok || low_ok)) res_v <= 1'b0;
             end
-            if (amo_done_now && ram_ok) begin
+            if (amo_done_now && (ram_ok || low_ok)) begin
 `ifdef SCDBG
               $display("DBG AMO ea=%08x v=%0d lr=%0d sc=%0d ok=%0d", ea, amo_v, amo_lr, amo_sc, amo_ok_now);
 `endif
@@ -417,6 +474,10 @@ module cache32 (
                 res_v <= 1'b0;  // SC loses the reservation either way
                 if (amo_ok_now) begin
                   w0 = (ea >> 2) & (BACK_WORDS - 1);
+`ifdef LINUX
+                  if (low_ok) lrw[w0 & (LOW_WORDS - 1)] <= amo_new;
+                  else
+`endif
                   rw[w0] <= amo_new;
                   if (d_off <= 12) dcw[d_idx*4+(d_off>>2)] <= amo_new;
                   i_s = (ea >> LINE_SHIFT) & IC_MASK;
@@ -426,6 +487,10 @@ module cache32 (
               end else begin
                 if (res_a == ea) res_v <= 1'b0;
                 w0 = (ea >> 2) & (BACK_WORDS - 1);
+`ifdef LINUX
+                if (low_ok) lrw[w0 & (LOW_WORDS - 1)] <= amo_new;
+                else
+`endif
                 rw[w0] <= amo_new;
                 if (d_off <= 12) dcw[d_idx*4+(d_off>>2)] <= amo_new;
                 i_s = (ea >> LINE_SHIFT) & IC_MASK;

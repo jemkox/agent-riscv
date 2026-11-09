@@ -152,6 +152,10 @@ int main(int argc, char **argv) {
         setc(0, 1, 0, 0, 0);
         load_words(FW_ADDR, fw);
         load_words(KERNEL_ADDR, kernel);
+        // pinned spike places the --dtb at RAM 0x1020 (its a1 hint address); load
+        // the identical copy there so OpenSBI's scan-from-a1 sees byte-identical
+        // memory (the kernel later reuses this low RAM, same as spike).
+        load_words(0x1020, dtb);
         load_words(DTB_ADDR, dtb);
         load_words(INITRD_ADDR, initrd);
         setc(0, 0, 0, 0, 0);
