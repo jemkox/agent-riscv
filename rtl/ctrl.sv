@@ -53,7 +53,15 @@ module ctrl (
   assign is_mret  = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h302);
   assign is_sret  = (opc == 7'b1110011 && i[14:12] == 3'b000 &&
                      (i[31:20] == 12'h102 || i[31:20] == 12'h106));
-  assign csr_req  = (csr_num == 12'h3ff) ? 2'b00 : csr_num[9:8];
+  // System *hints* CSRs 0xB00-0xB1F: pinned spike defines them at ALL
+  // privileges and they read 0 / ignore writes (OpenSBI reads mhint3=0xB03
+  // as part of its SBI-time probing; a strict impl traps and diverges).
+  function bit csr_hint;
+    input bit [11:0] c;
+    csr_hint = (c >= 12'hb03) && (c <= 12'hb1f);
+  endfunction
+  assign csr_req  = (csr_num == 12'h3ff || csr_hint(csr_num)) ? 2'b00
+                   : csr_num[9:8];
   assign csr_def  = csr_defined(csr_num);
   assign csr_ro   = is_csr_readonly(csr_num);
 `ifdef FPGA
@@ -201,7 +209,8 @@ module ctrl (
             c == 12'h105 || c == 12'h106 || c == 12'h140 || c == 12'h141 ||
             c == 12'h142 || c == 12'h143 || c == 12'h180 || c == 12'hb00 ||
             c == 12'hb02 || c == 12'hb82 || c == 12'hc01 || c == 12'hc02 ||
-            c == 12'hc81 || c == 12'hc82 || c == 12'hc00 || c == 12'hc80 ||
+            c == 12'hc81 || c == 12'hc82 ||             c == 12'hc00 || c == 12'hc80 ||
+            (c >= 12'hb03 && c <= 12'hb1f) ||   // system hints (spike-defined)
             c == 12'h310 || c == 12'h306 || c == 12'hf11 || c == 12'hf12 || c == 12'hf13 ||
             c == 12'hf14 || c == 12'h7a0 || c == 12'h7a1 || c == 12'h7a2 ||
             c == 12'h7a3 || c == 12'h7a4 || c == 12'h7a5 || c == 12'h7a6 ||

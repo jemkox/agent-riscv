@@ -11,12 +11,18 @@ LOG, BIN = sys.argv[1], sys.argv[2]
 MAXN = int(sys.argv[3]) if len(sys.argv) > 3 else 10**12
 FIRST_RTL = int(sys.argv[4], 16) if len(sys.argv) > 4 else 0x80000000
 
+import re
 def spike_iter(path):
-    """yield (idx, pc, insn) per retired instruction from spike commit log."""
+    """yield (idx, pc, insn, rd, wv) per retired instruction from spike commit log.
+    rd,wv are taken from the xN write tokens on the commit line; ambiguous
+    (multi-write) insns get rd=-1 so the reg compare is skipped for them."""
     i = 0
     with open(path, 'rb') as f:
         for line in f:
-            if line.startswith(b'core   0: 0x') and b'(' in line:
+            if (line.startswith(b'core   0: 0x') or re.match(b'core   0: [0-9a-f] 0x', line)) and b'(' in line:
+                commit = not line.startswith(b'core   0: 0x')
+                if not commit:
+                    continue   # use the commit line (priv-prefixed) which carries reg writes
                 try:
                     a = line.index(b'0x') + 2
                     b2 = line.index(b' ', a)
@@ -26,7 +32,17 @@ def spike_iter(path):
                     ins = int(line[o1+1:o2], 16)
                 except (ValueError, IndexError):
                     continue
-                yield (i, pc, ins)
+                tail = line[o2+1:].decode(errors='replace')
+                ws = re.findall(r'\bx(\d+)\s+0x([0-9a-fA-F]+)', tail)
+                if not ws:
+                    rd, wv = 0, 0
+                elif len(ws) == 1:
+                    rd, wv = int(ws[0][0]), int(ws[0][1], 16)
+                    if rd == 0:
+                        rd = -1   # x0 write: nothing golden to compare
+                else:
+                    rd, wv = -1, 0
+                yield (i, pc, ins, rd, wv)
                 i += 1
 
 def rtl_iter(path):
@@ -34,7 +50,7 @@ def rtl_iter(path):
         rec = f.read(32)
         while len(rec) == 32:
             cyc, pc, ins, rdf, wv, st, ea, sd = struct.unpack('<8I', rec)
-            yield pc, ins
+            yield pc, ins, rdf, wv
             rec = f.read(32)
 
 it_s = spike_iter(LOG)
@@ -65,16 +81,21 @@ try:
             print("compared %d instrs; one stream exhausted (spike=%s rtl=%s)" %
                   (ns, srec is not None, rr is not None))
             break
-        idx, spc, sins = srec
+        idx, spc, sins, srd, swv = srec
         if stream: stream.pop()
-        rpc, rins = rr
-        RING.append((idx, spc, sins, rpc, rins))
-        if spc != rpc or ((sins ^ rins) & 0xffffffff) != 0:
+        rpc, rins, rdf, rwv = rr
+        RING.append((idx, spc, sins, rpc, rins, srd, swv, rdf, rwv))
+        bad = spc != rpc or ((sins ^ rins) & 0xffffffff) != 0
+        if not bad and srd > 0 and (rdf != srd or rwv != swv):
+            bad = True
+        if bad:
             if mism == 0:
                 print("FIRST DIVERGENCE at n=%d; context:" % idx)
                 for r in RING:
-                    mark = "  OK " if (r[1]==r[3] and (r[2]^r[4])==0) else " BAD "
-                    print("n=%d spike pc=%08x insn=%08x | rtl pc=%08x insn=%08x %s" % (r[0],r[1],r[2],r[3],r[4],mark))
+                    mark = "  OK " if (r[1]==r[3] and (r[2]^r[4])==0 and
+                                       not (r[5] > 0 and (r[7]!=r[5] or r[8]!=r[6]))) else " BAD "
+                    print("n=%d spike pc=%08x insn=%08x rd=%s wv=%08x | rtl pc=%08x insn=%08x rd=%08x wv=%08x %s"
+                          % (r[0],r[1],r[2],('  -' if r[5]<0 else '%2d'%r[5]),r[9] if False else r[6],r[3],r[4],r[7],r[8],mark))
             mism += 1
             if mism >= 4: break
         ns += 1
