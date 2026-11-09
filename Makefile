@@ -2,7 +2,7 @@ RTL := rtl/top_pipe.sv rtl/mmu.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mdiu_f
 CACHE_LAT ?= 1
 RTL_SINGLE := rtl/top_single.sv rtl/ctrl.sv rtl/imm32.sv rtl/alu.sv rtl/mem32.sv rtl/regs32.sv
 TB  := tb/run_hex.sv
-TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t44_sip t45_sv32_sfence_remap t46_sys_hints t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef t107_stdata_fwd
+TESTS := t01_basic t02_memory t03_control t04_edge t05_jumps t06_fence t07_m t08_bp t09_csr t10_ecall t11_ebreak t12_illegal t13_timer t14_ldst_stall t15_ld_ld_br t16_mret t17_csr_fwd t18_wfi t19_amo t20_amo_illegal t21_fpga_subw t22_fpga_control t24_fpga_csr_writes t24_priv_trap_m t25_priv_mret_umode t39_irq_gate t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop t105_csr_undef t107_stdata_fwd
 N ?= 200
 CC := riscv64-unknown-elf-gcc
 CCFLAGS := -march=rv32im_zicsr -mabi=ilp32
@@ -314,7 +314,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t44_sip t45_sv32_sfence_remap t46_sys_hints t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
+MMU_TESTS := t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)

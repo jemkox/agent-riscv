@@ -53,14 +53,16 @@ module ctrl (
   assign is_mret  = (opc == 7'b1110011 && i[14:12] == 3'b000 && i[31:20] == 12'h302);
   assign is_sret  = (opc == 7'b1110011 && i[14:12] == 3'b000 &&
                      (i[31:20] == 12'h102 || i[31:20] == 12'h106));
-  // System *hints* CSRs 0xB00-0xB1F: pinned spike defines them at ALL
-  // privileges and they read 0 / ignore writes (OpenSBI reads mhint3=0xB03
-  // as part of its SBI-time probing; a strict impl traps and diverges).
+  // Legacy mhpmcounter3..31 CSRs 0xB03-0xB1F: pinned spike defines them
+  // machine-level (bits [9:8]=3), reads 0 / ignores writes. OpenSBI probes
+  // mhint3=0xB03 while still in M; a strict "unimplemented CSR" decode traps
+  // there and diverges from the pin. 0xB00/0xB02 keep their own counters.
   function bit csr_hint;
     input bit [11:0] c;
     csr_hint = (c >= 12'hb03) && (c <= 12'hb1f);
   endfunction
-  assign csr_req  = (csr_num == 12'h3ff || csr_hint(csr_num)) ? 2'b00
+  assign csr_req  = (csr_num == 12'h3ff) ? 2'b00
+                   : csr_hint(csr_num) ? 2'b11        // spike: machine-only
                    : csr_num[9:8];
   assign csr_def  = csr_defined(csr_num);
   assign csr_ro   = is_csr_readonly(csr_num);

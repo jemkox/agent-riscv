@@ -1,6 +1,7 @@
-# t46: pinned spike defines SYSTEM HINT CSRs 0xB03-0xB1F at all privileges:
-# reads return 0, writes are ignored (never illegal). OpenSBI's SBI-time probe
-# reads mhint3 (0xB03); a strict decode traps and diverges from the pin.
+# t46: pinned spike implements LEGACY mhpmcounter3..31 CSRs 0xB03-0xB1F as
+# machine-level CSRs that read 0 / ignore writes (not counters, not a trap).
+# OpenSBI probes mhint3 (0xB03) while still in M; a strict "unimplemented CSR"
+# decode traps there and diverges from the pin.  U/S gating: t47_sys_hints_priv.
   .globl _start
   .option norvc
 _start:

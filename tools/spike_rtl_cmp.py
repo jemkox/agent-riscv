@@ -95,7 +95,7 @@ try:
                     mark = "  OK " if (r[1]==r[3] and (r[2]^r[4])==0 and
                                        not (r[5] > 0 and (r[7]!=r[5] or r[8]!=r[6]))) else " BAD "
                     print("n=%d spike pc=%08x insn=%08x rd=%s wv=%08x | rtl pc=%08x insn=%08x rd=%08x wv=%08x %s"
-                          % (r[0],r[1],r[2],('  -' if r[5]<0 else '%2d'%r[5]),r[9] if False else r[6],r[3],r[4],r[7],r[8],mark))
+                          % (r[0],r[1],r[2],('  -' if r[5]<0 else '%2d'%r[5]),r[6],r[3],r[4],r[7],r[8],mark))
             mism += 1
             if mism >= 4: break
         ns += 1

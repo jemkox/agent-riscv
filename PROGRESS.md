@@ -1865,3 +1865,18 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
   through the whole save run (compared 286000 of 600k spike insns, 0 BAD).
 - boot9 restore from ckpt 4f96abd1... running (LINUX_SIM_CYCLES default);
   log reached ALSA / kernel-running at 80M cycles -> /tmp/opencode/boot9.out.
+- Review fixes on 6f47150 (reviews/rv32cpu-6f47150.md), committed below:
+  * naming: CSRs 0xB03-0xB1F = legacy mhpmcounter3..31 (machine-level),
+    reads 0 / writes ignored - NOT "system hints at all privileges".
+  * pinned spike pins them M-ONLY: at S/U an access traps (cause 2, mtval=insn,
+    no writeback).  Fix: rtl/ctrl.sv csr_req = 2'b11 for csr_hint(); iss/iss.py
+    csr_priv(n)=3 for 0xb03..0xb1f.  t47_sys_hints_priv.S: enter S via mret ->
+    csrrs x15,0xB1F (sentinel x15=0x777 intact); enter U via mret -> csrrw
+    x17,0xB03 (x17=0x666 intact); M handler checks mcause=2 + mtval=insn word,
+    resumes by dispatch.  t46 header/naming updated, points at t47.
+  * tools/spike_rtl_cmp.py: dead r[9] if False else r[6] cleaned to r[6].
+  * gates: make test TEST=t47 ALL PASS (ISS+RTL+spike), all_tests green, mmu
+    green, mmu5 green, spike_tests (incl t46+t47) SPIKE_MMU_OK.
+- Re-run of boot probe after the fix: fresh save@300M-cycles run (cpu_retire.bin)
+  vs fresh pinned-spike log (linux_mmu_spike_commits.log): compare 200k/400k insns
+  0 mismatches (old BAD at 214442 csrrs-0xB03-trap is gone: pin matches spike).
