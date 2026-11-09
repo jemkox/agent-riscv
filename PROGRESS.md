@@ -1911,3 +1911,49 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
   RTL reads 0x00000900 (extra 0x800 bit leaked into the S-mode sstatus readback). So the S-mode
   sstatus READ masking is wrong: RTL must mask mstatus down to the S-visible sstatus field
   (drop the extra 0x800 bit that spike excludes). 4 mismatches all cluster here.
+
+## Boot compare after review fixes (2026-11-09, this batch)
+- Boot infra re-run with the fixed models: `linux_mmu_spike_log` (pinned spike, --dtb=linux/linux_mmu.dtb, --pmpregions=0, cap 6.5M, 6.44M ins) + `linux_mmu_ckpt_save CKPT_CYCLES=30000000` (23.85M retires; boot runs ~857k cyc/s) + `spike_rtl_cmp.py ... 6300000 0x80000000` -> **compared 6300000, mismatches 0** (was: first BAD at 5908196 pre-fix). First run used the OLD linux_mmu.dtb for spike (dts edited 16:39, dtb rebuilt 17:50); regenerated log at 18:05 against the new dtb (initrd-end 0x83fffa80 both sides) -> clean.
+- Spike banner confirms masks: `Boot HART MIDELEG 0x00000222`, `MEDELEG 0x0000b109` = pinned spike writable masks now in RTL (`st_medeleg <= newv & 0x0000_B109`, `st_mideleg <= newv & 0x0000_0222`).
+
+## Review fixes on 43399dd (2026-11-09, this batch)
+- Review verdict PASS WITH ISSUES; six items applied/verified:
+  1. clint_dev Linux mtime model parameterized (MT_RATE_C/MT_SEED_C localparams, defaults 1/0
+     hardware-model 1 tick per retire; boot runners retune via -DMT_RATE=100 -DMT_SEED=11240
+     through Makefile MT_DEFINE; derivation note lives in the Makefile, not in the CPU).
+     Fixed preprocessor usage: `ifdef MT_RATE + `MT_RATE backtick expansion (Verilator -D
+     macros expand only in backtick form, cf. cache32's `CACHE_LAT); 64'(MT_RATE_C) cast
+     silences WIDTHEXPAND.
+  2. run_openboot: retire/boot-log paths from argv 12/13 or env RETIRE_BIN/BOOT_LOG,
+     default build/linux/...; no hardcoded ../../build-linux paths. Makefile passes
+     $(B)-based paths in all three linux_mmu_* recipes.
+  3. ctrl.sv: removed the duplicated `mcycleh + mhpmcounterNh` csr_defined line.
+  4. cs_sfence (csrs_pipe): rs2 field bits[24:20] must be x0 (the review named bits[19:15]
+     but that is the rs1/VA field which t45_sv32_sfence_remap pins legal against pinned
+     spike - 0x120E0073 `sfence.vma t3,x0`; ISS mirrored with `and (ins>>20)&0x1f==0`).
+     Gate order: rd==0 && rs2==0 && f3=000 && opcode=SYSTEM && bits[31:25]=0x12>>1.
+  5. linux_mmu.dts: initrd-end corrected to 0x83fffa80 (real cpio size 0x132080 bytes above
+     0x83ecda00); runner layout comment + default INITRD_ADDR updated to 0x83ecda00.
+  6. SSTATUS_MASK 0x800C1922 -> 0x800C0122 in RTL csrs.sv AND iss/iss.py: MPP(12:11) is M-only
+     in the sstatus view (spike 1.1.1-dev sstatus read/write mask excludes MPP; kernel
+     csrrci s4,sstatus,2 pin n=5908196 read 0x100 vs our old 0x900 = SPP + leaked MPP=S).
+- Consequential fix found while re-running `mmu` (which all_tests does NOT cover - that is
+  why this stayed hidden at 43399dd): t39_irq_gate mmuself failed because the ISS gained
+  the spike mideleg write mask (0x222) at 43399dd: MTI bit7 cannot be delegated on pinned
+  spike, so the old "csrs mideleg,0x80" pin A scenario cannot exist. RTL had NO medeleg/mideleg
+  write masks at all (ISS==RTL only because t39 never read mideleg back):
+  * rtl/csrs.sv: CSR_MEDELEG newv & 0x0000_B109, CSR_MIDELEG newv & 0x0000_0222
+    (both values = pinned spike 1.1.1-dev writable masks, ISS comment cites boot banner).
+  * tests/t39_irq_gate.S RE-CUT (self-written test, pinned goldens are spike/sail): pins
+    now (A) csrw mideleg,0x3ff -> csrr a6 == 0x222 (spike writable-mask readback, mmucheck
+    maskmk), (B) pending MTI at M taken on first retire after MIE armed (a6==0xA retired
+    before lBmark), (C) at S after mret MPP=S pending non-delegated MTI traps at
+    `li a6,0xC` despite SIE/MIE off/hidden (buggy flow -> j fail gp=3). ISS+RTL agree;
+    mmucheck maskmk 222, lBmark a, done a.
+- Gates measured this session after the batch: `make test` ALL PASS, `make mmu` MMU ALL
+  PASS (19 incl re-cut t39 + t44..t47), `make mmu5` MMU5 ALL PASS, `make spike_tests`
+  SPIKE_MMU_OK, `make lint` clean (run_hex -DTOPPIPE set).
+- Boot chain re-running with dts change (dtb rebuilt): fresh pinned-spike log (SPIKE_MAX_INS
+  6500000) + RTL ckpt save@700M cycles into build/linux/, compare via linux_spike_cmp.
+  In flight: /tmp/opencode/boot_chain.out.
+

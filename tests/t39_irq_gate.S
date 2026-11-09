@@ -1,33 +1,41 @@
-# t39: IRQ gating corners (post 40c5649 review). Two pins:
-#  A) at M with mideleg[MTI]=1 (S handler), MIE set, mtimecmp overdue: the
-#     delegated MTI must NOT be taken at M (less-privileged handler).
-#  B) at S (entered by mret MPP=S) with mideleg[MTI]=0, MIE hidden at S: the
-#     pending MTI (handler M) must trap despite SIE/MIE being off (satp=0).
-# If A is mis-gated (taken at M) or B is mis-gated (gated by SIE), the flow
-# falls into fail (gp=3). Correct flow: two handler entries -> mret chain ->
-# done, gp=1. mmucheck: a6==10 before lBmark, a6==10 before done.
+# t39: IRQ gating corners, spike-pinned mideleg/medeleg write masks (0x222/0xB109)
+# (pinned spike 1.1.1-dev: `csrw mideleg,0x3ff` then read back -> 0x222; the
+# MTI bit7 is NOT delegable on spike, so a "delegated MTI at M" scenario cannot
+# exist there - the old pin A was rewritten to pin the mask itself).
+# Pins:
+#  A) mideleg write mask: csrw 0x303,0x3ff -> csrr a6,0x303 must read 0x222
+#     (mmucheck maskmk 222).
+#  B) at M with MIE armed and mtimecmp overdue: the pending MTI fires on the
+#     FIRST retire after arming (handler entry 1); a6==0xA retired before lBmark.
+#  C) at S (entered by mret MPP=S) with mideleg[MTI]=0 and SIE/MIE hidden/off:
+#     the re-armed pending MTI MUST trap at `li a6,0xC` despite SIE/MIE being
+#     off (handler is M); the buggy flow falls through to j fail. Entry 2 ->
+#     step2 mepc=done + mret(MPP=M) -> done, gp=1.
+# mmucheck: a6==0x222 before maskmk, a6==0xA before lBmark, a6==0xA before done.
   .globl _start
   .option norvc
 _start:
   li gp,0
   la t1,handler
   csrw mtvec,t1
-  li t4,0x80
-  csrw 0x304,t4                       # mie.MTI
-  csrs 0x303,t4                       # mideleg.MTI -> S handler (BEFORE pending exists)
+  li t4,0x3ff
+  csrw 0x303,t4                       # mideleg attempt -> masked to 0x222 by spike
+  csrr a6,0x303                       # a6 = 0x222 (spike writable mask pinned)
+maskmk:
+  # mmucheck maskmk 222
   lui t2,0x2001
   sw x0,-2048(t2)                     # mtimecmp_lo=0
-  sw x0,-2044(t2)                     # mtimecmp_hi=0 -> overdue
-  li t0,8
-  csrs mstatus,t0                     # MIE -> pending MTI armed now (delegated to S)
+  sw x0,-2044(t2)                     # mtimecmp_hi=0 -> overdue once mie armed
+  li t0,0x80
+  csrw 0x304,t0                       # mie.MTI
   li a6,0xA
-lA:
-  addi a0,x0,1
-  addi a1,x0,2
-  csrc 0x303,t4                       # clear mideleg bit7: MTI handled by M now
-  j scode                            # buggy-A trap skipped this insn; correct: trapped here
+  li t0,8
+  csrs mstatus,t0                     # MIE -> pending MTI armed now (handler M)
 lBmark:
   # mmucheck lBmark a
+  addi a0,x0,1                        # trap here (mepc=this insn)
+  addi a1,x0,2
+  j scode                             # not reached
 scode:
   lui t6,0x2001
   sw x0,-2048(t6)                     # re-arm overdue (store at S, satp=0)
@@ -70,7 +78,7 @@ step2:
   lui t6,0x2001
   li t5,0xffffffff
   sw t5,-2048(t6)
-  sw t5,-2044(t6)                     # push mtimecmp far
+  sw t5,-2044(t6)                     # push far
   la t3,done
   csrw mepc,t3
   li t0,0x1818                        # MPP=M, MPIE, MIE

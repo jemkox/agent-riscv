@@ -14,7 +14,7 @@
 	 stdout-path = "/soc/serial@10000000";
 	 stdin-path = "/soc/serial@10000000";
 	  linux,initrd-start = <0x00 0x83ecda00>;
-	  linux,initrd-end = <0x00 0x83fff000>;
+	  linux,initrd-end = <0x00 0x83fffa80>;
 	};
 
 	 timers {

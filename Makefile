@@ -542,11 +542,11 @@ linux/gate.txt: linux/configs/gate-symbols.map linux | $(B)
 	@mkdir -p linux
 	@python3 tools/linux_gate.py linux/configs/gate-symbols.map linux/gate.txt
 $(B)/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(MT_DEFINE) -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
 
 $(B)/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
-	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir $(B)/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
+	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(MT_DEFINE) -DLINUX -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir $(B)/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3 -DLINUX_DEBUG" run_linux -j 4
 
 linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
@@ -979,7 +979,7 @@ linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
 	@grep -m 5 -a "OpenSBI\|Run /init as init\|login\|Power down" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true
 
 $(B)/vlt_openboot/run_openboot: $(RTL) tb/run_linux.sv tb/run_openboot.cpp | $(B)
-	verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast $(OPENBOOT_DBG) $(OPENBOOT_IFHDBG) -DLINUX -DLINUX_DEBUG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
+	verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast $(OPENBOOT_DBG) $(OPENBOOT_IFHDBG) $(MT_DEFINE) -DLINUX -DLINUX_DEBUG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
 	$(MAKE) -C $(B)/vlt_openboot -f Vrun_linux.mk OPT_FAST="-O2 -DLINUX_DEBUG " run_openboot -j 4
 
 linux_mmu_spike: linux_mmu_build spike_pin_check | $(B)/linux/logs
@@ -1038,6 +1038,19 @@ INITRD_ADDR ?= 0x83ecda00
 DTB_ADDR ?= 0x83e00000   # 0x82200000 collides with the 34MB kernel Image tail
 SPIKE_CMP_MAX ?= 40000000
 LINUX_CMP_ANCHOR ?= 0x80000000
+# CLINT mtime calibration for the Linux boot compare vs pinned spike - runner
+# side, NOT inside the CPU (clint_dev's hardware model is a plain 1-tick-per-
+# retire counter; these -DMT_* only retune the Linux runner builds so RTL and
+# spike timer IRQs land on the same retire):
+#  * spike's CLINT advances mtime 1 tick per 100 retired insns (riscv-isa-sim
+#    sim.h: INSNS_PER_RTC_TICK=100; sim.cc steps in INTERLEAVE=5000-insn
+#    quanta then dev->tick(5000/100) -> +1 per 100 insns)
+#  * spike ran OpenSBI-stub insns before our 0x8000_0000 retire anchor: boot
+#    measured TIME=13600 at our-ins 1348769..1348824 -> seed in [11231,11249]
+#    -> 11240 (mid). RTL: mt = (retires + SEED) / RATE.
+MTIME_RATE ?= 100
+MTIME_SEED ?= 11240
+MT_DEFINE = -DMT_RATE=$(MTIME_RATE) -DMT_SEED=$(MTIME_SEED)
 linux_mmu_spike_log: linux_mmu_build spike_pin_check | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
 	@rm -f $(B)/linux/logs/linux_mmu_spike_commits.log $(B)/linux/logs/linux_mmu_spike_c.out
@@ -1048,11 +1061,11 @@ linux_mmu_spike_log: linux_mmu_build spike_pin_check | $(B)/linux/logs
 # artifacts: linux_mmu_spike_log's commits log and run_openboot's retire bin.
 # Exit 0 only when streams agree for the compared prefix (divergences fail).
 linux_spike_cmp:
-	@python3 tools/spike_rtl_cmp.py $(B)/linux/logs/linux_mmu_spike_commits.log $(BR_MMU_OUT)/cpu_retire.bin $(SPIKE_CMP_MAX) $(LINUX_CMP_ANCHOR)
+	@python3 tools/spike_rtl_cmp.py $(B)/linux/logs/linux_mmu_spike_commits.log $(B)/linux/cpu_retire.bin $(SPIKE_CMP_MAX) $(LINUX_CMP_ANCHOR)
 
 linux_mmu_sim: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mmu_build | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
-	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) STUCK_LIMIT=$(LINUX_STUCK_LIMIT) TRACE_MINPC=$(LINUX_TRACE_MINPC) ./$(B)/vlt_openboot/run_openboot $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt | tee $(B)/linux/logs/openboot.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) RETIRE_BIN=$(B)/linux/cpu_retire.bin BOOT_LOG=$(B)/linux/cpu_boot.log STUCK_LIMIT=$(LINUX_STUCK_LIMIT) TRACE_MINPC=$(LINUX_TRACE_MINPC) ./$(B)/vlt_openboot/run_openboot $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt | tee $(B)/linux/logs/openboot.out
 	@grep -q "^OPENBOOT OK" $(B)/linux/logs/openboot.out || { echo "L7 OPENBOOT SIM FAILED"; exit 1; }
 
 # L7 checkpoint: save the boot state at CKPT_CYCLES, then restore and continue.
@@ -1064,12 +1077,12 @@ linux_mmu_ckpt_save: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mm
 	@mkdir -p $(B)/linux/logs $(B)/linux/inputs
 	@cp -p $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(B)/linux/inputs/
 	@rm -f $(B)/linux/boot_ckpt.bin
-	@H=$$( { sha256sum $(RTL) tb/run_linux.sv tb/run_openboot.cpp $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb; echo "addr $(INITRD_ADDR) $(DTB_ADDR)"; } | sha256sum | cut -d' ' -f1); \
+	@H=$$( { sha256sum $(RTL) tb/run_linux.sv tb/run_openboot.cpp $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb; echo "addr $(INITRD_ADDR) $(DTB_ADDR) mt $(MTIME_RATE) $(MTIME_SEED)"; } | sha256sum | cut -d' ' -f1); \
 	echo "$$H" > $(B)/linux/boot_ckpt.hash; \
-	INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(CKPT_CYCLES) - 0 save $(B)/linux/boot_ckpt.bin "$$H" | tee $(B)/linux/logs/ckpt_save.out
+	INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(CKPT_CYCLES) - 0 save $(B)/linux/boot_ckpt.bin "$$H" $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_save.out
 	@grep -q "^#CKPT_SAVE" $(B)/linux/logs/ckpt_save.out || { echo "CKPT SAVE FAILED"; exit 1; }
 
 linux_mmu_ckpt_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
-	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) | tee $(B)/linux/logs/ckpt_restore.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_restore.out
 	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/ckpt_restore.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
 	@grep -q "^OPENBOOT OK" $(B)/linux/logs/ckpt_restore.out || { echo "L7 CKPT-RESTORE SIM FAILED"; exit 1; }

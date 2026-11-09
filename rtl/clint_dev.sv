@@ -45,17 +45,26 @@ module clint_dev (
   logic [31:0] st_cmh   = 32'hFFFF_FFFF;
 
 `ifdef LINUX
-  // Spike's rv32 CLINT/TIME model advances ~1 per 100 retired insns
-  // (measured on pinned spike: TIME=2000 at insn 200011, =floor(ins/100));
-  // the boot run measured TIME=13600 at insn 1348824 -> +112 seed from spike's
-  // start-up stub insns ahead of our retire anchor. Match that model for Linux.
-  // Spike boot mtime = floor((insns_total_from_spike_start)/100); spike ran S insns
-  // before our 0x80000000 anchor. Two boot calibrations bracket S: old boot TIME=13600
-  // at our-ins 1348825 -> S in [11175,11249]; new boot TIME=13600 at our-ins 1348769
-  // -> S in [11231,11300] -> S in [11231,11249]. Pick S=11240 (mid).
+  // mtime model: a real 64-bit tick counter advanced by the retire signal
+  // (mt = (retires + SEED) / RATE; defaults 1/0 = one tick per retired insn
+  // like the non-LINUX model). The Linux boot-compare runner re-tunes RATE/
+  // SEED via -DMT_RATE / -DMT_SEED so RTL and pinned-spike timer IRQs land
+  // on the same retire; the calibration values and their derivation live in
+  // the Makefile's linux_mmu_* section, NOT baked into the CPU here.
+`ifdef MT_RATE
+  localparam int MT_RATE_C = `MT_RATE;
+`else
+  localparam int MT_RATE_C = 1;
+`endif
+`ifdef MT_SEED
+  localparam int MT_SEED_C = `MT_SEED;
+`else
+  localparam int MT_SEED_C = 0;
+`endif
   logic [63:0] st_ins = 64'd0;
   wire [63:0] ins_view = st_ins + (retire_en ? 64'd1 : 64'd0);
-  wire [63:0] mt_now = (ins_view + 64'd11240) / 64'd100;
+  wire [63:0] mt_now = MT_RATE_C == 1 ? (ins_view + 64'(MT_SEED_C))
+                                      : (ins_view + 64'(MT_SEED_C)) / 64'(MT_RATE_C);
 `else
   wire [63:0] mt_now = {st_mth, st_mtl} + (retire_en ? 64'd1 : 64'd0);
 `endif

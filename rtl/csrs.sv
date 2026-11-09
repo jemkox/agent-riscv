@@ -101,7 +101,8 @@ module csrs (
   localparam MSTATUS_SPIE  = 32'h0000_0020;
   localparam MSTATUS_MIE   = 32'h0000_0008;
   localparam MSTATUS_SIE   = 32'h0000_0002;
-  localparam SSTATUS_MASK  = 32'h800C1922;
+  localparam SSTATUS_MASK  = 32'h800C_0122;  // SD|MXR|SUM|SPP|SPIE|SIE (MPP is M-only: spike
+  // hides MPP(12:11) in the S-priv sstatus read; kernel csrrci sstatus read pinned n=5908196)
   // misa: MXL=RV32 + I M A (0x1101) + S(bit18) U(bit20) — we run Linux/OpenSBI
   // in S|U so misa must advertise them (OpenSBI generic probes misa bit for 'S').
   localparam MISA_VAL      = 32'h4014_1101;
@@ -286,8 +287,8 @@ module csrs (
           CSR_SIP: st_mip_sw <= (st_mip_sw & ~(st_mideleg & 32'h2)) |
                               (newv & (st_mideleg & 32'h2));
 `endif
-          CSR_MEDELEG: st_medeleg <= newv;
-          CSR_MIDELEG: st_mideleg <= newv;
+          CSR_MEDELEG: st_medeleg <= newv & 32'h0000_B109;  // spike 1.1.1-dev writable mask
+          CSR_MIDELEG: st_mideleg <= newv & 32'h0000_0222;  // spike writable mask (MTI bit7 NOT delegable)
           CSR_STVEC: st_stvec <= newv;
           CSR_SEPC: st_sepc <= newv;
           CSR_SCAUSE: st_scause <= newv;

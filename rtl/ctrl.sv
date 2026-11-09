@@ -218,7 +218,6 @@ module ctrl (
             c == 12'hc81 || c == 12'hc82 ||             c == 12'hc00 || c == 12'hc80 ||
             (c >= 12'hb03 && c <= 12'hb1f) ||   // legacy mhpmcounter3..31 (spike-defined)
             c == 12'hb80 || (c >= 12'hb83 && c <= 12'hb9f) ||  // mcycleh + mhpmcounterNh
-            c == 12'hb80 || (c >= 12'hb83 && c <= 12'hb9f) || // mcycleh + mhpmcounterNh
             c == 12'h310 || c == 12'h306 || c == 12'h30a ||   // mstatush,mcounteren,menvcfg
             c == 12'h31a ||                                  // menvcfgh (always 0, spike)
             ((c >= 12'h7a0) && (c <= 12'h7a4)) ||            // spike smask-family CSRs

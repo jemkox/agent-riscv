@@ -44,7 +44,8 @@ def main(argv):
           0x32d:0,0x32e:0,0x32f:0,
           0x7a0:0,0x7a2:0,0x7a3:0,0x202:0,0x282:0}   # spike ext-CSR probe group
     priv = 3   # current privilege: 3 = M, 1 = S, 0 = U
-    SSTATUS_MASK = 0x800C1922   # SD | SUM(18) | MXR(19) | MPP(12:11) | SPP | SPIE | SIE (rv32 encoding.h masks)
+    SSTATUS_MASK = 0x800C0122   # SD | MXR(19) | SUM(18) | SPP | SPIE | SIE; MPP(12:11) is M-only:
+    # pinned spike hides MPP in the S-priv sstatus read/write (kernel csrrci sstatus pin n=5908196)
     SUM_BIT = 0x00040000; MXR_BIT = 0x00080000
     MPP_MASK = 0x1800; SPP_BIT = 0x100; MPIE_BIT = 0x80; SPIE_BIT = 0x20
     MIE_BIT = 0x8; SIE_BIT = 0x2
@@ -466,7 +467,7 @@ def main(argv):
                 elif csr_num == 1:
                     pc = do_trap(3, pc); steps += 1    # EBREAK: mtval = epc
                     continue
-                elif (ins >> 25) & 0x7f == 0x9 and rd == 0:   # SFENCE.VMA (real encoding)
+                elif (ins >> 25) & 0x7f == 0x9 and rd == 0 and (ins >> 20) & 0x1f == 0:   # SFENCE.VMA (rs2=x0; rs1 may be VA form: t45)
                     if priv < 1 or (priv == 1 and (cs_get(0x300) & TVM_BIT)):
                         cause = 2; illegal = True
                     else:

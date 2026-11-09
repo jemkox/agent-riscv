@@ -2,8 +2,11 @@
 // Layout (fw_jump.bin bakes payload=+0x400000, fdt=+0x2200000):
 //   stub @0x1000 -> a1=fw baked hint 0x1020 (x11 seed), OpenSBI scans RAM
 //   fw_jump.bin   @0x80000000 | kernel Image @0x80400000
-//   FDT          @0x82200000 | initrd cpio @0x82400000
-// Usage: run_openboot <fw.bin> <Image> <rootfs.cpio> <linux.dtb> [max_cycles] [prompt]
+//   DTB          @0x83e00000 (env DTB_ADDR) | initrd cpio @0x83ecda00 (env INITRD_ADDR)
+//   dts initrd range 0x83ecda00..0x83fffa80; stub DTB copy still at 0x1020 (spike a1 hint)
+// Usage: run_openboot <fw.bin> <Image> <rootfs.cpio> <dtb> [max_cycles] [prompt]
+//        [rec_start] [save|restore <ckpt> <hash>] [retire_bin] [boot_log]
+// Output paths: argv 12/13 (or env RETIRE_BIN/BOOT_LOG); default $(B)/linux/*.
 #include <verilated.h>
 #include <memory>
 #include <cstdio>
@@ -20,7 +23,7 @@
 static const uint32_t FW_ADDR     = 0x80000000u;
 static const uint32_t KERNEL_ADDR = 0x80400000u;
 static uint32_t DTB_ADDR      = 0x83e00000u;
-static uint32_t INITRD_ADDR = 0x82800000u;
+static uint32_t INITRD_ADDR = 0x83ecda00u;
 static void apply_addr_env() {
     if (const char *e = getenv("DTB_ADDR"))    DTB_ADDR = (uint32_t)strtoul(e, nullptr, 16);
     if (const char *e = getenv("INITRD_ADDR")) INITRD_ADDR = (uint32_t)strtoul(e, nullptr, 16);
@@ -75,6 +78,16 @@ int main(int argc, char **argv) {
     const bool ckpt_restore = (argc > 8) && !std::strcmp(argv[8], "restore");
     const std::string ckpt_file = (argc > 9) ? std::string(argv[9]) : std::string();
     const std::string ckpt_hash = (argc > 10) ? std::string(argv[10]) : std::string();
+    // Retire-trace + boot-log output paths (review: no hard-coded out-of-tree
+    // paths in the runner): argv 12/13 win, then env RETIRE_BIN/BOOT_LOG,
+    // then the default build-linux/linux/ (make passes $(B)-based paths).
+    std::string retire_path, bootlog_path;
+    if (argc > 11) retire_path = argv[11];
+    if (argc > 12) bootlog_path = argv[12];
+    if (retire_path.empty()) if (const char *e = getenv("RETIRE_BIN")) retire_path = e;
+    if (bootlog_path.empty()) if (const char *e = getenv("BOOT_LOG")) bootlog_path = e;
+    if (retire_path.empty()) retire_path = "build/linux/cpu_retire.bin";
+    if (bootlog_path.empty()) bootlog_path = "build/linux/cpu_boot.log";
     // Kernel entry: the Image file is loaded whole at KERNEL_ADDR (as QEMU virt
     // does); its first u32 is a J-type jump to the head entry. FW_JUMP_ADDR (baked
     // into the fw_jump build) must equal this; we print it for cross-checking.
@@ -104,7 +117,7 @@ int main(int argc, char **argv) {
     const uint32_t stuck_limit = getenv("STUCK_LIMIT") ? (uint32_t)strtoul(getenv("STUCK_LIMIT"), 0, 10) : 25000u;
     const uint32_t trace_minpc = getenv("TRACE_MINPC") ? (uint32_t)strtoul(getenv("TRACE_MINPC"), 0, 16) : 0u;
     const uint32_t trace_max = getenv("TRACE_MAX") ? (uint32_t)strtoul(getenv("TRACE_MAX"), 0, 10) : 20000000u;
-    FILE *rtf = fopen("../../build-linux/mmu3/cpu_retire.bin",
+    FILE *rtf = fopen(retire_path.c_str(),
                       ckpt_restore ? "ab" : "wb");
     uint32_t rec_n = 0;
     uint64_t cyc = 0;
@@ -259,7 +272,7 @@ int main(int argc, char **argv) {
            (unsigned long long)cyc, banner ? 1 : 0, runinit ? 1 : 0,
            login ? 1 : 0, model->halt ? 1 : 0, panicked ? 1 : 0, log.size());
     {
-        FILE *f = fopen("../../build-linux/mmu3/cpu_boot.log", "w");
+        FILE *f = fopen(bootlog_path.c_str(), "w");
         if (f) { fwrite(log.data(), 1, log.size(), f);
                  fprintf(f, "\n[cycles %llu banner %d runinit %d login %d halt %d]\n",
                          (unsigned long long)cyc, banner ? 1 : 0,
