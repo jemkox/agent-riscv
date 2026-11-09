@@ -1,6 +1,6 @@
 // Open-boot runner: QEMU-virt-style handoff for OpenSBI fw_jump.bin + Sv32 kernel.
 // Layout (fw_jump.bin bakes payload=+0x400000, fdt=+0x2200000):
-//   stub @0x1000 -> a1=DTB, a0=0, jr 0x80000000
+//   stub @0x1000 -> a1=fw baked hint 0x1020 (x11 seed), OpenSBI scans RAM
 //   fw_jump.bin   @0x80000000 | kernel Image @0x80400000
 //   FDT          @0x82200000 | initrd cpio @0x82400000
 // Usage: run_openboot <fw.bin> <Image> <rootfs.cpio> <linux.dtb> [max_cycles] [prompt]
@@ -26,6 +26,12 @@ static void apply_addr_env() {
     if (const char *e = getenv("INITRD_ADDR")) INITRD_ADDR = (uint32_t)strtoul(e, nullptr, 16);
 }
 static const uint32_t STUB_ADDR   = 0x00001000u;
+// Pinned-spike boot: fw_jump's stub sets a1 = 0x1020 (the fw's baked DTB hint),
+// then OpenSBI's find_device_tree scan locates the real DTB in RAM.  The RTL
+// boot starts directly at FW_ADDR, so seed x11 with the same baked hint (NOT
+// DTB_ADDR): seeding the real addr made "found == hint" and took a different
+// OpenSBI path than spike (divergence at the scan result, boot panic).
+static const uint32_t STUB_HINT   = 0x00001020u;
 
 static bool load_bin(const char *path, std::vector<uint32_t> &words) {
     FILE *f = fopen(path, "rb");
@@ -131,7 +137,7 @@ int main(int argc, char **argv) {
                         uint32_t lwd) {
             model->clk = clk; model->reset = reset;
             model->lwe = lwe; model->lwa = lwa; model->lwd = lwd;
-            model->linux_dtb_addr = DTB_ADDR;
+            model->linux_dtb_addr = STUB_HINT;
             model->uart_rx_ready = 0; model->uart_rx_in = 0;
             model->eval();
         };
