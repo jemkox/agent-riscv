@@ -101,7 +101,8 @@ KINDS = (
 # an L7/L8 item (paged atomics under Linux); L6 paging class = load/store/branch/CSR+sfence.
 AMO_KINDS = ('amoadd', 'amoand', 'amoswap', 'amoor', 'amoxor', 'amomax', 'amomaxu',
              'amomin', 'amominu', 'lr', 'sc')
-KINDUSE = [k for k in (KINDS + ('sfence',)) if k not in AMO_KINDS] if PAG else KINDS
+PRIV_KINDS = ('sie_rw','sie_rs','sie_rc','sip_rw','sip_rs','sip_rc')
+KINDUSE = [k for k in (KINDS + ('sfence',) + (PRIV_KINDS if PAG else ())) if k not in AMO_KINDS] if PAG else KINDS
 
 def emit(kind, idx):
     d = rdreg()
@@ -207,6 +208,10 @@ def emit(kind, idx):
         f5 = {'amoadd': 0, 'amoand': 0xC, 'amoswap': 1, 'amoor': 8, 'amoxor': 4,
               'amomin': 0x10, 'amomax': 0x14, 'amominu': 0x18, 'amomaxu': 0x1C}[kind]
         return AMO(f5, a, 28, d)
+    if kind in ('sie_rw','sie_rs','sie_rc','sip_rw','sip_rs','sip_rc'):
+        f3 = {'rw':1,'rs':2,'rc':3}[kind[4:]]
+        csr = 0x104 if kind.startswith('sie') else 0x144
+        return I(csr, rsreg(), f3, rdreg(), 0x73)
     return I(0, 0, 0, 0, 0x0f)
 
 for i in range(Bn):
