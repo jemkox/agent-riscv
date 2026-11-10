@@ -1957,3 +1957,18 @@ L6: Sv32 MMU, page-table walker/TLB, `sfence.vma`, A/D bits, MXR/SUM, and paging
   6500000) + RTL ckpt save@700M cycles into build/linux/, compare via linux_spike_cmp.
   In flight: /tmp/opencode/boot_chain.out.
 
+## Review fixes after a6a89a1 (2026-11-10)
+- Commit `489eb60`: `review fixes: vendor CSR ISS mirror and spike-pin test for 0xf11-0xf14/0x7a1/0x7a4`.
+- Added committed `tests/t48_vendor_csr.S` and added `t48_vendor_csr` to `SPIKE_MMU_TESTS` so the pinned-spike evidence is committed through the spike-test gate. The test reads/pins vendor ID CSRs `0xf11/0xf12/0xf13/0xf14` and spike smask-family constants `0x7a1=0xF0000000`, `0x7a4=0x0100807C`.
+- `iss/iss.py` mirrors the pinned marchid read: `if n == 0xf12: return 5`. Existing ISS already mirrors `0x7a1`/`0x7a4`, and `csrs_comb.svh`/`csrs.sv` carry the RTL constants (`MARCHID_VAL = 32'h0000_0005`, `0x7A1`, `0x7A4`).
+- `hdl make mi` after the ISS/RTL sync: `ALL MI PASS`.
+- `hdl make spike_tests` after adding `t48_vendor_csr` to `SPIKE_MMU_TESTS`: `SPIKE_MMU_OK`. Generated `build/spike/logs/t48_vendor_csr.log` contains `x14 0x00000005` for `0xf12`, `x10 0xf0000000` for `0x7a1`, `x10 0x0100807c` for `0x7a4`, and `x3 0x00000001` pass marker.
+- Fresh-clone check at this commit state:
+```sh
+git clone -q . build/fresh-clone
+hdl make test RVTEST_DIR=/home/jemko/agent-workspace/downloads/riscv-tests/isa
+# ... final make output:
+ALL PASS
+```
+- `hdl make all_tests` at this commit state ended `ALL TESTS DONE`; the saved parallel output also contains `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, and Doom `TEST PASSED (Doom: 31 frames, halt=0)`.
+
