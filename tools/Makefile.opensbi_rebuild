@@ -1,0 +1,23 @@
+# Rebuild the OpenSBI fw_jump/fw_dynamic objects with our CPU ISA
+# (rv32imaz_zicsr_zifencei, NO RVC — our CPU has no compressed insns), then
+# install them over the Buildroot images. Run: hdl make -f tools/Makefile.opensbi_rebuild
+export PATH := /home/jemko/agent-workspace/build-linux/mmu3/host/bin:$(PATH)
+OBJS_DIR = /home/jemko/agent-workspace/build-linux/mmu3/build/opensbi-1.6
+FW_DIR = $(OBJS_DIR)/build/platform/generic/firmware
+IMGS = /home/jemko/agent-workspace/build-linux/mmu3/images
+FW_FDT ?= 0x82200000
+
+all:
+	$(MAKE) -s -C $(OBJS_DIR) CROSS_COMPILE=riscv32-buildroot-linux-uclibc- \
+	  PLATFORM=generic FW_JUMP=y FW_JUMP_ADDR=0x8040012c FW_JUMP_FDT_ADDR=$(FW_FDT) \
+	  PLATFORM_RISCV_XLEN=32 PLATFORM_RISCV_ABI=ilp32 \
+	  PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei clean
+	$(MAKE) -s -C $(OBJS_DIR) CROSS_COMPILE=riscv32-buildroot-linux-uclibc- \
+	  PLATFORM=generic FW_JUMP=y FW_JUMP_ADDR=0x8040012c FW_JUMP_FDT_ADDR=$(FW_FDT) \
+	  PLATFORM_RISCV_XLEN=32 PLATFORM_RISCV_ABI=ilp32 \
+	  PLATFORM_RISCV_ISA=rv32ima_zicsr_zifencei all
+	cp $(FW_DIR)/fw_jump.bin $(IMGS)/fw_jump.bin
+	cp $(FW_DIR)/fw_jump.elf $(IMGS)/fw_jump.elf
+	cp $(FW_DIR)/fw_dynamic.bin $(IMGS)/fw_dynamic.bin
+	cp $(FW_DIR)/fw_dynamic.elf $(IMGS)/fw_dynamic.elf
+	sha256sum $(IMGS)/fw_jump.bin $(IMGS)/fw_dynamic.elf

@@ -1,0 +1,54 @@
+[    0.000000] Linux version 6.12.27 (jemko@jemko) (riscv32-buildroot-linux-uclibc-gcc.br_real (Buildroot 2025.02.19) 13.4.0, GNU ld (GNU Binutils) 2.43.1) #2 Wed Nov  4 00:12:10 CET 2026
+[    0.000000] Machine model: rv32cpu,linux-sim
+[    0.000000] earlycon: ns16550 at MMIO 0x10000000 (options '')
+[    0.000000] printk: legacy bootconsole [ns16550] enabled
+[    0.000000] OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000080000000-0x0000000083ffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080000000-0x0000000083ffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x0000000083ffffff]
+[    0.000000] Falling back to deprecated "riscv,isa"
+[    0.000000] riscv: base ISA extensions aim
+[    0.000000] riscv: ELF capabilities aim
+[    0.000000] Kernel command line: console=ttyS0 earlycon=ns16550,mmio,0x10000000 initramfs_async=0
+[    0.000000] Dentry cache hash table entries: 8192 (order: 3, 32768 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 4096 (order: 2, 16384 bytes, linear)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 16384
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] riscv-intc: 32 local interrupts mapped
+[    0.000000] clint: clint@2000000: timer running at 10000000 Hz
+[    0.000000] clocksource: clint_clocksource: mask: 0xffffffffffffffff max_cycles: 0x24e6a1710, max_idle_ns: 440795202120 ns
+[    0.000514] sched_clock: 64 bits at 10MHz, resolution 100ns, wraps every 4398046511100ns
+[    0.026554] Console: colour dummy device 80x25
+[    0.041326] Calibrating delay loop (skipped), value calculated using timer frequency.. 20.00 BogoMIPS (lpj=40000)
+[    0.053886] pid_max: default: 32768 minimum: 301
+[    0.077472] Mount-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    0.086833] Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    0.325853] Memory: 57968K/65536K available (4556K kernel code, 544K rwdata, 692K rodata, 663K init, 228K bss, 7300K reserved, 0K cma-reserved)
+[    0.378452] devtmpfs: initialized
+[    0.584184] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.596043] futex hash table entries: 256 (order: -1, 3072 bytes, linear)
+[    0.695068] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.805335] cpu0: Ratio of byte access time to unaligned word access is 1.08, unaligned accesses are fast
+[    1.132819] pps_core: LinuxPPS API ver. 1 registered
+[    1.139390] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    1.150545] PTP clock support registered
+[    1.324547] clocksource: Switched to clocksource clint_clocksource
+[    2.753606] NET: Registered PF_INET protocol family
+[    2.782253] IP idents hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    2.874156] tcp_listen_portaddr_hash hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    2.886248] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    2.897726] TCP established hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    2.907560] TCP bind hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    2.918103] TCP: Hash tables configured (established 1024 bind 1024)
+[    2.934246] UDP hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    2.944040] UDP-Lite hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    2.967657] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[   11.870466] workingset: timestamp_bits=30 max_order=14 bucket_order=0
+[   11.898226] io scheduler mq-deadline registered
+[   11.906123] io scheduler kyber registered
+[   12.786358] riscv-plic: plic@c000000: mapped 95 interrupts with 1 handlers for 2 contexts.

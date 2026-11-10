@@ -172,6 +172,9 @@ $(B)/t19_amo.o: tests/t19_amo.S | $(B)
 	$(CC) $(T19_CCFLAGS) -c $< -o $(B)/t19_amo.rvo
 	$(OC) -O elf32-littleriscv $(B)/t19_amo.rvo $@
 
+$(B)/t110_sv32_uspf.o: tests/t110_sv32_uspf.S | $(B)
+	$(CC) $(UA_CCFLAGS) -c $< -o $(B)/t110_sv32_uspf.rvo
+	$(OC) -O elf32-littleriscv $(B)/t110_sv32_uspf.rvo $@
 # t20: reserved atomics and MMIO atomic traps need the A extension too
 T20_CCFLAGS := -march=rv32ima_zicsr -mabi=ilp32
 $(B)/t20_amo_illegal.o: tests/t20_amo_illegal.S | $(B)
@@ -314,7 +317,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
+MMU_TESTS := t110_sv32_uspf t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -1095,3 +1098,28 @@ linux_mmu_ckpt_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump
 	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_restore.out
 	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/ckpt_restore.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
 	@grep -q "^OPENBOOT OK" $(B)/linux/logs/ckpt_restore.out || { echo "L7 CKPT-RESTORE SIM FAILED"; exit 1; }
+
+# Capture a retire trace THROUGH the /init panic (no break on 'Kernel panic') for
+# self-consistency checkers (memcheck/regcheck/ra_hunt). Restore from the boot
+# checkpoint, run PANIC_CYCLES further cycles, append records (rec_start=0 ->
+# everything from the restored cycle on) into $(B)/linux/panic_retire.bin.
+PANIC_CYCLES ?= 4000000
+linux_panic_trace: $(B)/vlt_openboot/run_openboot $(B)/linux/boot_ckpt.hash $(B)/linux/inputs/linux_mmu.dtb | $(B)/linux/logs
+	@rm -f $(B)/linux/panic_retire.bin
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(PANIC_CYCLES) - 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/panic_retire.bin $(B)/linux/panic_boot.log | tee $(B)/linux/logs/panic_trace.out
+	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/panic_trace.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
+	@echo "panic trace: $(B)/linux/panic_retire.bin (rec_start=0, past_panic)"
+
+# SCDBG3 cache-watch run: build a SEPARATE savable model with -DSCDBG3 (cache32 prints
+# hit/off/want/have/tag/epoch/word and ST for physical 0x8285_0000). Save a ckpt at
+# SCDBG_SAVE (rec_start suppresses early trace), restore past the panic.
+SCDBG_SAVE ?= 211600000
+linux_panic_dbg: $(B)/linux/inputs/linux_mmu.dtb linux_mmu_build | $(B)/linux/logs
+	@mkdir -p $(B)/vlt_scdbg
+	@verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast -DSCDBG3 $(MT_DEFINE) -DLINUX -DLINUX_DEBUG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_scdbg -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
+	@$(MAKE) -C $(B)/vlt_scdbg -f Vrun_linux.mk OPT_FAST="-O2 -DLINUX_DEBUG -DSCDBG3" run_openboot -j 4
+	@rm -f $(B)/linux/panic_scdbg.bin $(B)/linux/ckpt_scdbg.bin
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 ./$(B)/vlt_scdbg/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(SCDBG_SAVE) - '$(SCDBG_SAVE)' save $(B)/linux/ckpt_scdbg.bin x $(B)/linux/panic_scdbg.bin $(B)/linux/panic_scdbg.log > $(B)/linux/logs/panic_scdbg_save.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 ./$(B)/vlt_scdbg/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb 3400000 - $(SCDBG_SAVE) restore $(B)/linux/ckpt_scdbg.bin x $(B)/linux/panic_scdbg.bin $(B)/linux/panic_scdbg.log > $(B)/linux/logs/panic_scdbg.out
+	@grep -c 'SCDBG' $(B)/linux/logs/panic_scdbg.out
+	@echo "scdbg panic trace: $(B)/linux/panic_scdbg.bin"

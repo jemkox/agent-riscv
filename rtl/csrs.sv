@@ -245,7 +245,7 @@ module csrs (
         if (trap_to_sup) begin
           // S handler: SPIE<-SIE, SIE<-0, SPP<-priv, MPP<-priv, priv<-S
           st_mstatus <= (after_mstatus & ~(MSTATUS_SPIE | MSTATUS_SIE | MSTATUS_SPP | MSTATUS_MPP)) |
-                        (after_priv[0] ? MSTATUS_SPP : 32'h0) |
+                        ((after_priv != 2'b11) ? MSTATUS_SPP : 32'h0) |
                         (((after_mstatus & MSTATUS_SIE) != 0) ? MSTATUS_SPIE : 32'h0) |
                         ({30'b0, after_priv} << 11);
           st_priv <= 2'b01;

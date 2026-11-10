@@ -20,6 +20,9 @@ module mmu (
   input  logic [1:0]  dpriv,    // D-side effective privilege (MPRV at M maps MPP's priv)
   input  logic        sum, mxr,
   input  logic        flush,
+  input  logic        cancel,   // pipeline trap/mret flush: kill in-progress walks, keep TLB entries
+  input  logic        stm_v,    // committed MEM store to PA stm_pa: snoop PTE writes (TLB coherence;
+  input  logic [31:0] stm_pa,   // the kernel updates PTEs on unmap/remap without sfence)
   input  logic [31:0] if_va,
   input  logic        if_on,
   output logic        if_hit, if_fault, if_stall,
@@ -39,6 +42,7 @@ module mmu (
   logic [19:0] tg_i [0:3], tg_d [0:3];
   logic [21:0] ppa_i [0:3], ppa_d [0:3];
   logic [6:0]  fg_i [0:3], fg_d [0:3];
+  logic [31:0] tta_i [0:3][0:1], tta_d [0:3][0:1];  // PTE word addrs consulted per entry (snoop)
   logic [1:0]  s_i = 0, s_d = 0;   // 0 idle 1 pending-read 2 pending-write 3 fault-hold
   logic        own_i = 0, own_d = 0, won_i = 0, won_d = 0;
   logic        lvl_i = 0, lvl_d = 0;
@@ -129,6 +133,7 @@ module mmu (
   logic fi_i, fi_d;
   logic [21:0] fpa_i, fpa_d;
   logic [6:0]  ffl_i, ffl_d;
+  logic keep_i, keep_d;   // a concurrent store to a consulted PTE poisons this fill
 
   always_comb begin
     ns_i = s_i; ns_d = s_d;
@@ -273,11 +278,24 @@ module mmu (
       else begin p_a = l1a_d; lvl_nd = 1; nwt_d = tag_d; nra_d = l1a_d; end
       p_ld = 1;
     end
+    // A store to either consulted PTE word (top frame word or leaf/huge PTE)
+    // makes any TLB entry built from them stale: don't poison with the old PTE.
+    keep_i = !(stm_v && (stm_pa == l1a_i || stm_pa == {fpa_i, 2'b00}));
+    keep_d = !(stm_v && (stm_pa == l1a_d || stm_pa == {fpa_d, 2'b00}));
   end
 
   always_ff @(posedge clk) begin
     if (reset || flush) begin
       tv_i <= 0; tv_d <= 0;
+      s_i <= 0; s_d <= 0; own_i <= 0; own_d <= 0; won_i <= 0; won_d <= 0;
+      lvl_i <= 0; lvl_d <= 0; wt_i <= 0; wt_d <= 0;
+      fcsr_i <= 0; fcsr_d <= 0; ra_i <= 0; ra_d <= 0;
+      cap_i <= 0; cap_d <= 0; wda_i <= 0; wda_d <= 0; wdv_i <= 0; wdv_d <= 0;
+      pv_i <= 0; pv_d <= 0;
+    end else if (cancel) begin
+      // A pipeline flush removes the instruction whose walk is in progress;
+      // without this the orphaned walk keeps driving mm_act and clobbers the
+      // next access's cache feed (its store/load write then silently drops).
       s_i <= 0; s_d <= 0; own_i <= 0; own_d <= 0; won_i <= 0; won_d <= 0;
     end else begin
       s_i <= ns_i; s_d <= ns_d;
@@ -301,13 +319,25 @@ module mmu (
                  fcsr_i, fcsr_d,
                  tv_i[tag_i[1:0]], tg_i[tag_i[1:0]], fg_i[tag_i[1:0]], fg_i[tag_i[1:0]][5]);
 `endif
-      if (fi_i) begin
+      if (fi_i && keep_i) begin
         tv_i[tag_i[1:0]] <= 1; tg_i[tag_i[1:0]] <= tag_i;
         ppa_i[tag_i[1:0]] <= fpa_i; fg_i[tag_i[1:0]] <= ffl_i;
+        tta_i[tag_i[1:0]][0] <= l1a_i; tta_i[tag_i[1:0]][1] <= {fpa_i, 2'b00};
       end
-      if (fi_d) begin
+      if (fi_d && keep_d) begin
         tv_d[tag_d[1:0]] <= 1; tg_d[tag_d[1:0]] <= tag_d;
         ppa_d[tag_d[1:0]] <= fpa_d; fg_d[tag_d[1:0]] <= ffl_d;
+        tta_d[tag_d[1:0]][0] <= l1a_d; tta_d[tag_d[1:0]][1] <= {fpa_d, 2'b00};
+      end
+      if (stm_v) begin
+        // PTE-write snoop: drop entries built from the written PTE word, and
+        // restart any walk that already read it (its latched PTE may be stale).
+        for (int k = 0; k < 4; k++) begin
+          if (tv_i[k] && (stm_pa == tta_i[k][0] || stm_pa == tta_i[k][1])) tv_i[k] <= 0;
+          if (tv_d[k] && (stm_pa == tta_d[k][0] || stm_pa == tta_d[k][1])) tv_d[k] <= 0;
+        end
+        if (s_i == 2'b01 && (stm_pa == ra_i || stm_pa == l1a_i)) s_i <= 2'b00;
+        if (s_d == 2'b01 && (stm_pa == ra_d || stm_pa == l1a_d)) s_d <= 2'b00;
       end
     end
   end

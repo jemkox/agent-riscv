@@ -1,0 +1,79 @@
+[    0.000000] Linux version 6.12.27 (jemko@jemko) (riscv32-buildroot-linux-uclibc-gcc.br_real (Buildroot 2025.02.19) 13.4.0, GNU ld (GNU Binutils) 2.43.1) #2 Wed Nov  4 00:12:10 CET 2026
+[    0.000000] Machine model: rv32cpu,linux-sim
+[    0.000000] earlycon: ns16550 at MMIO 0x10000000 (options '')
+[    0.000000] printk: legacy bootconsole [ns16550] enabled
+[    0.000000] OF: reserved mem: Reserved memory: No reserved-memory node in the DT
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000080000000-0x0000000083ffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080000000-0x0000000083ffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x0000000083ffffff]
+[    0.000000] Falling back to deprecated "riscv,isa"
+[    0.000000] riscv: base ISA extensions aim
+[    0.000000] riscv: ELF capabilities aim
+[    0.000000] Kernel command line: console=ttyS0 earlycon=ns16550,mmio,0x10000000 initramfs_async=0
+[    0.000000] Dentry cache hash table entries: 8192 (order: 3, 32768 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 4096 (order: 2, 16384 bytes, linear)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 16384
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] riscv-intc: 32 local interrupts mapped
+[    0.000000] clint: clint@2000000: timer running at 10000000 Hz
+[    0.000000] clocksource: clint_clocksource: mask: 0xffffffffffffffff max_cycles: 0x24e6a1710, max_idle_ns: 440795202120 ns
+[    0.000509] sched_clock: 64 bits at 10MHz, resolution 100ns, wraps every 4398046511100ns
+[    0.027317] Console: colour dummy device 80x25
+[    0.042203] Calibrating delay loop (skipped), value calculated using timer frequency.. 20.00 BogoMIPS (lpj=40000)
+[    0.054669] pid_max: default: 32768 minimum: 301
+[    0.078065] Mount-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    0.087438] Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    0.316726] Memory: 56940K/65536K available (4556K kernel code, 544K rwdata, 692K rodata, 663K init, 228K bss, 8328K reserved, 0K cma-reserved)
+[    0.370241] devtmpfs: initialized
+[    0.579485] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.592752] futex hash table entries: 256 (order: -1, 3072 bytes, linear)
+[    0.694255] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.804710] cpu0: Ratio of byte access time to unaligned word access is 1.16, unaligned accesses are fast
+[    1.110212] pps_core: LinuxPPS API ver. 1 registered
+[    1.115960] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    1.126672] PTP clock support registered
+[    1.303044] clocksource: Switched to clocksource clint_clocksource
+[    2.724184] NET: Registered PF_INET protocol family
+[    2.752882] IP idents hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    2.844742] tcp_listen_portaddr_hash hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    2.856412] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    2.867897] TCP established hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    2.879129] TCP bind hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    2.888607] TCP: Hash tables configured (established 1024 bind 1024)
+[    2.905251] UDP hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    2.916009] UDP-Lite hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    2.939626] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    9.593048] Unpacking initramfs...
+[   13.287261] Freeing initrd memory: 1024K
+[   13.380094] workingset: timestamp_bits=30 max_order=14 bucket_order=0
+[   13.405145] io scheduler mq-deadline registered
+[   13.411936] io scheduler kyber registered
+[   14.258968] riscv-plic: plic@c000000: mapped 95 interrupts with 1 handlers for 2 contexts.
+[   26.937075] Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+[   27.344422] printk: legacy console [ttyS0] disabled
+[   27.411745] 10000000.serial: ttyS0 at MMIO 0x10000000 (irq = 3, base_baud = 14400) is a 16550A
+[   27.431274] printk: legacy console [ttyS0] enabled
+[   27.431274] printk: legacy console [ttyS0] enabled
+[   27.446659] printk: legacy bootconsole [ns16550] disabled
+[   27.446659] printk: legacy bootconsole [ns16550] disabled
+[   27.719280] NET: Registered PF_INET6 protocol family
+[   27.871073] Segment Routing with IPv6
+[   27.888747] In-situ OAM (IOAM) with IPv6
+[   27.908240] sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+[   28.024883] NET: Registered PF_PACKET protocol family
+[   31.073472] clk: Disabling unused clocks
+[   31.733072] Freeing unused kernel image (initmem) memory: 660K
+[   31.739682] This architecture does not have kernel memory protection.
+[   31.747086] Run /init as init process
+Saving 256 bits of non-creditable seed for next boot
+Starting network: Waiting for interface eth0 to appear............... timeout!
+run-parts: /etc/network/if-pre-up.d/wait_iface: exit status 1
+FAIL
+
+Welcome to Buildroot
+buildroot login: 

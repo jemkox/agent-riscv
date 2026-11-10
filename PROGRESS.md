@@ -1972,3 +1972,25 @@ ALL PASS
 ```
 - `hdl make all_tests` at this commit state ended `ALL TESTS DONE`; the saved parallel output also contains `ALL UI PASS`, `ALL UM PASS`, `ALL MI PASS`, and Doom `TEST PASSED (Doom: 31 frames, halt=0)`.
 
+## L7 debug: first /init crash found via self-consistency checkers (2026-11-10)
+- Per directive, the Spike-vs-RTL divergence at ~17.97M instrs is clock/time RNG entropy (both sides run
+  `memcpy` of clock-seeded random bytes), NOT a CPU bug; spike lockstep is only meaningful up to the first
+  entropy read. The /init crash was found instead with the trace checkers in `~/agent-workspace/uploads/trace-checkers/`
+  (`memcheck.py`, `regcheck.py`, `ra_hunt.py`) run on a retire trace captured THROUGH the panic
+  (make target `linux_panic_trace` with `PAST_PANIC=1`, trace `build/linux/panic_retire.bin`, saved ckpt at 211M).
+- memcheck first load mismatch: rec 445665, boot cyc 211665406, pc 0xc0c9ade4 = `handle_exception+0x14`
+  `lw x2, 8(x4)` (insn 0x00822103, x4=0xc2450000, VA 0xc2450008 -> PA 0x82850008, huge-page leaf).
+  Got 0xc244dd10; trace's own previous store for that PA was 2 cycles earlier at pc 0xc0c9addc
+  (`handle_exception+0xc` `sw x2, 8(x4)` 0x00222423, sd=0xc244de00). Same PA, different value -> cache/store bug,
+  not translation. regcheck: clean. ra_hunt: no bad `ret` feeds the handler (entered via MTVEC).
+- cache32 SCDBG3 (gated to page ea[31:12]==0x82850, `linux_panic_dbg` target, ckpt `ckpt_scdbg.bin` @211600000):
+  at the load c=211665405 the line hits with correct tag (want=have=0x00020a14) but the line word (off 8) is the
+  STALE backing value 0xc244dd10; NO store with ea in page 0x82850 ever entered the cache until much later
+  (212.38M+, offset 4 only). The store to 0x82850008 retired but never reached the cache data path.
+- Hypothesis: store to a huge-page leaf whose PTE D-bit is still 0 -> mm_dmiss -> MMU D-bit-set walk; the data
+  store is dropped/deferred through the `mm_act ? (mm_pwe?mm_wa:mm_paddr) : ...` feed in top_pipe (lines 231-234)
+  and never re-issued at the resolved PA. Load 2 cycles later TLB-hits and reads the stale line.
+- Make targets added: `linux_panic_trace` (PAST_PANIC retire trace), `linux_panic_dbg` (SCDBG3 savable model
+  build in $(B)/vlt_scdbg, save @SCDBG_SAVE, restore past panic -> panic_scdbg.bin/logs).
+
+

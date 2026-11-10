@@ -117,6 +117,9 @@ int main(int argc, char **argv) {
     const uint32_t stuck_limit = getenv("STUCK_LIMIT") ? (uint32_t)strtoul(getenv("STUCK_LIMIT"), 0, 10) : 25000u;
     const uint32_t trace_minpc = getenv("TRACE_MINPC") ? (uint32_t)strtoul(getenv("TRACE_MINPC"), 0, 16) : 0u;
     const uint32_t trace_max = getenv("TRACE_MAX") ? (uint32_t)strtoul(getenv("TRACE_MAX"), 0, 10) : 20000000u;
+    // PAST_PANIC: keep running (do not break on 'Kernel panic') so a retire trace
+    // can be captured THROUGH the /init panic (for self-consistency checkers).
+    const bool past_panic = getenv("PAST_PANIC") != nullptr;
     FILE *rtf = fopen(retire_path.c_str(),
                       ckpt_restore ? "ab" : "wb");
     uint32_t rec_n = 0;
@@ -143,6 +146,10 @@ int main(int argc, char **argv) {
         for (uint32_t i = 0; i < cnt; i++) { TEntry t; is >> t.pc >> t.insn >> t.rd >> t.wv >> t.ea; trace_first.push_back(t); }
         is >> log;
         is >> contextp.get() >> *model;
+        // Review fix: rec_n is the SAVE-run record counter (capped at the save run's
+        // TRACE_MAX). Restoring it would block the writer (rec_n < trace_max) for a
+        // restore whose new run writes a FRESH file, so the trace restarts at 0.
+        rec_n = 0;
         printf("#CKPT_RESTORE cyc=%llu insns=%u loglen=%zu\n",
                (unsigned long long)cyc, rec_n, log.size());
     } else {
@@ -276,7 +283,7 @@ int main(int argc, char **argv) {
             for (const auto &e : trace)
                 printf("#PANI %08x %08x r%u<-%08x ea=%08x\n", e.pc, e.insn, e.rd, e.wv, e.ea);
         }
-        if ((login && prompt_stop) || panicked || model->halt) break;
+        if ((login && prompt_stop) || (panicked && !past_panic) || model->halt) break;
         cyc++;
     }
 

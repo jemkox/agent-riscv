@@ -312,6 +312,12 @@ module cache32 (
 `ifdef SCDBG3
   logic [63:0] dbg_cyc3 = 0;
   always_ff @(posedge clk) if (!reset) dbg_cyc3 <= dbg_cyc3 + 64'd1;
+  always_ff @(posedge clk) begin
+    if (!reset) begin
+      if (dbg_cyc3 >= 64'd211665398 && dbg_cyc3 < 64'd211665412)
+        $display("SCDBG9 IN c=%0d v=%b st=%b ld=%b ea=%08x sd=%08x aamo=%b pf=%08x", dbg_cyc3+64'd0, idex_valid, idex_st, idex_ld, ea, sd_raw, amo_v, pc_if);
+    end
+  end
 `endif
   always_ff @(posedge clk) begin
     if (lwe) begin
@@ -391,6 +397,10 @@ module cache32 (
 
       if (dreq) begin
         if (dc_ready_now) begin
+`ifdef SCDBG3
+          if (dbg_cyc3 >= 64'd211665400 && dbg_cyc3 < 64'd211665410)
+            $display("SCDBG8 MEMOP c=%0d vld=%b st=%b ld=%b ea=%08x ssz=%b sd=%08x hit=%0d off=%0d tag=%08x have=%08x", dbg_cyc3, idex_valid, idex_st, idex_ld, ea, ssz, sd_raw, dc_hit, d_off, d_tag, dc_tag[d_idx]);
+`endif
           if (!(uart_store || uart_load || clint_store
 `ifdef DOOM_BIG
                || key_store
@@ -400,9 +410,9 @@ module cache32 (
 `endif
               )) begin
 `ifdef SCDBG3
-            if (idex_ld && ((ea & 32'hFFFFFFF0) == 32'h82850000))
+            if (idex_ld && (ea[31:12] == 20'h82850))
               $display("SCDBG3 LD c=%0d ea=%08x hit=%0d off=%0d want=%08x have=%08x cep=%08x epoch=%08x word=%08x", dbg_cyc3, ea, dc_hit, d_off, d_tag, dc_tag[d_idx], dc_ep[d_idx], epoch, rb_dc(ea));
-            if ((idex_st || idex_ld) && ((ea & 32'hFFFFFFF0) == 32'h82850000))
+            if ((idex_st || idex_ld) && (ea[31:12] == 20'h82850))
               $display("SCDBG6 ACC c=%0d ea=%08x st=%b ld=%b vld=%b dreq=%b ready=%b hit=%b rok=%b lok=%b ssz=%b sd=%08x", dbg_cyc3, ea, idex_st, idex_ld, idex_valid, dreq, dc_ready_now, dc_hit, ram_ok, low_ok, ssz, sd_raw);
 `endif
             if (!dc_hit) begin
@@ -420,7 +430,7 @@ module cache32 (
             end
             if (idex_st && (ram_ok || low_ok)) begin
 `ifdef SCDBG3
-              if ((ea & 32'hFFFFFFF0) == 32'h82850000)
+              if (ea[31:12] == 20'h82850)
                 $display("SCDBG3 ST c=%0d ea=%08x sd=%08x hit=%0d off=%0d", dbg_cyc3, ea, sd_raw, dc_hit, d_off);
 `endif
               w0  = (ea >> 2) & (BACK_WORDS - 1);

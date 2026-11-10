@@ -250,7 +250,8 @@ module top_pipe (
 `ifndef FPGA
   mmu MMU(.clk(clk), .reset(reset), .mode(mm_mode), .dm(mm_dmode), .sppn(mm_sppn),
           .priv(mm_priv), .dpriv(mm_dpriv), .sum(mm_sum_b), .mxr(mm_mxr_b),
-           .flush(flush_now),
+           .flush(flush_now), .cancel(trap_flush || timer_flush || mret_flush || sret_flush),
+           .stm_v(exmem_valid && exmem_st), .stm_pa(exmem_ea),
           .if_va(pc_if), .if_on(1'b1),
           .if_hit(mm_hit_i), .if_fault(mm_fl_i), .if_stall(mm_st_i), .if_pa(mm_pa_i),
            .df_va(idex_ea), .df_on(idex_valid && !stall && !mem_kill_now && (ce_ld || ce_st || ce_amo)),
@@ -499,12 +500,52 @@ module top_pipe (
                ldx_raw, idex_valid, idex_insn, stall, m_stall);
   end
 `endif
+`ifdef SCDBG3
+  logic [63:0] tdbg3 = 0;
+  always_ff @(posedge clk) if (!reset) tdbg3 <= tdbg3 + 1;
+  always_comb begin
+    if (tdbg3 >= 64'd211665395 && tdbg3 < 64'd211665415)
+      $display("SCDBGT t=%0d irqp=%b tim_rdy=%b stall=%b mst=%b mkn=%b mmiss=%b act=%b pld=%b pwe=%b paddr=%08x wa=%08x hitd=%b idex=%08x idpc=%08x id_st=%b id_ld=%b exv=%b ex_st=%b expc=%08x id_ea=%08x sd=%08x",
+               tdbg3, irq_pend, timer_ready, stall, m_stall, mem_kill_now, mm_dmiss,
+               mm_act, mm_pld, mm_pwe, mm_paddr, mm_wa, mm_hit_d,
+               idex_insn, idex_pc, idex_st, idex_ld, exmem_valid, exmem_st,
+               exmem_pc, idex_ea, idex_sd_raw);
+  end
+`endif
 `ifdef IFHDBG
   always_comb
     if (pc_if >= 32'h8000_0400 && pc_if < 32'h8000_0420)
       $display("IFHIT pc=%08x mode=%b priv=%b hit=%b walk=%b fault=%b ifidv=%b ifidpc=%08x idexp=%08x st=%b mst=%b",
                pc_if, mm_mode, mm_priv, mm_hit_i, mm_st_i, mm_fl_i, ifid_valid, ifid_pc, idex_pc,
                stall, m_stall);
+  always_comb
+    if (pc_if >= 32'h58e8_0 && pc_if < 32'h58f0_0)
+      $display("IFHU0 pc=%08x fetchpa=%08x mode=%b hit=%b walk=%b fault=%b pa_i=%08x",
+               pc_if, fetch_pa, mm_mode, mm_hit_i, mm_st_i, mm_fl_i, mm_pa_i);
+  always_comb
+    if (pc_if > 32'h10000 && pc_if < 32'h4000_0000)
+      $display("IFHUSR pc=%08x fetchpa=%08x mode=%b hit=%b walk=%b fault=%b pa_i=%08x ex=%08x",
+               pc_if, fetch_pa, mm_mode, mm_hit_i, mm_st_i, mm_fl_i, mm_pa_i, ex_pc);
+  //IFHPR disabled (spam):
+  //always_comb
+  //  if (mm_priv == 2'd1 && mm_mode == 1'b1)
+  //    $display("IFHPR iv=%08x ex=%08x id=%08x hit=%b fetch=%08x", pc_if, ex_pc, idex_pc, mm_hit_i, fetch_pa);
+  always_comb
+    if ((ex_pc >= 32'h58e8_0 && ex_pc < 32'h58f0_0) || (idex_pc >= 32'h58e8_0 && idex_pc < 32'h58f0_0) || (ifid_pc >= 32'h58e8_0 && ifid_pc < 32'h58f0_0))
+      $display("IFHW iv=%08x id=%08x ex=%08x ivi=%08x di=%08x exi=%08x hit=%b fetch=%08x pa=%08x",
+               ifid_pc, idex_pc, ex_pc, ifid_insn, idex_insn, ex_insn, mm_hit_i, fetch_pa, mm_pa_i);
+  always_comb
+    if (idex_pc < 32'h8000_0000 && idex_pc > 32'h10000)
+      $display("IFHLOW id=%08x di=%08x ex=%08x exi=%08x iv=%08x ivi=%08x priv=%0b fetch=%08x hit=%b walk=%b fault=%b",
+               idex_pc, idex_insn, ex_pc, ex_insn, ifid_pc, ifid_insn, mm_priv, fetch_pa, mm_hit_i, mm_st_i, mm_fl_i);
+  always_comb
+    if (mwb_pc < 32'h8000_0000 && mwb_pc > 32'h10000)
+      $display("IFHMW mw=%08x id=%08x iv=%08x pcif=%08x fetch=%08x hit=%b mode=%b priv=%b",
+               mwb_pc, idex_pc, ifid_pc, pc_if, fetch_pa, mm_hit_i, mm_mode, mm_priv);
+  always_comb
+    if (pc_if < 32'h4000_0000)
+      $display("IFHANY pcif=%08x id=%08x mw=%08x fetch=%08x mode=%b",
+               pc_if, idex_pc, mwb_pc, fetch_pa, mm_mode);
 `endif
   always_ff @(posedge clk) begin
 `ifdef LINUX_DEBUG
