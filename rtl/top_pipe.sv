@@ -55,7 +55,7 @@ module top_pipe (
   logic [4:0]  exmem_rd = 0, mwb_rd = 0, ce_rs1, ce_rs2, ce_rd, ceif_rs1, ceif_rs2;
   logic [31:0] a_ex, b_ex, aluB_ex, br_tgt_ex, iimm, simm, bimm, uimm, jimm, fetch_insn, rf_r1, rf_r2;
   logic [31:0] idex_ea, idex_sd_raw, idex_sd_log, idex_wbval, ldx_raw, ldx_ex, alu_res, md_result, exmem_r1 = 0;
-  logic [31:0] cs_old, idex_cs_old, cs_trap_pc;
+  logic [31:0] cs_old, idex_cs_old, cs_trap_pc, exmem_result_fwd;
   logic [31:0] clint_ld;
   logic clint_commit, irq_pend;
   logic mem_kill_now;
@@ -293,6 +293,14 @@ module top_pipe (
                 .is_amo(ceif_amo), .is_lr(), .is_sc(), .amo5(), .csr_num(), .i(ifid_insn));
   /* verilator lint_on PINCONNECTEMPTY */
   ldst  LDST(.is_ld(ce_ld), .is_st(ce_st), .is_amo(ce_amo), .is_ill(ce_ill), .ld_ok(ld_ok), .st_ok(st_ok));
+  // Live CSR result forwarding: the value a CSR producer writes to its rd (cs_old,
+  // read while it sits in EX/MEM at line 533) must be the SAME value a distance-1
+  // consumer forwards to. cs_time_mt64 (time/timeh) changes every cycle, so the
+  // latched idex_cs_old would hand the consumer a stale value (bug seen in Linux:
+  // csrr time; sw stored 0). Other CSRs are state-stable but this is equal for
+  // them too (st_*_at_exmem_cycle == after_*_at_idex_cycle when no stall, and
+  // cs_old is the architecturally correct read at the producer's retire boundary).
+  assign exmem_result_fwd = (exmem_csr_en && exmem_valid) ? cs_old : exmem_result;
   fwd   FWDD(.idex_valid(idex_valid), .ce_br(ce_br), .ce_jalr(ce_jalr), .ce_opi(ce_opi),
              .ce_op(ce_op), .ce_m(ce_m), .ce_csr(ce_csr), .ld_ok(ld_ok), .st_ok(st_ok),
 `ifdef FPGA
@@ -303,7 +311,7 @@ module top_pipe (
              .idex_r1(idex_r1), .idex_r2(idex_r2),
              .exmem_valid(exmem_valid), .exmem_rd(exmem_rd), .exmem_wben(exmem_wben),
               .exmem_ld(exmem_ld), .exmem_st(exmem_st), .exmem_stop(exmem_stop),
-              .exmem_result(exmem_result), .mwb_valid(mwb_valid), .mwb_rd(mwb_rd),
+              .exmem_result(exmem_result_fwd), .mwb_valid(mwb_valid), .mwb_rd(mwb_rd),
              .mwb_wben(mwb_wben), .mwb_wv(mwb_wv),
              .ifid_valid(ifid_valid), .ifid_r1(rf_r1_use), .ifid_r2(rf_r2_use),
              .ceif_br(ceif_br), .ceif_jalr(ceif_jalr), .ceif_ld(ceif_ld), .ceif_st(ceif_st),
@@ -476,6 +484,7 @@ module top_pipe (
   assign exmem_is_sc  = exmem_is_amo && exmem_insn[31:27] == 5'b00011 && exmem_f3 == 3'b010;
   assign amo_log_wr   = exmem_is_amo && !exmem_is_lr && (!exmem_is_sc || exmem_sc_ok);
   ldext LDX(.f3(exmem_is_amo ? 3'b010 : exmem_f3), .raw(exmem_ld_raw), .ext(ldx_ex));
+
 `endif
 `ifdef SCDBG
   always_comb if (idex_valid && ce_amo)

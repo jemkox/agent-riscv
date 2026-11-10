@@ -125,6 +125,8 @@ module csrs (
   (* keep *) logic [31:0] st_scntr = 0;
   logic [31:0] st_mcounteren = 0;
   logic [31:0] st_menvcfg = 0;   // menvcfg low half (bit0 ST kept, like spike)
+  localparam MARCHID_VAL = 32'h0000_0005;  // spike 1.1.1-dev marchid(0xf12) read constant
+  // pinned by boot: spike_deep_commits.log lines 31161360/31219514 both read x15=5
   logic [31:0] st_mcm0 = 0, st_mcm1 = 0;  // spike ext CSRs 0x7a2/0x7a3
   logic [31:0] st_tsel = 0;               // 0x7a0 tselect: spike accepts only <4
   (* keep *) logic [31:0] st_satp = 0;   // satp: mode|ASID|PPN (L6 MMU)

@@ -34,6 +34,7 @@
             | (cs_rsel == CSR_MCOUNTHI ? st_mcountinhibit : 32'h0)
             | (cs_rsel == CSR_MCOUNTEREN ? st_mcounteren : 32'h0)
             | (cs_rsel == CSR_MENVCFG ? st_menvcfg : 32'h0)
+            | (cs_rsel == 12'hf12 ? MARCHID_VAL : 32'h0)  // spike marchid=5 (boot-pinned)
             | (cs_rsel == 12'h7a0 ? st_tsel : 32'h0)    // spike ext-CSR probe group
             | (cs_rsel == CSR_MCMASK0 ? st_mcm0 : 32'h0)
             | (cs_rsel == CSR_MCMASK1 ? st_mcm1 : 32'h0)
@@ -172,5 +173,14 @@
             | (idex_rsel == CSR_MINSTRT || idex_rsel == CSR_INSTRET ? after_minstret : 32'h0)
             | (idex_rsel == CSR_MINSTRT_H || idex_rsel == CSR_INSTRET_H ? after_minstret_hi : 32'h0)
             | (idex_rsel == CSR_MCOUNTHI ? after_mcountinhibit : 32'h0)
+            | (idex_rsel == CSR_CYCLE ? after_mcycle : 32'h0)
+            | (idex_rsel == CSR_MCOUNTEREN ? st_mcounteren : 32'h0)
+            | (idex_rsel == CSR_MENVCFG ? st_menvcfg : 32'h0)
+            | (idex_rsel == 12'hf12 ? MARCHID_VAL : 32'h0)  // spike marchid=5 (boot-pinned)
+            | (idex_rsel == 12'h7a0 ? st_tsel : 32'h0)
+            | (idex_rsel == 12'h7a1 ? 32'hF0000000 : 32'h0)
+            | (idex_rsel == 12'h7a4 ? 32'h0100807C : 32'h0)
+            | (idex_rsel == CSR_TIME ? cs_time_mt64[31:0] : 32'h0)
+            | (idex_rsel == CSR_TIMEH ? cs_time_mt64[63:32] : 32'h0)
             | (idex_rsel == CSR_XHALT ? {31'b0, after_halt} : 32'h0);
     end
