@@ -1,8 +1,10 @@
 // csrs.sv - machine + supervisor mode CSR state: counters, trap state, test halt CSR.
 // RV32 privilege model (L5): priv in {M=3,S=1,U=0}. mstatus.MPP (bits 12:11) is the
 // saved privilege for MRET (masks match riscv-tests env/encoding.h: MPP=0x1800, SPP=0x100,
-// SPIE=0x20, SIE=0x2); mstatus.SPP (bit 8) the supervisor's saved privilege for
-// SRET.  Trap routing follows medeleg/mideleg: a U/S-mode trap whose cause bit is set
+// SPIE=0x20, SIE=0x2); mstatus.SPP (bit 8) follows the RV32 priv spec: SPP=1 iff a
+// trap-to-S came from supervisor (cleared when it came from user); SRET with SPP set
+// returns to S, with SPP clear returns to U. Spike and the Linux kernel use this polarity.
+// Trap routing follows medeleg/mideleg: a U/S-mode trap whose cause bit is set
 // in medeleg (or mideleg for the machine MSI/MTI here) goes to the S handler
 // (stvec/sepc/scause/stval), otherwise to the M handler (mtvec/mepc/mcause/mtval).
 // With medeleg=mideleg=0 and priv=M this is bit-identical to the pre-L5 M/U model.
@@ -170,7 +172,7 @@ module csrs (
   logic [1:0] sret_priv;
   assign mret_priv = ((after_mstatus & MSTATUS_MPP) == 32'h0000_0800) ? 2'b01 :
                      ((after_mstatus & MSTATUS_MPP) == 32'h0000_0000) ? 2'b00 : 2'b11;
-  assign sret_priv = ((after_mstatus & MSTATUS_SPP) != 0) ? 2'b01 : 2'b00;
+  assign sret_priv = ((after_mstatus & MSTATUS_SPP) != 0) ? 2'b01 : 2'b00;  // per priv spec: SPP set -> S, clear -> U
 `ifdef FPGA
   // FPGA netlist guard: mathematically impossible for 32-bit mcycle/minstret,
   // but it keeps trap-state DFF D-inputs dynamic for yosys netlist checks.
@@ -243,9 +245,9 @@ module csrs (
         $display("DBG TRAPST pc=%08x cause=%08x tval=%08x", trap_pc, trap_cause, trap_tval);
 `endif
         if (trap_to_sup) begin
-          // S handler: SPIE<-SIE, SIE<-0, SPP<-priv, MPP<-priv, priv<-S
+          // S handler: SPIE<-SIE, SIE<-0, SPP<-(trapped from S), MPP<-priv, priv<-S
           st_mstatus <= (after_mstatus & ~(MSTATUS_SPIE | MSTATUS_SIE | MSTATUS_SPP | MSTATUS_MPP)) |
-                        ((after_priv != 2'b11) ? MSTATUS_SPP : 32'h0) |
+                        ((after_priv == 2'b01) ? MSTATUS_SPP : 32'h0) |
                         (((after_mstatus & MSTATUS_SIE) != 0) ? MSTATUS_SPIE : 32'h0) |
                         ({30'b0, after_priv} << 11);
           st_priv <= 2'b01;

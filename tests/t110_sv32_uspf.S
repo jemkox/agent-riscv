@@ -35,12 +35,12 @@ _start:
   sw t1, (0x30*4)(t0)
   li t1, (0x40<<10)|0x57      # VPN0x40 present R|W|A|V (D=0)
   sw t1, (0x40*4)(t0)
-  li t1, (0x50<<10)|0x59      # VPN0x50 present X|A|V (R=0)
-  sw t1, (0x50*4)(t0)
+  li t1, (0x25<<10)|0x59      # VPN0x25 present X|A|V (R=0): load fault (PA 0x25000 in RAM window)
+  sw t1, (0x25*4)(t0)
   li t1, (6<<10)|0xD3      # VPN0x60 present R|A|D|V (W=0): AMO store fault
   sw t1, (6*4)(t0)
   # seed physical RAM values (satp off, M physical)
-  li t0, 0x20000
+  li t0, ((MMU_CODE_VPN+0x20)<<12)   # case (a) page must hold 0x7777 (mmu: 0x20000)
   li t1, 0x7777
   sw t1, 0(t0)
   li t0, 0x30000
@@ -62,7 +62,7 @@ _start:
   csrs mstatus, t0
   li t0, 0x80000008
   csrw satp, t0
-  # M -> S via mret (MPP=S), then S -> U via sret (SPP=U=00)
+  # M -> S via mret (MPP=S), then S -> U via sret with SPP clear (per priv spec: clear => U)
   la t2, sstub
   csrw mepc, t2
   li t0, 0x1800
@@ -99,13 +99,23 @@ mkleaf:
   sw t1, 0(t0)
  hd:
   sfence.vma
-  li t4, 0x100             # clear SPP: sret returns to U (ISS models 1-bit SPP)
-  csrc sstatus, t4
   sret
 sstub:
+  # S-origin DPF: S-store to an unmapped page at S priv; the delegated handler maps
+  # it and sret (priv spec: trap-from-S SETS SPP) must return to S.  The
+  # following satp write is legal in S but illegal in U (cause 2 -> j fail), so a
+  # buggy sret-to-U cannot pass this test.
+  li t3, 0x10000
+  li t2, 0x0020
+  sw t2, 0(t3)             # S-priv store PF 15 -> handler -> retry at S (t2 survives handler)
+  lw t5, 0(t3)
+  li t4, 0x0020
+  bne t5, t4, fail
+  li t6, 0x80000008
+  csrw satp, t6            # legal in S; would trap if sret had returned to U
   la t2, ustart
   csrw sepc, t2
-  li t0, 0x300
+  li t0, 0x100             # per priv spec: CLEAR => sret returns to U
   csrc sstatus, t0
   sret
   .p2align 12             # U code lands on its own U-flagged page (VPN +1)
@@ -138,8 +148,8 @@ ustart:
   li t5, 0x80
   and t4, t4, t5
   beq t4, x0, fail
-  # (d) load from X-only page: PF13; handler grants R|W|A|D; retry loads 0
-  li t3, 0x50000
+  # (d) load from X-only page (VPN 0x25, PA in RAM window): PF13; handler grants R|W|A|D; retry loads 0
+  li t3, 0x25000
   lw t4, 0(t3)            # PF13
   bne t4, x0, fail
   # (e) U AMO to W=0 page: PF15; handler grants W; retry amoadd 0x0010+0x3333
@@ -148,8 +158,8 @@ ustart:
   lw t4, 0(t3)
   li t5, 0x3343
   bne t4, t5, fail
-  # fault count via handler (s1): load@a, store@b, load@d, amoor@e = 4
-  li t4, 4
+  # fault count via handler (s1): load@a, store@b, load@d, amo@e, S-store@f = 5
+  li t4, 5
   bne s1, t4, fail
   li gp, 1
   j halt

@@ -1994,3 +1994,9 @@ ALL PASS
   build in $(B)/vlt_scdbg, save @SCDBG_SAVE, restore past panic -> panic_scdbg.bin/logs).
 
 
+- SPP polarity (review c3e8948 #1): the priv-spec polarity is used everywhere now (SPP=1 iff
+  trap-to-S came from S; SRET SPP set -> S, clear -> U) - matches Spike 1.1.1-dev, upstream
+  rv32mi/illegal and the Linux kernel trap entry; the old "OPPOSITE polarity" comment was
+  wrong and wording is fixed. ISS+RTL+Spike agree (t113_sv32_sretm pins SRET semantics, t112
+  pins fresh store data across an S-origin DPF retry; t110 seed addr macro-parameterized so
+  the Spike build is green). Gates: mi/mmu/mm5/spike_tests/all_tests ALL PASS.

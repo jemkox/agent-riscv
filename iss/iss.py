@@ -30,8 +30,9 @@ def main(argv):
     lines = []
     mask = 0xFFFFFFFF
     # RV32 privilege modes (L5): M=3, S=1, U=0.  mstatus.MPP holds the saved
-    # privilege (2 bits at [12:11], mask 0x1800); mstatus.SPP (bit 8) the
-    # supervisor's saved privilege for SRET.
+    # privilege (2 bits at [12:11], mask 0x1800); mstatus.SPP (bit 8) per priv spec:
+    # SPP=1 iff the trap-to-S came from supervisor (0 for user); SRET sets priv to U
+    # when SPP is 0, to S when SPP is 1.  RTL csrs.sv matches this exactly.
     # privilege for SRET.  Trap routing follows medeleg/mideleg so that U/S-mode
     # traps go to the S handler (stvec/sepc/scause/stval/spp) when delegated, and
     # machine-mode traps go to the M handler.  With medeleg=mideleg=0 and the
@@ -157,7 +158,7 @@ def main(argv):
     def sret_mstatus():   # to S handler: SIE<-SPIE, SPP<-U, MPP<-returned priv, priv<-saved SPP
         nonlocal priv
         m = cs_get(0x300)
-        sp = 1 if (m & SPP_BIT) else 0
+        sp = 1 if (m & SPP_BIT) else 0   # per priv spec: SPP set => return to S; clear => U
         cs[0x300] = ((m & ~(SPIE_BIT | SIE_BIT | SPP_BIT | MPP_MASK)) |
                      (SIE_BIT if (m & SPIE_BIT) else 0) | (sp << 11)) & mask
         priv = sp
@@ -165,7 +166,7 @@ def main(argv):
         nonlocal priv
         m = cs_get(0x300)
         cs[0x300] = ((m & ~(SPIE_BIT | SIE_BIT | SPP_BIT | MPP_MASK)) |
-                     (SPP_BIT if priv != 3 else 0) |
+                     (SPP_BIT if priv == 1 else 0) |   # per priv spec: SPP=1 iff trapped from S
                      ((priv & 3) << 11) |
                      (SPIE_BIT if (m & SIE_BIT) else 0)) & mask
         priv = 1

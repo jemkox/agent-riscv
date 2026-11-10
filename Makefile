@@ -317,7 +317,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t110_sv32_uspf t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
+MMU_TESTS := t110_sv32_uspf t112_sv32_stwalk t113_sv32_sretm t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -1017,13 +1017,16 @@ linux_mmu_spike: linux_mmu_build spike_pin_check | $(B)/linux/logs
 # plain store (our choice, pinned by self-written unpaged t19) is a legal spurious failure
 # that both goldens are free to pass - not pinned in t42 any more. Spike mrets with MPP:=00
 # instead of restoring MPP=M (c768_mstatus 0xe0080); tests re-arm MPP explicitly where it
-# matters (t43/t42 do).
-SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr,$(MMU_TESTS)) t48_vendor_csr
+# matters (t43/t42 do).  t112_sv32_stwalk hardcodes a flat identity-VPN code page
+# (VPN 0), so it cannot run in the link_spike.ld layout (code at VPN 0x20); it is
+# pinned by ISS+RTL in the mmu suite instead, like the other filter-outs below.
+SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr t112_sv32_stwalk,$(MMU_TESTS)) t48_vendor_csr
 $(B)/spike:
 	@mkdir -p $@
 $(B)/spike/%.elf: tests/%.S tests/link_spike.ld | $(B)/spike
 	$(CC) $(CCFLAGS) -DMMU_CODE_VPN=0x20 -DCODE_FLAGS=0x4B -nostdlib -Wl,-Ttests/link_spike.ld -Wl,-m,elf32lriscv -o $@ $<
 $(B)/spike/t42_sv32_amo.elf: CCFLAGS := $(UA_CCFLAGS)
+$(B)/spike/t110_sv32_uspf.elf: CCFLAGS := $(UA_CCFLAGS)
 spike_tests: $(foreach t,$(SPIKE_MMU_TESTS),$(B)/spike/$(t).elf) spike_pin_check | $(B)
 	@mkdir -p $(B)/spike/logs
 	@bad=0; \

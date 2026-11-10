@@ -99,7 +99,15 @@ module run_hex ();
                  ex_st, ex_sa, ex_sd, ex_sbe);
         n = n + 1;
       end
-      if (halt) done = 1;
+      if (halt) begin
+`ifdef SCDBG2
+        $display("@RAMPA w_10000=%08x w_20000=%08x w_30000=%08x w_9140=%08x w_6000=%08x w_40000=%08x w_50000m=%08x w_9000=%08x",
+                 T.MM.rw[32'h10000/4], T.MM.rw[32'h20000/4], T.MM.rw[32'h30000/4],
+                 T.MM.rw[32'h9140/4], T.MM.rw[32'h6000/4], T.MM.rw[32'h3FFF0/4],
+                 T.MM.rw[32'h10000/4], T.MM.rw[32'h9000/4]);
+`endif
+        done = 1;
+      end
       else begin
         clk = 1; #1;
         clk = 0; #1;
