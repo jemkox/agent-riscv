@@ -204,6 +204,16 @@ int main(int argc, char **argv) {
             os << *model;
             if (!os.isOpen()) { printf("#CKPT_FAIL save stream closed\n"); return 1; }
             os.close();
+            {
+                FILE *lf = fopen(bootlog_path.c_str(), "w");
+                if (lf) {
+                    fwrite(log.data(), 1, log.size(), lf);
+                    fprintf(lf, "\n[cycles %llu banner %d runinit %d login %d halt %d]\n",
+                            (unsigned long long)cyc, banner ? 1 : 0,
+                            runinit ? 1 : 0, login ? 1 : 0, model->halt ? 1 : 0);
+                    fclose(lf);
+                }
+            }
             model->final();
             return 0;
         }
@@ -223,9 +233,11 @@ int main(int argc, char **argv) {
                 if (trace_first.size() < 1200 && half == 1) trace_first.push_back(t);
                 if (rtf && rec_n < trace_max && half == 1 && cyc >= rec_start &&
                     t.pc >= trace_minpc) {
+                    uint32_t top_op = t.insn & 0x7fu;
+                    uint32_t is_st = (top_op == 0x23u) ? 1u : 0u;
+                    uint32_t sd_val = (uint32_t)model->ex_sd;
                     uint32_t rec[8] = {(uint32_t)cyc, t.pc, t.insn, t.rd, t.wv,
-                                       (uint32_t)(model->ex_st ? 1 : 0), t.ea,
-                                       (uint32_t)model->ex_sd};
+                                       is_st, t.ea, sd_val};
                     fwrite(rec, sizeof(rec), 1, rtf);
                     ++rec_n;
                 }

@@ -309,6 +309,10 @@ module cache32 (
   assign uart_rx_pending = uart_pend;
 `endif
 
+`ifdef SCDBG3
+  logic [63:0] dbg_cyc3 = 0;
+  always_ff @(posedge clk) if (!reset) dbg_cyc3 <= dbg_cyc3 + 64'd1;
+`endif
   always_ff @(posedge clk) begin
     if (lwe) begin
 `ifdef LINUX
@@ -395,6 +399,12 @@ module cache32 (
                || plic_store || plic_load
 `endif
               )) begin
+`ifdef SCDBG3
+            if (idex_ld && ((ea & 32'hFFFFFFF0) == 32'h82850000))
+              $display("SCDBG3 LD c=%0d ea=%08x hit=%0d off=%0d want=%08x have=%08x cep=%08x epoch=%08x word=%08x", dbg_cyc3, ea, dc_hit, d_off, d_tag, dc_tag[d_idx], dc_ep[d_idx], epoch, rb_dc(ea));
+            if ((idex_st || idex_ld) && ((ea & 32'hFFFFFFF0) == 32'h82850000))
+              $display("SCDBG6 ACC c=%0d ea=%08x st=%b ld=%b vld=%b dreq=%b ready=%b hit=%b rok=%b lok=%b ssz=%b sd=%08x", dbg_cyc3, ea, idex_st, idex_ld, idex_valid, dreq, dc_ready_now, dc_hit, ram_ok, low_ok, ssz, sd_raw);
+`endif
             if (!dc_hit) begin
               for (int w = 0; w < LINE_BYTES/4; w++)
                 dcw[d_idx*4+w] =
@@ -409,6 +419,10 @@ module cache32 (
               dc_tag[d_idx] = d_tag;
             end
             if (idex_st && (ram_ok || low_ok)) begin
+`ifdef SCDBG3
+              if ((ea & 32'hFFFFFFF0) == 32'h82850000)
+                $display("SCDBG3 ST c=%0d ea=%08x sd=%08x hit=%0d off=%0d", dbg_cyc3, ea, sd_raw, dc_hit, d_off);
+`endif
               w0  = (ea >> 2) & (BACK_WORDS - 1);
               sft = (ea & 3) * 8;
               nby = (ssz == 2'b00) ? 1 : (ssz == 2'b01) ? 2 : 4;

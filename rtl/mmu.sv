@@ -57,6 +57,8 @@ module mmu (
   function logic pbad (input [4:0] f, input logic rd, input logic wr,
                       input [1:0] pr, input logic sm, input logic mx);
     logic r, w, x, u, ok;
+    // spec PTE bits (callers pass f = {lvl, pv1, pv2, pv3, pv4}): R=bit1 W=bit2
+    // X=bit3 U=bit4 -> load needs f[3]=R, fetch needs f[1]=X.
     r = f[3]; w = f[2]; x = f[1]; u = f[0];
     ok = 1;
     if (!rd && !wr) begin

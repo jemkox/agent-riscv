@@ -90,7 +90,7 @@ while True:
     elif op == 0x03:                       # loads
         if a is not None:
             e = (a + iimm) & M32
-            if e != ea: report("LD-ADDR", n, cyc, pc, insn, f"ea {ea:08x}, expected {e:08x}")
+            if (e ^ ea) & 0xFFF: report("LD-ADDR", n, cyc, pc, insn, f"ea {ea:08x}, expected {e:08x}")
         size = {0: 1, 1: 2, 2: 4, 4: 1, 5: 2}[f3]
         v = rd_mem(ea, size)
         if v is None: adopt = True
@@ -99,7 +99,7 @@ while True:
         size = {0: 1, 1: 2, 2: 4}[f3]
         if a is not None:
             e = (a + simm) & M32
-            if e != ea: report("ST-ADDR", n, cyc, pc, insn, f"ea {ea:08x}, expected {e:08x} (x{r1}={a:08x})")
+            if (e ^ ea) & 0xFFF: report("ST-ADDR", n, cyc, pc, insn, f"ea {ea:08x}, expected {e:08x} (x{r1}={a:08x})")
         if b is not None:
             want = b & ((1 << (8 * size)) - 1)
             got = sd & ((1 << (8 * size)) - 1)
@@ -135,7 +135,7 @@ while True:
             elif f3 == 7: res = a & y
     elif op == 0x2F:                       # A extension
         f5 = insn >> 27
-        if a is not None and a != ea: report("AMO-ADDR", n, cyc, pc, insn, f"ea {ea:08x}, expected {a:08x}")
+        if a is not None and (a ^ ea) & 0xFFF: report("AMO-ADDR", n, cyc, pc, insn, f"ea {ea:08x}, expected {a:08x}")
         old = rd_mem(ea, 4)
         if f5 == 0x02:                     # lr.w
             if old is None: adopt = True

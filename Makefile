@@ -973,7 +973,7 @@ linux_mmu_build: linux | $(BR_MMU_OUT)
 
 linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
 	@rm -f $(BR_MMU_OUT)/qemu_boot.log
-	@timeout 240 sh -c '(sleep 115; printf "root\n"; sleep 6; printf "ls /\n"; sleep 6; printf "uname -a\n"; sleep 6; printf "cat /proc/cpuinfo\n"; sleep 6; printf "poweroff\n") | hdl qemu-system-riscv32 -M virt -m 128M -nographic -bios $(BR_MMU_OUT)/images/fw_dynamic.bin -kernel $(BR_MMU_OUT)/images/Image -initrd $(BR_MMU_OUT)/images/rootfs.cpio > $(BR_MMU_OUT)/qemu_boot.log'
+	@timeout 240 sh -c '(sleep 115; printf "root\n"; sleep 6; printf "ls /\n"; sleep 6; printf "uname -a\n"; sleep 6; printf "cat /proc/cpuinfo\n"; sleep 6; printf "poweroff\n") | hdl qemu-system-riscv32 -M virt -m 128M -nographic -bios $(BR_MMU_OUT)/images/fw_dynamic.bin -kernel $(BR_MMU_OUT)/images/Image -initrd $(BR_MMU_OUT)/images/rootfs.cpio -d in_asm,cpu -D $(B)/linux/logs/qemu_trace.log > $(BR_MMU_OUT)/qemu_boot.log'
 	@echo "QEMU boot log: $(BR_MMU_OUT)/qemu_boot.log"
 	@if grep -q "OpenSBI v1.6" $(BR_MMU_OUT)/qemu_boot.log && grep -q "buildroot login:" $(BR_MMU_OUT)/qemu_boot.log && grep -q "reboot: Power down" $(BR_MMU_OUT)/qemu_boot.log; then echo "L7 QEMU BOOT OK: OpenSBI banner + login + commands + clean poweroff"; else echo "L7 QEMU BOOT FAIL"; exit 1; fi
 	@grep -m 5 -a "OpenSBI\|Run /init as init\|login\|Power down" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true
@@ -1054,7 +1054,7 @@ MT_DEFINE = -DMT_RATE=$(MTIME_RATE) -DMT_SEED=$(MTIME_SEED)
 linux_mmu_spike_log: linux_mmu_build spike_pin_check | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
 	@rm -f $(B)/linux/logs/linux_mmu_spike_commits.log $(B)/linux/logs/linux_mmu_spike_c.out
-	@timeout 900 sh -c '(sleep 120; printf "root\n"; sleep 10; printf "uname -a\n"; sleep 10; printf "cat /proc/cpuinfo\n"; sleep 10; printf "poweroff\n"; sleep 10) | $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m64 --dtb=linux/linux_mmu.dtb --pmpregions=0 --instructions=$(SPIKE_MAX_INS) -l --log-commits --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike_c.out 2> $(B)/linux/logs/linux_mmu_spike_commits.log'
+	@timeout 3300 sh -c '(sleep 120; printf "root\n"; sleep 10; printf "uname -a\n"; sleep 10; printf "cat /proc/cpuinfo\n"; sleep 10; printf "poweroff\n"; sleep 10) | $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m64 --dtb=linux/linux_mmu.dtb --pmpregions=0 --instructions=$(SPIKE_MAX_INS) -l --log-commits --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/linux_mmu_spike_c.out 2> $(B)/linux/logs/linux_mmu_spike_commits.log'
 	@if grep -q "System simulated" $(B)/linux/logs/linux_mmu_spike_c.out; then echo "SPIKE LOG OK (capped at $(SPIKE_MAX_INS) insns; commit log in linux_mmu_spike_commits.log)"; else echo "SPIKE LOG FAIL"; exit 1; fi
 
 # Compare pinned-spike retire stream vs RTL retire stream (boot). Needs both
@@ -1062,6 +1062,13 @@ linux_mmu_spike_log: linux_mmu_build spike_pin_check | $(B)/linux/logs
 # Exit 0 only when streams agree for the compared prefix (divergences fail).
 linux_spike_cmp:
 	@python3 tools/spike_rtl_cmp.py $(B)/linux/logs/linux_mmu_spike_commits.log $(B)/linux/cpu_retire.bin $(SPIKE_CMP_MAX) $(LINUX_CMP_ANCHOR)
+
+# Detached deeper spike boot log (survives harness timeouts; poll the log).
+linux_spike_deep: | $(B)/linux/logs
+	@mkdir -p $(B)/linux/logs
+	@rm -f $(B)/linux/logs/spike_deep_commits.log $(B)/linux/logs/spike_deep_c.out
+	@setsid nohup timeout 3300 sh -c '(sleep 120; printf "root\n"; sleep 10; printf "uname -a\n"; sleep 10; printf "cat /proc/cpuinfo\n"; sleep 10; printf "poweroff\n"; sleep 10) | $(SPIKE) --isa=rv32ima_zicsr_zifencei_zicntr -m64 --dtb=linux/linux_mmu.dtb --pmpregions=0 --instructions=24000000 -l --log-commits --kernel=$(BR_MMU_OUT)/images/Image --initrd=$(BR_MMU_OUT)/images/rootfs.cpio $(BR_MMU_OUT)/images/fw_jump.elf > $(B)/linux/logs/spike_deep_c.out 2> $(B)/linux/logs/spike_deep_commits.log' &
+	@echo "deep spike boot log detached (cap 24M insns) -> $(B)/linux/logs/spike_deep_commits.log"
 
 linux_mmu_sim: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mmu_build | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
@@ -1073,13 +1080,15 @@ linux_mmu_sim: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mmu_buil
 # the *frozen* input copies made by linux_mmu_ckpt_save; a mismatch means something
 # changed since the save and restore refuses (#CKPT_STALE, exit 5).
 CKPT_CYCLES ?= 300000000
+CKPT_REC_START ?= 0
+LINUX_TRACE_MAX ?= 20000000
 linux_mmu_ckpt_save: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mmu_build | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs $(B)/linux/inputs
 	@cp -p $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(B)/linux/inputs/
 	@rm -f $(B)/linux/boot_ckpt.bin
 	@H=$$( { sha256sum $(RTL) tb/run_linux.sv tb/run_openboot.cpp $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb; echo "addr $(INITRD_ADDR) $(DTB_ADDR) mt $(MTIME_RATE) $(MTIME_SEED)"; } | sha256sum | cut -d' ' -f1); \
 	echo "$$H" > $(B)/linux/boot_ckpt.hash; \
-	INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(CKPT_CYCLES) - 0 save $(B)/linux/boot_ckpt.bin "$$H" $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_save.out
+	INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) TRACE_MAX=$(LINUX_TRACE_MAX) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(CKPT_CYCLES) - '$(CKPT_REC_START)' save $(B)/linux/boot_ckpt.bin "$$H" $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_save.out
 	@grep -q "^#CKPT_SAVE" $(B)/linux/logs/ckpt_save.out || { echo "CKPT SAVE FAILED"; exit 1; }
 
 linux_mmu_ckpt_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
