@@ -1015,7 +1015,7 @@ linux_mmu_spike: linux_mmu_build spike_pin_check | $(B)/linux/logs
 # that both goldens are free to pass - not pinned in t42 any more. Spike mrets with MPP:=00
 # instead of restoring MPP=M (c768_mstatus 0xe0080); tests re-arm MPP explicitly where it
 # matters (t43/t42 do).
-SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr,$(MMU_TESTS))
+SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr,$(MMU_TESTS)) t48_vendor_csr
 $(B)/spike:
 	@mkdir -p $@
 $(B)/spike/%.elf: tests/%.S tests/link_spike.ld | $(B)/spike

@@ -75,6 +75,7 @@ def main(argv):
         if n == 0xb82 or n == 0xc82: return cs[0xb82]
         if n == 0x7a1: return 0xF0000000   # spike smask-family constants
         if n == 0x7a4: return 0x0100807C
+        if n == 0xf12: return 5   # spike 1.1.1-dev marchid read const (boot log: x15=5 at 0x8000e344)
         if n in (0x7a0,): return 0
         return cs.get(n,0)
     def cs_set(n,v):
