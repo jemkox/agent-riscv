@@ -317,7 +317,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t110_sv32_uspf t112_sv32_stwalk t113_sv32_sretm t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
+MMU_TESTS := t110_sv32_uspf t112_sv32_stwalk t113_sv32_sretm t114_illdec_priv t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)

@@ -2000,3 +2000,14 @@ ALL PASS
   wrong and wording is fixed. ISS+RTL+Spike agree (t113_sv32_sretm pins SRET semantics, t112
   pins fresh store data across an S-origin DPF retry; t110 seed addr macro-parameterized so
   the Spike build is green). Gates: mi/mmu/mm5/spike_tests/all_tests ALL PASS.
+
+- BusyBox userspace SIGILL root cause (review c3e8948 follow-up): csrs_pipe `priv_viol` SFENCE.VMA
+  term tested only insn[31:25]==7'b0001001 and insn[11:7]==5'b0 - no opcode/funct3 check.  Any
+  U-mode (or S+TVM) insn whose IMMEDIATE bits happened to match was misdecoded as SFENCE and
+  trapped cause 2: the observed badaddrs 0x12079063 (bne +288), 0x13612023/0x13a12023/0x13a12823
+  (sw/lw +288).  Fix: the priv_viol term now also requires opcode==7'b1110011 && f3==3'b000
+  (rs2==x0 kept).  Directed test t114_illdec_priv.S pins the 3-trap sequence (sfence S+TVM ->
+  ecall S -> sfence U) with sw/lw/bne offset-288 executing legally at S+TVM and U.  Gates:
+  mmu ALL PASS incl. t114 (ISS/RTL cmp).  Linux: no SIGILLs; LOGIN_SUCCESS cyc=368332484;
+  linux_shell gate PASSED (prompt/login/uname/cpuinfo/ls //LINUX_SIM_DONE echo) at 980588325
+  cycles, 847888361 insns (LINUX_SHELL_CYCLES=1200000000).

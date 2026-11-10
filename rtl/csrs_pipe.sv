@@ -151,6 +151,8 @@ module csrs_pipe (
                               (ce_csr && ce_csr_ro && csr_watt) ||
                               // SFENCE.VMA: illegal in U; illegal in S when mstatus.TVM (rv32 bit20).
                               ((idex_insn[31:25] == 7'b0001001) && (idex_insn[11:7] == 5'b0) &&
+                               (idex_insn[24:20] == 5'b0) && (idex_insn[6:0] == 7'b1110011) &&
+                               (idex_insn[14:12] == 3'b000) &&
                                (priv_cur == 2'b00 ||
                                 (priv_cur == 2'b01 && ((mstatus_next & 32'h0010_0000) != 0)))) ||
                               // satp access in S is illegal when mstatus.TVM (U already covered).
