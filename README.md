@@ -15,6 +15,9 @@ official RISC-V architecture tests (riscv-arch-test through RISCOF, against the
 Sail reference model), and the core places and routes for a **Sipeed Tang Nano
 20K** FPGA.
 
+**Linux boot:** see [Booting Linux on the finished CPU](#booting-linux-on-the-finished-cpu-reproducible);
+prebuilt boot images are in the [v2.0-linux release](https://github.com/jemkox/agent-riscv/releases/tag/v2.0-linux).
+
 The design (about 4,300 lines of RTL today), its tests and the Doom port were written
 autonomously by a **local LLM coding agent** running on a consumer PC. I designed
 the agent setup, the task, and the verification rules it had to obey, and
@@ -312,10 +315,12 @@ else's part:
 
 Prebuilt boot images (OpenSBI, kernel `Image`, rootfs; built with Buildroot
 2025.02.19 from the configs in `linux/configs/`) are attached to the GitHub
-release as `rv32cpu-linux-images.tar.xz`. Their sha256 sums are pinned in the
+release [v2.0-linux](https://github.com/jemkox/agent-riscv/releases/tag/v2.0-linux) as
+[`rv32cpu-linux-images.tar.xz`](https://github.com/jemkox/agent-riscv/releases/download/v2.0-linux/rv32cpu-linux-images.tar.xz). Their sha256 sums are pinned in the
 Makefile, so a rebuilt image that differs is refused.
 
 ```sh
+curl -LO https://github.com/jemkox/agent-riscv/releases/download/v2.0-linux/rv32cpu-linux-images.tar.xz
 mkdir -p ../linux-mmu && tar -xJf rv32cpu-linux-images.tar.xz -C ../linux-mmu
 make linux BR_MMU_OUT=../linux-mmu    # ~15 min; ends with LINUX BOOT REPRODUCED
 ```
