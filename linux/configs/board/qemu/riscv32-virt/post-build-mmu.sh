@@ -8,4 +8,11 @@ T="$1"
 rm -rf "${T}/lib/modules" "${T}/usr/lib/modules" "${T}/modules" 2>/dev/null || true
 rm -rf "${T}/etc/udev" "${T}/usr/share/zoneinfo" "${T}/etc/ppp" 2>/dev/null || true
 rm -f "${T}/etc/init.d/S40network" 2>/dev/null || true
+rm -f "${T}/etc/init.d/S"??* 2>/dev/null || true
+cat > "${T}/etc/init.d/rcS" <<'EOF'
+#!/bin/sh
+# L7/L8 minimal rcS: mount points are handled by /etc/inittab.
+exit 0
+EOF
+chmod +x "${T}/etc/init.d/rcS"
 exit 0

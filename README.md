@@ -282,7 +282,8 @@ else's part:
 - Run DOOM on a real FPGA board with SDRAM (e.g. an ECP5 board), where it
   should reach roughly 12–20 fps.
 - Raise the FPGA clock beyond 13 MHz by pipelining the critical path.
-- Atomics, supervisor/user mode and an MMU, on the way to booting Linux.
+- Boot Linux on real hardware: needs an SDRAM board; the FPGA top does not
+  yet carry S/U modes, the MMU or CLINT (only the simulation CPU does).
 
 ## Linux notes
 
@@ -298,6 +299,38 @@ else's part:
   (`0x1000_0005`), and the device value consumed by the simulation for UART data loads is
   `0x60 | rx_pending` (ready without a pending RX byte is `0x60`; pending RX is `0x61`).
 
+### Booting Linux on the finished CPU (reproducible)
+
+- `hdl make linux` reproduces the whole L7/L8 boot from committed source and
+  pinned image shas: Buildroot/OpenSBI `fw_jump.bin`, Linux 6.12.27 MMU
+  `Image`, canonical rootfs sha `0fda249a...` with a minimal L7/L8 `rcS`, and
+  `linux/linux_mmu.dtb` generated from the committed DTS. It saves a fresh
+  checkpoint at 220M cycles, restores it, then scripts login, `uname -a`,
+  `cat /proc/cpuinfo`, `ls /`, and `echo LINUX_SIM_DONE`. The observed full
+  reproduction is ~13 min wall at ~1.6M cycles/s (build cached); the run is
+  deterministic with fixed MT seed and fixed rootfs canonicalization.
+- Cycle counts for the current `hdl make linux` boot: login prompt detected at
+  427,205,495 cycles; `#LINUX cycles=1326617464 insns=1753060506 prompt=1 login=1 done=1 halt=0 cmds=1`.
+- Boot log excerpt (`build/linux/logs/shell.out`):
+
+```
+buildroot login: root
+Jan  1 00:00:00 login[57]: root login on 'console'
+# uname -a
+Linux buildroot 6.12.27 #4 SMP Sun Nov  8 12:02:41 CET 2026 riscv32 GNU/Linux
+# cat /proc/cpuinfo
+processor	: 0
+hart		: 0
+isa		: rv32ima_zicntr_zicsr_zifencei_zihpm
+mmu		: sv32
+# ls /
+bin  init  lib  proc ...
+# echo LINUX_SIM_DONE
+LINUX_SIM_DONE
+#STOP cyc=1326617464 login=1 prompt_stop=0 done=1 shell_stop=1 panic=0 past_panic=0 halt=0
+#LINUX cycles=1326617464 insns=1753060506 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000
+```
+
 ## Honest limits
 
 - DOOM runs in **simulation**. The UP5K has 128 KB of RAM and Doom needs about
@@ -305,14 +338,21 @@ else's part:
   built-in program. A board with SDRAM is needed to play it on real hardware.
 - Simulation speed peaked at 5.8M cycles/s; a 15M target was attempted and missed
   (attempts recorded in `PROGRESS.md`).
-- No atomics (A), no supervisor/user mode, no MMU, so no Linux yet. The
-  CLINT device, `mip`/`WFI` and M-mode interrupts exist only in the simulation
-  CPU; the FPGA top (`fpga_pipe_top`) has no CLINT and no interrupts (under
-  `ifdef FPGA` WFI never executes and the FPGA SYSTEM decoder keeps its Fmax
-  shape where csr 0x100 is illegal). WFI is a builder convention (not a spec
-  requirement in this project): simulation accepts f3=0 SYSTEM encodings for
-  `0x100` (x10000073) and `0x105` (x10500073) and retires them as IRQ-wait
-  no-ops when no IRQ is pending; a pending IRQ traps before retirement.
+- The Linux boot runs **only in simulation**. The simulation CPU is RV32 with
+  A/LR/SC and `AMO*`, S/U modes with `mstatus.SPP`, the Sv32 MMU (two-level
+  page-table walk, 4-entry direct-mapped TLB per side), CLINT
+  (`0x1FC0_0000`), a 64KiB direct-mapped 32-bit-line I/D data cache (128KiB
+  total) and the 16MiB `rv32-linux-sim` dtb/rootfs pins. One reproduction of
+  the boot takes ~13 min of wall time (checkpointed 220M-cycle save plus
+  restore to `LINUX_SIM_DONE`; login at 427M cycles, done at 1.3266B cycles);
+  the console is serial-only — no networking (the pinned rootfs has no network
+  daemons) and no GUI. The FPGA top (`fpga_pipe_top`) has no CLINT, no S/U
+  modes and no MMU (under `ifdef FPGA` WFI never executes and the FPGA SYSTEM
+  decoder keeps its Fmax shape where csr 0x100 is illegal). WFI is a builder
+  convention (not a spec requirement in this project): simulation accepts f3=0
+  SYSTEM encodings for `0x100` (x10000073) and `0x105` (x10500073) and retires
+  them as IRQ-wait no-ops when no IRQ is pending; a pending IRQ traps before
+  retirement.
 - The formal proof covers pipeline invariants, not full ISA equivalence.
 - The FPGA build truncates the 64-bit counters to 32 bits.
 

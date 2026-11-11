@@ -21,3 +21,12 @@ linux/rootfs*.ext*
 linux/linux_*.bin
 tmp-stage/
 console=ttyS0
+
+# Scratch debug artifacts (huge logs / probes), kept on disk but not in git.
+linux/qemu_mmu_ref.log
+linux/qtrace.txt
+linux/qtrace_embed.txt
+linux/txx.S
+linux/txx.o
+tb/t_ctrl_probe.sv
+tests/probe_*.S

@@ -2010,4 +2010,81 @@ ALL PASS
   ecall S -> sfence U) with sw/lw/bne offset-288 executing legally at S+TVM and U.  Gates:
   mmu ALL PASS incl. t114 (ISS/RTL cmp).  Linux: no SIGILLs; LOGIN_SUCCESS cyc=368332484;
   linux_shell gate PASSED (prompt/login/uname/cpuinfo/ls //LINUX_SIM_DONE echo) at 980588325
-  cycles, 847888361 insns (LINUX_SHELL_CYCLES=1200000000).
+   cycles, 847888361 insns (LINUX_SHELL_CYCLES=1200000000).
+
+## Linux L8: whole-boot reproduction target + README (2026-11-10, COMPLETE)
+- Makefile `linux:` is now a full reproduction target: recovers the pinned kernel (git blob
+  09a6ad3 via tools/git_blob_to_file.py, embedded initramfs zeroed -> KERNEL_SHA256
+  2bdaf208...), recovers the committed rootfs cpio blob (ROOTFS_SHA256 6f4a9e73...), builds the
+  dtbs from committed DTS, then runs the scripted UART session via nested make `linux_shell`.
+  All old `linux`-phony back-references (normal/order-only prereqs on ~21 rules) were removed
+  so the heavy target cannot recurse; per-rule `@mkdir -p linux` kept. `LINUX_SHELL_CYCLES`
+  default raised 800000000 -> 1200000000.
+- `hdl make linux` observed run: `TEST PASSED (L4 BusyBox shell: login, uname, cpuinfo, ls /,
+  LINUX_SIM_DONE)`; `#LINUX cycles=980588325 insns=847888361 prompt=1 login=1 done=1 halt=0
+  cmds=1` — byte-identical to the standalone `linux_shell` run (deterministic, fixed MT seed).
+  Wall time 6m55s (~2.37M cycles/s). start_kernel @176,007 cyc; LOGIN_SUCCESS @368,332,484 cyc;
+  BP stats bp=208,035,652 taken=111,095,529 mis=33,152,778.
+- README.md: added "Booting Linux on the finished CPU (reproducible)" (command, log excerpt,
+  cycle counts, wall time, stats) and rewrote the stale "no atomics/SU/MMU, so no Linux yet"
+  honest-limit bullet: Linux runs in simulation only (A-ext, S/U+SPP, Sv32 MMU 2-level walk +
+  4-entry TLB/side, CLINT 0x1FC0_0000, 64KiB direct-mapped I/D caches, 16MiB dtb pins, serial
+  console, no network); FPGA top still has no CLINT/SU/MMU. "What's next" bullet replaced with
+  Linux-on-real-hardware (needs SDRAM board).
+- Hygiene (review c3e8948 deferred items): untracked 8.6GB linux/qemu_mmu_ref.log, 55MB+30MB
+  linux/qtrace*.txt, linux/txx.{S,o}, tb/t_ctrl_probe.sv, tests/probe_*.S via git rm --cached +
+  .gitignore entries (files left on disk); removed hardcoded /home/jemko paths from
+  tools/Makefile.opensbi_rebuild (BL ?= $(CURDIR)/../../build-linux/mmu3), tools/spike_boot_log.sh
+  (BR_MMU_IMG/SPIKE_BIN), tools/qemu_rom_probe.py (argv or path derived from the tools dir). Item
+  "PTE-snooped physical address reuse" (perf) still deferred.
+- `hdl make linux` target itself (pinned recovery + scripted shell session) works, but the
+  kernel it boots is the pinned L4 blob (nommu, cpuinfo `mmu : none`) — NOT the L7/L8
+  OpenSBI+Sv32 target. L7/L8 remain open: rerun the `tb/run_openboot.cpp` MMU boot (build
+  linux/logs/openboot.out, 2026-11-10 07:42, predates the SPP+SFENCE fixes) with the current
+  CPU, drive login/uname -a/cat /proc/cpuinfo/ls / over UART, then re-target `linux`/
+  `linux_shell` at those images. No DONE marker yet.
+
+## Linux L8: OpenSBI + Sv32 MMU shell reproduction (2026-11-11, COMPLETE)
+- Re-targeted `hdl make linux` to the real L7/L8 OpenSBI + Linux MMU boot:
+  Buildroot/OpenSBI `fw_jump.bin`, Linux `Image`, rootfs canonical sha
+  `0fda249a...`, `linux/linux_mmu.dtb` from committed `rtl/linux_mmu.dts`,
+  and scripted UART login/`uname -a`/`cat /proc/cpuinfo`/`ls /`/`echo LINUX_SIM_DONE`.
+- `linux_mmu_build` now skips Buildroot when `build/linux/mmu_build.stamp` exists;
+  the stamp was regenerated after the minimal-L7/L8 rootfs change (post-build
+  rcS minimal). Delete the stamp to force a rebuild if pinned rootfs/config changes.
+- `tb/run_openboot.cpp` is optimized for final boot reproduction:
+  default trace/stuck rings disabled unless `DUMP_TRACE=1`, keyword scan
+  changed from per-cycle `log.find` to incremental matchers, retire ring
+  writes skipped unless trace mode, and `#PROG` interval is 100M.
+- `hdl make linux` observed complete reproduction:
+  `#CKPT_SAVE cyc=219999999 insns=0 hash=56c8924de58066c3ba209a59a8b61e06dcda46266a28241d4525677ac15af790`
+  then final restored shell run `#STOP cyc=1326617464 login=1 done=1`,
+  `#LINUX cycles=1326617464 insns=1753060506 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000`,
+  and `OPENBOOT OK: OpenSBI + MMU Linux shell commands + LINUX_SIM_DONE on our CPU`.
+- `hdl make linux` target itself passed under the tool budget after the cached
+  build/stamp and optimization changes; the gate greps `#LINUX.*done=1`,
+  `#LINUX.*cmds=1`, and OpenSBI banner in `build/linux/logs/ckpt_shell.out`.
+- Linux CPU: DONE
+
+LINUX CPU: DONE
+
+## External change: yosys driver-conflict fix (2026-11-10, applied by Claude at the owner's request — READ THIS)
+- BUG: `rtl/top_pipe.sv` declared `rf_fetch_sched`, `rf_rsel1`, `rf_rsel2` with `= 0` initialisers
+  AND drove them with `assign` (FPGA branch). Verilator accepts it; yosys treats the initialiser as a
+  second driver and resolved it by tying `ifid_insn[24:15]` (rs1/rs2 fields) to 0 — see the 10
+  "Driver-driver conflict" warnings in the old `build/cpu_full_syn.log`. Every `fpga_full` netlist
+  so far was therefore functionally broken, and its numbers (~3.3K SB_LUT4, ~17 MHz) were of the
+  broken netlist. RTL simulations never saw it because they simulate RTL, not the netlist.
+- FIX: removed the three initialisers (comment left in place). Do not re-add `= 0` to any net that
+  is driven by `assign`.
+- GUARD: Makefile macro `yosys_conflict_check` now runs after all three `synth_ice40` rules
+  (`cpu.json`, `cpu_full.json`, `fpga_csrtrap/cpu_full.json`): any "Driver-driver conflict" in the
+  yosys log fails the rule and deletes the json. Keep it.
+- Verified after the fix: `hdl make lint` clean; `fpga_mgate`, `fpga_subw_gate`,
+  `fpga_control_gate`, `fpga_csr_gate` TEST PASSED; `hdl make test` ALL PASS; synthesis 0
+  conflicts, 6533 SB_LUT4.
+- CONSEQUENCES: the correct design is 145% of the iCE40 UP5K (7661/5280 LCs), so `fpga_full`
+  can no longer place on the UP5K. `FPGA_NETLIST_LUT4` / `FPGA_CSRTRAP_NETLIST_LUT4` baselines
+  (~3.3K) were pinned to the broken netlist and need re-baselining or retiring. The FPGA target
+  is moving to the Tang Nano 20K (Gowin GW2AR-18): there the fixed core places and routes at
+  49.5–51.4 MHz post-route (3 seeds, nextpnr-himbaechel) using 5706 LUT4 (27%).

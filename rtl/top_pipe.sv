@@ -130,8 +130,10 @@ module top_pipe (
   // mst_cnt/st_cnt are output ports (declared in the header), incremented below.
 `endif
 `ifdef FPGA
-  logic        rf_fetch_sched = 0;
-  logic [4:0]  rf_rsel1 = 0, rf_rsel2 = 0;
+  // No `= 0` initialisers: these are driven by assign below, and yosys treats an
+  // initialiser as a second driver (it tied ifid_insn[24:15] to 0 in the netlist).
+  logic        rf_fetch_sched;
+  logic [4:0]  rf_rsel1, rf_rsel2;
   logic [31:0] rf_r1_use, rf_r2_use;
   assign rf_r1_use = rf_r1;
   assign rf_r2_use = rf_r2;
@@ -234,9 +236,9 @@ module top_pipe (
              .sd_raw(mm_act ? mm_wd : idex_sd_raw), .ssz(mm_act ? 2'b10 : idex_ssz),
 `endif
 `ifndef FPGA
-             .amo_v(idex_valid && ce_amo && !ce_ex_ill && !stall && !mem_kill_now && !mm_act && !mm_dmiss),
-             .amo_lr(ce_lr && idex_valid && !ce_ex_ill && !stall && !mem_kill_now),
-             .amo_sc(ce_sc && idex_valid && !ce_ex_ill && !stall && !mem_kill_now), .amo5(ce_amo5),
+             .amo_v(idex_valid && ce_amo && !ce_ex_ill && !stall && !mem_kill_now && !mm_act && !mm_dmiss && !wfi_wait && !mm_walk_i && !mm_walk_d),
+             .amo_lr(ce_lr && idex_valid && !ce_ex_ill && !stall && !mem_kill_now && !mm_act && !mm_dmiss && !wfi_wait && !mm_walk_i && !mm_walk_d),
+             .amo_sc(ce_sc && idex_valid && !ce_ex_ill && !stall && !mem_kill_now && !mm_act && !mm_dmiss && !wfi_wait && !mm_walk_i && !mm_walk_d), .amo5(ce_amo5),
              .amo_new(amo_new), .amo_sc_ok(amo_sc_ok),
 `endif
              .ld_raw(ldx_raw), .mem_ready(mem_ready),
@@ -251,7 +253,7 @@ module top_pipe (
   mmu MMU(.clk(clk), .reset(reset), .mode(mm_mode), .dm(mm_dmode), .sppn(mm_sppn),
           .priv(mm_priv), .dpriv(mm_dpriv), .sum(mm_sum_b), .mxr(mm_mxr_b),
            .flush(flush_now), .cancel(trap_flush || timer_flush || mret_flush || sret_flush),
-           .stm_v(exmem_valid && exmem_st), .stm_pa(exmem_ea),
+           .stm_v(exmem_valid && exmem_st), .stm_pa(exmem_spa),
           .if_va(pc_if), .if_on(1'b1),
           .if_hit(mm_hit_i), .if_fault(mm_fl_i), .if_stall(mm_st_i), .if_pa(mm_pa_i),
            .df_va(idex_ea), .df_on(idex_valid && !stall && !mem_kill_now && (ce_ld || ce_st || ce_amo)),

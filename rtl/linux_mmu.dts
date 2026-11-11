@@ -80,9 +80,7 @@
 		serial: serial@10000000 {
 			clock-frequency = <0x989680>;
 			reg = <0x00 0x10000000 0x00 0x100>;
-			compatible = "ns16550a";
-			interrupt-parent = <&plic>;
-			interrupts = <0x04>;
+		compatible = "ns16550a";
 		};
 
 	 clint@2000000 {

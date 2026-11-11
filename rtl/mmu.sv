@@ -280,8 +280,8 @@ module mmu (
     end
     // A store to either consulted PTE word (top frame word or leaf/huge PTE)
     // makes any TLB entry built from them stale: don't poison with the old PTE.
-    keep_i = !(stm_v && (stm_pa == l1a_i || stm_pa == {fpa_i, 2'b00}));
-    keep_d = !(stm_v && (stm_pa == l1a_d || stm_pa == {fpa_d, 2'b00}));
+    keep_i = !(stm_v && (stm_pa == l1a_i || stm_pa == ra_i));
+    keep_d = !(stm_v && (stm_pa == l1a_d || stm_pa == ra_d));
   end
 
   always_ff @(posedge clk) begin
@@ -322,12 +322,12 @@ module mmu (
       if (fi_i && keep_i) begin
         tv_i[tag_i[1:0]] <= 1; tg_i[tag_i[1:0]] <= tag_i;
         ppa_i[tag_i[1:0]] <= fpa_i; fg_i[tag_i[1:0]] <= ffl_i;
-        tta_i[tag_i[1:0]][0] <= l1a_i; tta_i[tag_i[1:0]][1] <= {fpa_i, 2'b00};
+        tta_i[tag_i[1:0]][0] <= l1a_i; tta_i[tag_i[1:0]][1] <= ra_i;
       end
       if (fi_d && keep_d) begin
         tv_d[tag_d[1:0]] <= 1; tg_d[tag_d[1:0]] <= tag_d;
         ppa_d[tag_d[1:0]] <= fpa_d; fg_d[tag_d[1:0]] <= ffl_d;
-        tta_d[tag_d[1:0]][0] <= l1a_d; tta_d[tag_d[1:0]][1] <= {fpa_d, 2'b00};
+        tta_d[tag_d[1:0]][0] <= l1a_d; tta_d[tag_d[1:0]][1] <= ra_d;
       end
       if (stm_v) begin
         // PTE-write snoop: drop entries built from the written PTE word, and

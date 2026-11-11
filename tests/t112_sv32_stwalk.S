@@ -5,6 +5,17 @@
 # L2 page, sfence.vma, sret.  The retried store, issued after the D-side walk,
 # must write the FRESH 0x140df (the RTL bug wrote the pre-or 0x14059 in t110);
 # the reload must read it back.  s1 must be exactly 1.  gp=1 pass, 3 fail.
+/* MMU_CODE_VPN/CODE_FLAGS: 0/0xB for tests/link.ld (mmu suite); the spike
+   build passes -DMMU_CODE_VPN=0x20 -DCODE_FLAGS=0x4B to follow link_spike.ld
+   ORIGIN 0x20000 (spike 1.1 page-faults leaves with A=0, hence A preset).
+   VPN 0x10 (store) and VPN 0x9 (data view of the L2 page) must not equal
+   MMU_CODE_VPN - true for 0 and 0x20. */
+#ifndef MMU_CODE_VPN
+#define MMU_CODE_VPN 0
+#endif
+#ifndef CODE_FLAGS
+#define CODE_FLAGS 0xB
+#endif
   .globl _start
   .option norvc
 _start:
@@ -12,11 +23,11 @@ _start:
   li s1, 0
   # L1@0x8000 (satp 0x80000008) -> L2@0x9000
   li t0, 0x8000
-  li t1, 0x2401           # L1[0]: VPN0 -> L2@0x9000
+  li t1, 0x2401           # L1[0]: VPNs 0..0x3FF -> L2@0x9000
   sw t1, 0(t0)
   li t0, 0x9000
-  li t1, 0xB              # VPN0 code page (S-only X)
-  sw t1, 0(t0)
+  li t1, (MMU_CODE_VPN<<10)|CODE_FLAGS   # code page identity (S-only X)
+  sw t1, ((MMU_CODE_VPN&0xFF)*4)(t0)
   li t1, (9<<10)|0xD7     # VPN 0x9 -> the L2 page itself (data view)
   sw t1, (9*4)(t0)
   # push the CLINT compare far away so no spurious STV fires mid-test

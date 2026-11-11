@@ -47,8 +47,8 @@ WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.w
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
 # Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
-FPGA_NETLIST_LUT4 ?= 3360
-FPGA_NETLIST_FLOPS ?= 1259
+FPGA_NETLIST_LUT4 ?= 3411
+FPGA_NETLIST_FLOPS ?= 1291
 # Pinned netlist for the documented fpga_csrtrap ROM (smaller, but it exercises
 # trap CSRs dynamically; see fpga_csrtrap_netlist target below).
 FPGA_CSRTRAP_NETLIST_LUT4 ?= 2176
@@ -175,6 +175,10 @@ $(B)/t19_amo.o: tests/t19_amo.S | $(B)
 $(B)/t110_sv32_uspf.o: tests/t110_sv32_uspf.S | $(B)
 	$(CC) $(UA_CCFLAGS) -c $< -o $(B)/t110_sv32_uspf.rvo
 	$(OC) -O elf32-littleriscv $(B)/t110_sv32_uspf.rvo $@
+# t116: atomic +1 across a code-page ITLB walk must apply exactly once
+$(B)/t116_sv32_amo_walk.o: tests/t116_sv32_amo_walk.S | $(B)
+	$(CC) $(UA_CCFLAGS) -c $< -o $(B)/t116_sv32_amo_walk.rvo
+	$(OC) -O elf32-littleriscv $(B)/t116_sv32_amo_walk.rvo $@
 # t20: reserved atomics and MMIO atomic traps need the A extension too
 T20_CCFLAGS := -march=rv32ima_zicsr -mabi=ilp32
 $(B)/t20_amo_illegal.o: tests/t20_amo_illegal.S | $(B)
@@ -317,7 +321,7 @@ $(B)/vlt_mmu:
 $(B)/mmu/logs:
 	@mkdir -p $(B)/mmu/logs
 
-MMU_TESTS := t110_sv32_uspf t112_sv32_stwalk t113_sv32_sretm t114_illdec_priv t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd
+MMU_TESTS := t110_sv32_uspf t112_sv32_stwalk t113_sv32_sretm t114_illdec_priv t44_sip t45_sv32_sfence_remap t46_sys_hints t47_sys_hints_priv t40_sv32_midentity t41_mprv_satp t42_sv32_amo t43_sv32_mprv_umxr t39_irq_gate t30_sv32_walk t31_sv32_ad t32_sv32_itpf t33_sv32_dpf t34_sv32_mega t35_sv32_perms t36_sfence t37_sv32_permrules t38_sv32_sumfetch t108_sv32_stfwd t116_sv32_amo_walk
 
 $(B)/vlt_mmu/run_mmu: $(RTL) $(TB) | $(B) $(B)/vlt_mmu
 	verilator --binary --Wall --timing -O2 -DTOPPIPE -DVRUNTIME -DTBHEX='"$(B)/p.hex"' -DCACHE_LAT=1 --Mdir $(B)/vlt_mmu -o run_mmu $(RTL) $(TB)
@@ -497,26 +501,36 @@ LINUX_CKPT_SAVE_CYCLE ?= 85000000
 LINUX_CKPT_LATER_CYCLE ?= 90000000
 LINUX_CKPT_HASH ?= $(shell sha256sum $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb | sha256sum | cut -d' ' -f1)
 LINUX_DBG_CYCLES ?= 150000000
-LINUX_SHELL_CYCLES ?= 800000000
+LINUX_SHELL_CYCLES ?= 1200000000
 LINUX_SIM_CYCLES ?= 3000000000
 LINUX_STUCK_LIMIT ?= 25000
+LINUX_MMU_CKPT_CYCLES ?= 220000000
+LINUX_MMU_SHELL_CYCLES ?= 2000000000
+# `hdl make linux` now reproduces the L7/L8 OpenSBI + Sv32 MMU boot (not the
+# older L4 BusyBox shell path). It saves a fresh boot checkpoint from reset,
+# restores it, then runs the scripted UART session: login -> uname -a
+# -> cat /proc/cpuinfo -> ls / -> echo LINUX_SIM_DONE.
 linux:
-	@mkdir -p linux $(B)/linux
+	@mkdir -p linux $(B)/linux $(B)/linux/logs $(B)/linux/inputs
+	@$(MAKE) linux_mmu_build
+	@$(MAKE) linux_mmu_ckpt_save CKPT_CYCLES=$(LINUX_MMU_CKPT_CYCLES)
+	@$(MAKE) linux_mmu_ckpt_shell_restore LINUX_MMU_SHELL_CYCLES=$(LINUX_MMU_SHELL_CYCLES)
+	@echo "LINUX BOOT REPRODUCED (hdl make linux): OpenSBI fw_jump.bin + MMU Linux Image + rootfs from $(BR_MMU_OUT)/images, dtb from rtl/linux_mmu.dts; scripted UART ran login, uname -a, cat /proc/cpuinfo, ls /, LINUX_SIM_DONE; full log $(B)/linux/logs/ckpt_shell.out"
 $(B)/linux/logs:
 	@mkdir -p $@
-linux/linux.dtb: rtl/linux.dts linux | $(B)
+linux/linux.dtb: rtl/linux.dts | $(B)
 	@mkdir -p linux
 	@dtc -I dts -O dtb -o linux/linux.dtb rtl/linux.dts
-linux/vmlinux.bin: linux | $(B)
+linux/vmlinux.bin: | $(B)
 	@if [ ! -f linux/vmlinux.bin ]; then cp $(LINUX_KERNEL_BIN) linux/vmlinux.bin; fi
-linux/rootfs_unfiltered.cpio: linux | $(B)
+linux/rootfs_unfiltered.cpio: | $(B)
 	@if [ ! -f linux/rootfs_unfiltered.cpio ]; then cp $(LINUX_ROOTFS_BIN) linux/rootfs_unfiltered.cpio; fi
-linux/rootfs.cpio: linux/rootfs_unfiltered.cpio linux | $(B)
+linux/rootfs.cpio: linux/rootfs_unfiltered.cpio | $(B)
 	@python3 tools/rootfs_drop_network.py linux/rootfs_unfiltered.cpio linux/rootfs.cpio etc/init.d/S40network
-linux/linux_initrd.dtb: linux/linux_initrd.dts linux | $(B)
+linux/linux_initrd.dtb: linux/linux_initrd.dts | $(B)
 	@mkdir -p linux
 	@dtc -I dts -O dtb -o linux/linux_initrd.dtb linux/linux_initrd.dts
-linux_rebuild_kernel: linux | $(BR_OUT)
+linux_rebuild_kernel: | $(BR_OUT)
 	$(MAKE) -C $(BR_ROOT) O=$(BR_OUT) defconfig BR2_DEFCONFIG=$(CURDIR)/$(BR_DEFCONFIG)
 	$(MAKE) -C $(BR_ROOT) O=$(BR_OUT) linux
 	@mkdir -p linux $(B)
@@ -527,32 +541,32 @@ linux_rebuild_kernel: linux | $(BR_OUT)
 	@sha256sum linux/vmlinux.bin linux/rootfs.cpio
 	@echo "Expected KERNEL_SHA256=$(KERNEL_SHA256) ROOTFS_SHA256=$(ROOTFS_SHA256)"
 
-linux_pinned_kernel: linux | $(B)
+linux_pinned_kernel: | $(B)
 	@mkdir -p linux $(B)
 	@python3 tools/git_blob_to_file.py 09a6ad3 $(B)/linux_kernel_blob.bin
 	@python3 tools/kernel_disable_embedded_initramfs.py $(B)/linux_kernel_blob.bin linux/vmlinux.bin
 	@sha256sum linux/vmlinux.bin
 	@echo "Recovered pinned kernel for KERNEL_SHA256=$(KERNEL_SHA256)"
 
-linux_pinned_rootfs: linux | $(B)
+linux_pinned_rootfs: | $(B)
 	@mkdir -p linux $(B)
 	@python3 tools/git_blob_to_file.py HEAD:linux/rootfs.cpio $(B)/linux_rootfs_blob.bin
 	@cp $(B)/linux_rootfs_blob.bin linux/rootfs.cpio
 	@sha256sum linux/rootfs.cpio
 	@echo "Recovered pinned rootfs for ROOTFS_SHA256=$(ROOTFS_SHA256)"
 
-linux/gate.txt: linux/configs/gate-symbols.map linux | $(B)
+linux/gate.txt: linux/configs/gate-symbols.map | $(B)
 	@mkdir -p linux
 	@python3 tools/linux_gate.py linux/configs/gate-symbols.map linux/gate.txt
-$(B)/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
+$(B)/vlt_linux/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | $(B)
 	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(MT_DEFINE) -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux -f Vrun_linux.mk OPT_FAST="-O3" run_linux -j 4
 
-$(B)/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
+$(B)/vlt_linux_dbg/run_linux: $(RTL) tb/run_linux.sv tb/run_linux.cpp | $(B)
 	verilator --cc --exe --Wall -O3 --x-assign fast --x-initial fast $(MT_DEFINE) -DLINUX -DCACHE_LAT=1 -DLINUX_DEBUG --top-module run_linux --Mdir $(B)/vlt_linux_dbg -o run_linux $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux_dbg -f Vrun_linux.mk OPT_FAST="-O3 -DLINUX_DEBUG" run_linux -j 4
 
-linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
+linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Recover the pinned kernel with make linux_pinned_kernel, rebuild from the committed Buildroot recipe with make linux_rebuild_kernel, or download linux/vmlinux.bin and linux/linux.dtb from the GitHub Release asset for KERNEL_SHA256 $(KERNEL_SHA256)."; exit 1; fi
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX DEBUG BOOT TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@mkdir -p $(B)/linux/logs; ./$(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux.dtb 90000000 prompt | tee $(B)/linux/logs/boot_dbg.out
@@ -561,7 +575,7 @@ linux_sim_dbg: $(B)/vlt_linux_dbg/run_linux | linux linux/linux.dtb linux_pinned
 # linux_dbg_initrd by editing the kernel/dtb inputs/log); it must use the same
 # vmlinux.bin, dtb and dtb_addr that produced build/linux/cpu_retire.bin. The
 # runner prints the load address as `dtb=xxxxxxxx` in its final #LINUX line.
-linux_trace_check: linux_sim_dbg | linux linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
+linux_trace_check: linux_sim_dbg | linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "linux_trace_check: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@DTB=`grep -o 'dtb=[0-9a-f]\{8\}' $(B)/linux/logs/boot_dbg.out | tail -n 1 | cut -d= -f 2`; \
@@ -569,7 +583,7 @@ linux_trace_check: linux_sim_dbg | linux linux/linux.dtb linux_pinned_kernel $(B
 	 echo "linux_trace_check: using kernel linux/vmlinux.bin, dtb linux/linux.dtb, dtb_addr $$DTB"; \
 	 python3 tools/trace_replay_check.py build/linux/cpu_retire.bin linux/vmlinux.bin linux/linux.dtb "$$DTB" 30 | tee $(B)/linux/logs/trace_replay_check.out
 
-linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
+linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux/linux.dtb linux_pinned_kernel $(B)/linux/logs
 	@ok=1; for f in linux/vmlinux.bin linux/linux.dtb; do if [ ! -s $$f ]; then echo "Linux test input missing: $$f"; ok=0; fi; done; if [ $$ok -ne 1 ]; then echo "Recover the pinned kernel with make linux_pinned_kernel or rebuild from the committed Buildroot recipe with make linux_rebuild_kernel; linux/linux.dtb is generated by make linux/linux.dtb."; exit 1; fi
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX L3 TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256)); regenerate with make linux_pinned_kernel or make linux_rebuild_kernel" >&2; exit 1; }
 	./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux.dtb 6000000 platform | tee $(B)/linux/logs/boot.out
@@ -582,36 +596,36 @@ linux_sim: $(B)/vlt_linux/run_linux linux/gate.txt | linux linux/linux.dtb linux
 	@grep -q "^#LINUX" $(B)/linux/logs/boot.out || { echo "LINUX L3 TEST FAILED: runner did not finish" >&2; exit 1; }
 	@echo "TEST PASSED (L3 platform boot: Linux reaches init_freeable; BusyBox prompt not reached yet)"
 
-linux_shell: $(B)/vlt_linux/run_linux | linux linux/linux_initrd.dtb linux_pinned_kernel linux_pinned_rootfs linux/rootfs.cpio $(B)/linux/logs
+linux_shell: $(B)/vlt_linux/run_linux | linux/linux_initrd.dtb linux_pinned_kernel linux_pinned_rootfs linux/rootfs.cpio $(B)/linux/logs
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX SHELL TEST FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@sha256sum linux/rootfs.cpio | grep -q $(ROOTFS_SHA256) || { echo "LINUX SHELL TEST FAILED: rootfs sha256 mismatch (expected $(ROOTFS_SHA256))" >&2; exit 1; }
 	@mkdir -p $(B)/linux/logs; env LINUX_INITRD=linux/rootfs.cpio ./$(B)/vlt_linux/run_linux linux/vmlinux.bin linux/linux_initrd.dtb $(LINUX_SHELL_CYCLES) shell > $(B)/linux/logs/shell.out; sed -n '1,160p' $(B)/linux/logs/shell.out; tail -n 6 $(B)/linux/logs/shell.out; grep -q "#LINUX.*login=1" $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED: login prompt not seen" >&2; exit 1; }; grep -q "#LINUX.*done=1" $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED: runner did not observe real LINUX_SIM_DONE output" >&2; exit 1; }; grep -q "#LINUX.*cmds=1" $(B)/linux/logs/shell.out || { echo "LINUX SHELL TEST FAILED: expected command output not observed" >&2; exit 1; }; echo "TEST PASSED (L4 BusyBox shell: login, uname, cpuinfo, ls /, LINUX_SIM_DONE)"
 
-linux_dbg_initrd: $(B)/vlt_linux_dbg/run_linux | linux linux/linux_initrd.dtb linux_pinned_kernel linux_pinned_rootfs $(B)/linux/logs
+linux_dbg_initrd: $(B)/vlt_linux_dbg/run_linux | linux/linux_initrd.dtb linux_pinned_kernel linux_pinned_rootfs $(B)/linux/logs
 	@sha256sum linux/vmlinux.bin | grep -q $(KERNEL_SHA256) || { echo "LINUX DEBUG INITRD FAILED: kernel sha256 mismatch (expected $(KERNEL_SHA256))" >&2; exit 1; }
 	@sha256sum linux/rootfs.cpio | grep -q $(ROOTFS_SHA256) || { echo "LINUX DEBUG INITRD FAILED: rootfs sha256 mismatch (expected $(ROOTFS_SHA256))" >&2; exit 1; }
 	@mkdir -p $(B)/linux/logs; env LINUX_INITRD=linux/rootfs.cpio ./$(B)/vlt_linux_dbg/run_linux linux/vmlinux.bin linux/linux_initrd.dtb $(LINUX_DBG_CYCLES) prompt | tee $(B)/linux/logs/boot_dbg_initrd.out
 
-$(B)/vlt_linux_ckpt/run_linux_ckpt: $(RTL) tb/run_linux.sv tb/run_linux.cpp | linux
+$(B)/vlt_linux_ckpt/run_linux_ckpt: $(RTL) tb/run_linux.sv tb/run_linux.cpp | $(B)
 	verilator --cc --exe --savable --Wall -O3 --x-assign fast --x-initial fast -DLINUX -DLINUX_CKPT -CFLAGS -DLINUX_CKPT -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_linux_ckpt -o run_linux_ckpt $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_linux.cpp
 	$(MAKE) -C $(B)/vlt_linux_ckpt -f Vrun_linux.mk OPT_FAST="-O3" run_linux_ckpt -j 4
 
 linux_ckpt_hash: $(RTL) tb/run_linux.sv tb/run_linux.cpp linux/vmlinux.bin linux/linux.dtb
 	@echo "LINUX_CKPT_HASH=$(LINUX_CKPT_HASH)"
 
-linux_ckpt_save: $(B)/vlt_linux_ckpt/run_linux_ckpt linux/gate.txt | linux $(B)/linux/logs
+linux_ckpt_save: $(B)/vlt_linux_ckpt/run_linux_ckpt linux/gate.txt | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs $(B)/linux_ckpt
 	@./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $$(( $(LINUX_CKPT_SAVE_CYCLE)+1 )) run save $(LINUX_CKPT_FILE) $(LINUX_CKPT_HASH) | tee $(B)/linux/logs/ckpt_save.out
 	@grep -q "^#CKPT_SAVE " $(B)/linux/logs/ckpt_save.out || { echo "LINUX CHECKPOINT SAVE FAILED" >&2; exit 1; }
 	@sha256sum $(LINUX_CKPT_FILE) | tee $(B)/linux/logs/ckpt_save_sha.out
 
-linux_ckpt_restore: $(B)/vlt_linux_ckpt/run_linux_ckpt $(LINUX_CKPT_FILE) | linux $(B)/linux/logs
+linux_ckpt_restore: $(B)/vlt_linux_ckpt/run_linux_ckpt $(LINUX_CKPT_FILE) | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
 	@./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run restore $(LINUX_CKPT_FILE) $(LINUX_CKPT_HASH) | tee $(B)/linux/logs/ckpt_restore.out
 	@grep -q "^#CKPT_RESTORE " $(B)/linux/logs/ckpt_restore.out || { echo "LINUX CHECKPOINT RESTORE FAILED" >&2; exit 1; }
 	@grep -q "^#LINUX cycles=" $(B)/linux/logs/ckpt_restore.out || { echo "LINUX CHECKPOINT RESTORE DID NOT FINISH" >&2; exit 1; }
 
-linux_ckpt_equiv: linux_ckpt_save linux_ckpt_restore | linux $(B)/linux/logs
+linux_ckpt_equiv: linux_ckpt_save linux_ckpt_restore | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
 	@./$(B)/vlt_linux_ckpt/run_linux_ckpt linux/vmlinux.bin linux/linux.dtb $(LINUX_CKPT_LATER_CYCLE) run mark $(LINUX_CKPT_SAVE_CYCLE) | tee $(B)/linux/logs/ckpt_mark.out
 	@grep -q "^#CKPT_MARK " $(B)/linux/logs/ckpt_mark.out || { echo "LINUX CHECKPOINT MARK FAILED" >&2; exit 1; }
@@ -623,7 +637,7 @@ linux_ckpt_equiv: linux_ckpt_save linux_ckpt_restore | linux $(B)/linux/logs
 	@grep -q "^#CKPT_RESTORE " $(B)/linux/logs/ckpt_restore.out || { echo "LINUX CHECKPOINT EQUIVALENCE: no restore marker" >&2; exit 1; }
 	@echo "LINUX CHECKPOINT EQUIVALENCE PASSED"
 
-linux_dbg_ckpt: $(B)/vlt_linux_ckpt/run_linux_ckpt linux/gate.txt | linux $(B)/linux/logs
+linux_dbg_ckpt: $(B)/vlt_linux_ckpt/run_linux_ckpt linux/gate.txt | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs $(B)/linux_ckpt
 	@echo "Checkpoint hash: $(LINUX_CKPT_HASH)"
 	@if [ -s $(LINUX_CKPT_FILE) ]; then \
@@ -791,8 +805,20 @@ TB_FPGA := tb/fpga_tb.sv
 $(B)/vlt/fpga_run: $(FPGA_RTL) $(TB_FPGA) | $(B)/vlt
 	verilator --binary --Wall --timing -O2 --Mdir $(B)/vlt -o fpga_run $(FPGA_RTL) $(TB_FPGA)
 
+# Fail a synthesis rule when yosys had to resolve a multiple-driver conflict:
+# it silently picks one driver (for example a `= 0` initialiser on an assigned
+# net), so the netlist no longer matches the RTL that the simulations test.
+# Usage: $(call yosys_conflict_check,<log>,<json to delete on failure>)
+define yosys_conflict_check
+@if grep -q 'Driver-driver conflict' $(1); then \
+  grep 'Driver-driver conflict' $(1) | head -5; \
+  echo "ERROR: yosys resolved a driver conflict, see $(1)"; \
+  rm -f $(2); exit 1; fi
+endef
+
 $(B)/cpu.json: $(FPGA_RTL) | $(B)
 	yosys -p 'read_verilog -sv -Irtl $(FPGA_RTL); synth_ice40 -top fpga_top -json $(B)/cpu.json; stat' > $(B)/cpu_syn.log
+	$(call yosys_conflict_check,$(B)/cpu_syn.log,$@)
 
 $(B)/cpu.asc: $(B)/cpu.json | $(B)
 	nextpnr-ice40 --up5k --package sg48 --json $(B)/cpu.json --asc $(B)/cpu.asc --freq 20 > $(B)/cpu_route.log 2>&1
@@ -825,6 +851,7 @@ FPGA_PIPE_RTL := rtl/fpga_pipe_top.sv rtl/cache32_fpga.sv $(filter-out rtl/mdiu_
 
 $(B)/cpu_full.json: $(FPGA_PIPE_RTL) rtl/fpga_prog_init.sv | $(B)
 	@yosys -p 'read_verilog -sv -Irtl -DFPGA $(FPGA_PIPE_RTL); synth_ice40 -dsp -top fpga_pipe_top -json $(B)/cpu_full.json; stat' > $(B)/cpu_full_syn.log
+	$(call yosys_conflict_check,$(B)/cpu_full_syn.log,$@)
 
 $(B)/cpu_full.asc: $(B)/cpu_full.json | $(B)
 	@nextpnr-ice40 --up5k --package sg48 --json $(B)/cpu_full.json --asc $(B)/cpu_full.asc --freq $(FPGA_FREQ) --seed $(FPGA_SEED) > $(B)/cpu_full_route.log 2>&1
@@ -847,6 +874,7 @@ $(B)/fpga_csrtrap/fpga_prog_init.sv: $(B)/fpga_csrtrap.hex | $(B)/fpga_csrtrap
 # `include "fpga_prog_init.sv"` resolves to the csrtrap ROM rather than rtl/fpga_prog_init.sv.
 $(B)/fpga_csrtrap/cpu_full.json: $(FPGA_PIPE_RTL) $(B)/fpga_csrtrap/fpga_prog_init.sv | $(B)/fpga_csrtrap
 	@yosys -p 'read_verilog -sv -DFPGA -I$(B)/fpga_csrtrap -Irtl $(FPGA_PIPE_RTL); synth_ice40 -dsp -top fpga_pipe_top -json $(B)/fpga_csrtrap/cpu_full.json; stat' > $(B)/fpga_csrtrap/cpu_full_syn.log
+	$(call yosys_conflict_check,$(B)/fpga_csrtrap/cpu_full_syn.log,$@)
 
 fpga_csrtrap_netlist: $(B)/fpga_csrtrap/cpu_full.json | $(B)/fpga_csrtrap
 	@python3 tools/fpga_netlist_check.py $(B)/fpga_csrtrap/cpu_full.json --baseline-lut4 $(FPGA_CSRTRAP_NETLIST_LUT4) --baseline-flops $(FPGA_CSRTRAP_NETLIST_FLOPS) --csr-min st_mepc:32 --csr-min st_mtvec:6 --csr-min st_mcause:6 --csr-min st_mie:6
@@ -955,15 +983,16 @@ riscof: $(B)/vlt_riscof/run_hex_sig
 BR_MMU_OUT ?= ../../build-linux/mmu3
 BR_MMU_NAME ?= qemu_riscv32_virt_mmu_defconfig
 
-linux/linux_mmu.dtb: rtl/linux_mmu.dts linux | $(B)
+linux/linux_mmu.dtb: rtl/linux_mmu.dts | $(B)
 	@mkdir -p linux
 	@dtc -I dts -O dtb -o linux/linux_mmu.dtb rtl/linux_mmu.dts
 
 MMU_KERNEL_SHA256 ?= 09f4ae2c01a2c6b54cac7167ecd092e53a04ef775999f8bfaa24f2ccafb3c2c3
 MMU_FW_SHA256 ?= 1b5f194f55c2f743be9c26cc4c220a8d04e74f51e0e944023b9a5626e15fa7b7
-MMU_ROOTFS_CANON_SHA256 ?= c1692250c8f8d06eaa0baab7334839ea7c6ea3888f8f02e90986b9882487110f
+MMU_ROOTFS_CANON_SHA256 ?= 0fda249ac4e57da50cf49ca0326c9a0b7dc94156843a12646be6e422e9506be7
 
-linux_mmu_build: linux | $(BR_MMU_OUT)
+linux_mmu_build: | $(BR_MMU_OUT) $(B)/linux/mmu_build.stamp
+	@if [ -f $(B)/linux/mmu_build.stamp ]; then echo "MMU build cached (delete build/linux/mmu_build.stamp to rebuild)"; exit 0; fi
 	@ln -sf $(CURDIR)/linux/configs/$(BR_MMU_NAME) $(BR_ROOT)/configs/$(BR_MMU_NAME)
 	@cp $(CURDIR)/linux/configs/board/qemu/riscv32-virt/linux-mmu.fragment $(BR_ROOT)/board/qemu/riscv32-virt/linux-mmu.fragment
 	@cp $(CURDIR)/linux/configs/board/qemu/riscv32-virt/linux-isa-min.config $(BR_ROOT)/board/qemu/riscv32-virt/linux-isa-min.config
@@ -973,6 +1002,7 @@ linux_mmu_build: linux | $(BR_MMU_OUT)
 	$(MAKE) -s -C $(BR_ROOT) O=$(BR_MMU_OUT) all -j2
 	@python3 tools/canonical_cpio.py $(BR_MMU_OUT)/images/rootfs.cpio $(BR_MMU_OUT)/rootfs_canon.cpio
 	@python3 tools/mmu_pin_check.py $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/fw_dynamic.elf $(BR_MMU_OUT)/rootfs_canon.cpio $(MMU_KERNEL_SHA256),$(MMU_FW_SHA256),$(MMU_ROOTFS_CANON_SHA256)
+	@touch $(B)/linux/mmu_build.stamp
 
 linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
 	@rm -f $(BR_MMU_OUT)/qemu_boot.log
@@ -982,8 +1012,8 @@ linux_mmu_qemu: linux_mmu_build | $(B)/linux/logs
 	@grep -m 5 -a "OpenSBI\|Run /init as init\|login\|Power down" $(BR_MMU_OUT)/qemu_boot.log | head -10 || true
 
 $(B)/vlt_openboot/run_openboot: $(RTL) tb/run_linux.sv tb/run_openboot.cpp | $(B)
-	verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast $(OPENBOOT_DBG) $(OPENBOOT_IFHDBG) $(MT_DEFINE) -DLINUX -DLINUX_DEBUG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
-	$(MAKE) -C $(B)/vlt_openboot -f Vrun_linux.mk OPT_FAST="-O2 -DLINUX_DEBUG " run_openboot -j 4
+	verilator --cc --exe --savable --Wall -O3 --x-assign fast --x-initial fast $(OPENBOOT_DBG) $(OPENBOOT_IFHDBG) $(OPENBOOT_LINUX_DEBUG) $(MT_DEFINE) -DLINUX -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_openboot -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
+	$(MAKE) -C $(B)/vlt_openboot -f Vrun_linux.mk OPT_FAST="-O3 $(OPENBOOT_LINUX_DEBUG) -march=native" run_openboot -j 4
 
 linux_mmu_spike: linux_mmu_build spike_pin_check | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs
@@ -1017,16 +1047,17 @@ linux_mmu_spike: linux_mmu_build spike_pin_check | $(B)/linux/logs
 # plain store (our choice, pinned by self-written unpaged t19) is a legal spurious failure
 # that both goldens are free to pass - not pinned in t42 any more. Spike mrets with MPP:=00
 # instead of restoring MPP=M (c768_mstatus 0xe0080); tests re-arm MPP explicitly where it
-# matters (t43/t42 do).  t112_sv32_stwalk hardcodes a flat identity-VPN code page
-# (VPN 0), so it cannot run in the link_spike.ld layout (code at VPN 0x20); it is
-# pinned by ISS+RTL in the mmu suite instead, like the other filter-outs below.
-SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr t112_sv32_stwalk,$(MMU_TESTS)) t48_vendor_csr
+# matters (t43/t42 do).  t112_sv32_stwalk is now spike-pinnable: its identity code page is
+# macro-parameterized (MMU_CODE_VPN like t110), so the spike variant runs with code at VPN
+# 0x20; its SRET-to-S store-retry pin gets a golden (SPP polarity itself is pinned by t113).
+SPIKE_MMU_TESTS := $(filter-out t39_irq_gate t31_sv32_ad t43_sv32_mprv_umxr,$(MMU_TESTS)) t48_vendor_csr
 $(B)/spike:
 	@mkdir -p $@
 $(B)/spike/%.elf: tests/%.S tests/link_spike.ld | $(B)/spike
 	$(CC) $(CCFLAGS) -DMMU_CODE_VPN=0x20 -DCODE_FLAGS=0x4B -nostdlib -Wl,-Ttests/link_spike.ld -Wl,-m,elf32lriscv -o $@ $<
 $(B)/spike/t42_sv32_amo.elf: CCFLAGS := $(UA_CCFLAGS)
 $(B)/spike/t110_sv32_uspf.elf: CCFLAGS := $(UA_CCFLAGS)
+$(B)/spike/t112_sv32_stwalk.elf: CCFLAGS := $(UA_CCFLAGS)
 spike_tests: $(foreach t,$(SPIKE_MMU_TESTS),$(B)/spike/$(t).elf) spike_pin_check | $(B)
 	@mkdir -p $(B)/spike/logs
 	@bad=0; \
@@ -1038,6 +1069,7 @@ spike_tests: $(foreach t,$(SPIKE_MMU_TESTS),$(B)/spike/$(t).elf) spike_pin_check
 # Spike commit log (golden per-instruction reference): compare with build/linux/cpu_retire.bin.
 OPENBOOT_IFHDBG ?=
 OPENBOOT_DBG ?=
+OPENBOOT_LINUX_DEBUG ?=
 SPIKE_MAX_INS ?= 4750000
 # runner load addresses (must match the chosen/initrd + reg-clk nodes in the dtb)
 INITRD_ADDR ?= 0x83ecda00
@@ -1100,7 +1132,19 @@ linux_mmu_ckpt_save: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mm
 linux_mmu_ckpt_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
 	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_restore.out
 	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/ckpt_restore.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
-	@grep -q "^OPENBOOT OK" $(B)/linux/logs/ckpt_restore.out || { echo "L7 CKPT-RESTORE SIM FAILED"; exit 1; }
+	@grep -q "^OPENBOOT OK" $(B)/linux/logs/ckpt_restore.out || { echo "L7 CKPT-RESTORE SIM FAILED"; exit 1; fi
+
+linux_mmu_ckpt_probe: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
+	@rm -f $(B)/linux/cpu_shell_probe_retire.bin $(B)/linux/cpu_shell_probe_boot.log $(B)/linux/logs/probe.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_MMU_SHELL_CYCLES) shell 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_shell_probe_retire.bin $(B)/linux/cpu_shell_probe_boot.log > $(B)/linux/logs/probe.out
+
+linux_mmu_ckpt_shell_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
+	@rm -f $(B)/linux/cpu_shell_retire.bin $(B)/linux/cpu_shell_boot.log $(B)/linux/logs/ckpt_shell.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_MMU_SHELL_CYCLES) shell 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_shell_retire.bin $(B)/linux/cpu_shell_boot.log | tee $(B)/linux/logs/ckpt_shell.out
+	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/ckpt_shell.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
+	@grep -q "#LINUX.*done=1" $(B)/linux/logs/ckpt_shell.out || { echo "L7/L8 MMU SHELL FAILED: LINUX_SIM_DONE output not observed"; exit 1; }
+	@grep -q "#LINUX.*cmds=1" $(B)/linux/logs/ckpt_shell.out || { echo "L7/L8 MMU SHELL FAILED: expected command output not observed"; exit 1; }
+	@grep -q "OpenSBI v" $(B)/linux/cpu_shell_boot.log || { echo "L7/L8 MMU SHELL FAILED: OpenSBI banner missing"; exit 1; }
 
 # Capture a retire trace THROUGH the /init panic (no break on 'Kernel panic') for
 # self-consistency checkers (memcheck/regcheck/ra_hunt). Restore from the boot

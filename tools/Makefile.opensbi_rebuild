@@ -1,10 +1,11 @@
 # Rebuild the OpenSBI fw_jump/fw_dynamic objects with our CPU ISA
 # (rv32imaz_zicsr_zifencei, NO RVC — our CPU has no compressed insns), then
 # install them over the Buildroot images. Run: hdl make -f tools/Makefile.opensbi_rebuild
-export PATH := /home/jemko/agent-workspace/build-linux/mmu3/host/bin:$(PATH)
-OBJS_DIR = /home/jemko/agent-workspace/build-linux/mmu3/build/opensbi-1.6
+BL ?= $(CURDIR)/../../build-linux/mmu3
+export PATH := $(BL)/host/bin:$(PATH)
+OBJS_DIR = $(BL)/build/opensbi-1.6
 FW_DIR = $(OBJS_DIR)/build/platform/generic/firmware
-IMGS = /home/jemko/agent-workspace/build-linux/mmu3/images
+IMGS = $(BL)/images
 FW_FDT ?= 0x82200000
 
 all:

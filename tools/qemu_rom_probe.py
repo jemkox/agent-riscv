@@ -2,7 +2,7 @@
 # Probe QEMU virt's synthesized ROM stub (0x1000) + fw args struct via QMP.
 import subprocess, socket, json, time, sys, os
 
-QMP = "/home/jemko/agent-workspace/build-linux/mmu3/qmp.sock"
+QMP = sys.argv[1] if len(sys.argv) > 1 else os.path.relpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "build-linux", "mmu3", "qmp.sock"))
 try:
     os.unlink(QMP)
 except FileNotFoundError:
