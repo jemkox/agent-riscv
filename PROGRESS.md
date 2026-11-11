@@ -2139,6 +2139,23 @@ LINUX CPU: DONE
   - `hdl make linux`: reproduced OpenSBI + Sv32 Linux shell through `LINUX_SIM_DONE`;
     fresh metrics: `#CKPT_SAVE cyc=219999999 insns=0 hash=f8b3c5837eae0326963556fe8c7b5014a8a3ca5ccbd0c727083d805f0e52daa7`,
     `#STOP cyc=1326153238 login=1 done=1`, `#LINUX cycles=1326153238 insns=1753060742 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000`.
+- Follow-up review regression fixes after the first review-fix commit:
+  - `tools/run_hex_locked.py` derives the shared build root from the runner-binary path
+    when its parent directory starts with `vlt`, so nested parallel suite calls like
+    `make B=build/all_tests_parallel/test` copy `$(B)/p.hex`, not the parent `build/p.hex`.
+    This fixed the earlier `all_tests_parallel` failures where each suite's Verilator runner
+    read its own `p.hex` path while the helper had updated the wrong shared file.
+  - `tools/run_hex_locked.py` now removes an existing locked runner binary before copying and
+    retries if `ETEXTBUSY` is seen, so an already-executing runner image cannot cause
+    `Text file busy` copy failures.
+  - `tools/run_regress.py` calls the locked helper with a 70-second helper timeout and a
+    75-second outer subprocess timeout; the helper uses `Popen.kill()` and reports a
+    timeout line in the RTL log instead of leaving an old runner attached to the copied binary.
+- Measured after the follow-up fixes:
+  - `hdl make test`, `hdl make ui um mi ua si`, `hdl make regress N=500`, and
+    `hdl make linux`: PASS with the same locked helper.
+  - `hdl make all_tests`: `ALL TESTS DONE`; parallel suite regress reported
+    `REGRESS ALL PASS (0 checked, 500 skipped)` after the prior 500-seed cache pass.
 
 ### Metrics (review fixes on e76a5f0, measured this session)
 | Gate | Result |

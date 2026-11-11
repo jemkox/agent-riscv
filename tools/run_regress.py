@@ -5,8 +5,8 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 # Parallel-ish regress runner: per-seed gen -> sim (single prebuilt run_hex fed
-# via build/p.hex, 60s limit) -> ISS --pass (30s) -> cmp.  Seeds whose .bin hash
-# matches a stored hash and whose cmp passed before are skipped.
+# via build/p.hex, 75s limit through the locked helper) -> ISS --pass (30s) -> cmp.
+# Seeds whose .bin hash matches a stored hash and whose cmp passed before are skipped.
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 500
 B = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("BUILD_ROOT", "build")
 LAT = int(sys.argv[3]) if len(sys.argv) > 3 else 1   # CACHE_LAT of the run_hex build
@@ -44,14 +44,14 @@ for n, (i, h) in enumerate(todo):
     helper_out = os.path.join(RD, "%d.helper.log" % i)
     try:
         r = subprocess.run([sys.executable, "tools/run_hex_locked.py", BIN,
-                            os.path.join(RD, "p%d.hex" % i), rtl_log],
-                           capture_output=True, text=True, timeout=70)
+                            os.path.join(RD, "p%d.hex" % i), rtl_log, "70"],
+                           capture_output=True, text=True, timeout=75)
         open(helper_out, "w").write(r.stdout + r.stderr)
         if r.returncode != 0 or not os.path.exists(rtl_log) or "#NOTERM" in open(rtl_log).read():
             fails.append((i, "SIM NOTERM/helper failure rc=%d (stuck pipeline)" % r.returncode))
             continue
     except subprocess.TimeoutExpired:
-        simfail.append((i, "SIM TIMEOUT 70s (locked helper)"))
+        simfail.append((i, "SIM TIMEOUT 75s outside locked helper"))
         continue
     open(os.path.join(RD, "p%d.state2" % i), "w").write(h)
     if (n + 1) % 100 == 0:
