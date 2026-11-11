@@ -1,6 +1,6 @@
 # rv32cpu: a RISC-V CPU that runs DOOM and boots Linux, built by a local AI agent
 
-[![CI](https://github.com/jemkox/agent-riscv-doom/actions/workflows/ci.yml/badge.svg)](https://github.com/jemkox/agent-riscv-doom/actions/workflows/ci.yml)
+[![CI](https://github.com/jemkox/agent-riscv/actions/workflows/ci.yml/badge.svg)](https://github.com/jemkox/agent-riscv/actions/workflows/ci.yml)
 
 <p align="center">
   <img src="docs/doom/gameplay.gif" width="640" alt="DOOM E1M1 running on the rv32cpu pipeline in Verilator">
@@ -179,7 +179,7 @@ check.
 ### Get the test suites and Doom
 
 ```sh
-git clone https://github.com/jemkox/agent-riscv-doom.git && cd agent-riscv-doom
+git clone https://github.com/jemkox/agent-riscv.git && cd agent-riscv
 make deps    # clones riscv-tests, CoreMark and FreeRTOS at pinned versions into deps/
 ```
 

@@ -63,8 +63,8 @@ Needs Linux with systemd, [opencode](https://opencode.ai) 1.x, `bwrap`
 local OpenAI-compatible model server (for example llama.cpp's `llama-server`).
 
 ```sh
-git clone https://github.com/jemkox/agent-riscv-doom.git ~/agent-workspace/agent-riscv-doom
-cd ~/agent-workspace/agent-riscv-doom && make deps
+git clone https://github.com/jemkox/agent-riscv.git ~/agent-workspace/agent-riscv
+cd ~/agent-workspace/agent-riscv && make deps
 agent/install.sh --model-id <name your server reports> --context 131072 \
   --model-cmd "llama-server -m /path/to/model.gguf --port 8080 -c 131072"
 cpu-agent start      # starts model, server, watchdog, reviewer; creates the builder session
