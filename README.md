@@ -59,7 +59,7 @@ hardware.
 | CoreMark | **3.19 CoreMark/MHz** (EEMBC CoreMark 1.0, CRCs validated, GCC 13.2 `-O2`) |
 | Operating system | **FreeRTOS** V11.2.0 (own port): tasks, queue, mutex, preemption, software timers, 185 context switches in the demo |
 | DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
-| FPGA (Tang Nano 20K) | current `make fpga_tang`: real `fpga_pipe_top` routed for GW2AR-LV18QN88C8/I7, Max frequency `48.99 MHz` (`PASS at 27.00 MHz`), pinned post-PnR netlist **2538 LUT4 / 1219 DFF-family**, 6 RAM, 278 ALU; `fpga_full` UP5K real-CPU check is expected no-fit: **6533 SB_LUT4 / 1768 SB_DFF**, route fails no ICESTORM_LC BELs; dedicated `fpga_csrtrap_netlist`: **5544 SB_LUT4 / 1667 SB_DFF** |
+| FPGA (Tang Nano 20K) | current `make fpga_tang`: real `fpga_pipe_top` routed for GW2AR-LV18QN88C8/I7, Max frequency `48.99 MHz` (`PASS at 27.00 MHz`), pinned post-PnR netlist **2538 LUT4 / 1219 DFF-family**, 6 RAM, 278 ALU; separate `make fpga_up5k_gate`: toy proof top real UP5K PASS at 13 MHz, **527 SB_LUT4 / 195 SB_DFF / 8 SB_RAM40_4K**; `fpga_full` UP5K real-CPU check is expected no-fit: **6533 SB_LUT4 / 1768 SB_DFF**, route fails no ICESTORM_LC BELs; dedicated `fpga_csrtrap_netlist`: **5544 SB_LUT4 / 1667 SB_DFF** |
 
 What that means in frames per second:
 
@@ -191,8 +191,9 @@ make freertos    # boot FreeRTOS, self-checking demo
 make doom        # headless Doom, frames in build/doom/frames
 make play        # live SDL window with keyboard
 make play_test   # scripted play, must differ from a no-key run
-make fpga_tang FPGA_TANG_FREQ=27 FPGA_TANG_SEED=6  # real CPU Tang Nano 20K PASS gate
-make fpga_full FPGA_FREQ=13 FPGA_SEED=6            # real CPU UP5K size/no-fit check (expected not to fit)
+make fpga_up5k_gate                              # separate real UP5K PASS gate (toy proof top, 13 MHz)
+make fpga_tang OSS_CAD=/home/jemko/tools/oss-cad-suite-20261027 # real CPU Tang Nano 20K PASS gate
+make fpga_full FPGA_FREQ=13 FPGA_SEED=6           # real CPU UP5K size/no-fit check (expected not to fit)
 make fpga_csrtrap_netlist                 # yosys + netlist checker for tests/fpga_csrtrap.S ROM
 make fpga_toy, fpga_toy_test              # LEGACY single-cycle toy proof top (fpga_top); not the full CPU
 ```
@@ -311,7 +312,7 @@ else's part:
   reproduction is ~13 min wall at ~1.6M cycles/s (build cached); the run is
   deterministic with fixed MT seed and fixed rootfs canonicalization.
 - Cycle counts for the current `hdl make linux` boot: login prompt detected at
-  427M cycles (approx.); `#LINUX cycles=1326849360 insns=1753061298 prompt=1 login=1 done=1 halt=0 cmds=1`.
+  427M cycles (approx.); `#LINUX cycles=1326153238 insns=1753060742 prompt=1 login=1 done=1 halt=0 cmds=1`.
 - Boot log excerpt (`build/linux/logs/shell.out`):
 
 ```
@@ -328,8 +329,8 @@ mmu		: sv32
 bin  init  lib  proc ...
 # echo LINUX_SIM_DONE
 LINUX_SIM_DONE
-#STOP cyc=1326849360 login=1 prompt_stop=0 done=1 shell_stop=1 panic=0 past_panic=0 halt=0
-#LINUX cycles=1326849360 insns=1753061298 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000
+#STOP cyc=1326153238 login=1 prompt_stop=0 done=1 shell_stop=1 panic=0 past_panic=0 halt=0
+#LINUX cycles=1326153238 insns=1753060742 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000
 ```
 
 ## Honest limits
@@ -350,8 +351,10 @@ LINUX_SIM_DONE
   restore to `LINUX_SIM_DONE`; login around 427M cycles, done at 1.32685B cycles);
   the console is serial-only — no networking (the pinned rootfs has no network
   daemons) and no GUI. The FPGA top (`fpga_pipe_top`) has no CLINT, no S/U
-  modes and no MMU (under `ifdef FPGA` WFI never executes and the FPGA SYSTEM
-  decoder keeps its Fmax shape where csr 0x100 is illegal). WFI is a builder
+  modes and no MMU; A-ext LR/SC atomics are stubbed out in that top (`lwe=0`,
+  `lwa=0`, `lwd=0` at `fpga_pipe_top.sv:33-35`), so `fpga_tang` proves fit/timing
+  for the CPU core, not atomic execution. Under `ifdef FPGA` WFI never executes
+  and the FPGA SYSTEM decoder keeps its Fmax shape where csr 0x100 is illegal. WFI is a builder
   convention (not a spec requirement in this project): simulation accepts f3=0
   SYSTEM encodings for `0x100` (x10000073) and `0x105` (x10500073) and retires
   them as IRQ-wait no-ops when no IRQ is pending; a pending IRQ traps before

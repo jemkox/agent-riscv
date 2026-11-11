@@ -2107,3 +2107,44 @@ LINUX CPU: DONE
   (~3.3K) were pinned to the broken netlist and need re-baselining or retiring. The FPGA target
   is moving to the Tang Nano 20K (Gowin GW2AR-18): there the fixed core places and routes at
   49.5–51.4 MHz post-route (3 seeds, nextpnr-himbaechel) using 5706 LUT4 (27%).
+
+## Review fixes on e76a5f0 (2026-11-10/11, committed as `review fixes: ...`)
+- Fixed review items from `reviews/rv32cpu-e76a5f0.md`:
+  - `fpga_up5k_gate` is now a separate real UP5K PASS gate for the toy proof top `fpga_top`:
+    `hdl make fpga_up5k_gate` PASS at `13 MHz`, `527 SB_LUT4 / 195 SB_DFF / 8 SB_RAM40_4K / 0 SB_MAC16`,
+    with `FPGA_UP5K_PROOF_LUT4=527`, `FPGA_UP5K_PROOF_FLOPS=195`.
+  - `fpga_tang` now depends on `oss_cad_pin_check` and no longer silently uses `$(HOME)`.
+    `OSS_CAD ?= $(firstword $(wildcard deps/oss-cad-suite ../../downloads/oss-cad-suite) deps/oss-cad-suite)`.
+    Pinned version: `OSS_CAD_VERSION ?= 20261027`; pinned sha256 checks for
+    `nextpnr-himbaechel` `b8a76c74e615fa915dfbe460c15aaf0f419756e67d64e0c08cfd906b9f445be1`,
+    `yosys` `7c3e3396b38c129dd7485be5a0a0f0da8e495a94c8fd486059e3bea043a588d6`,
+    and `gowin_pack` `63944c4046c38df2327ba92e2a8f310dc36cbed12f06012976ca123cd8547bdf`.
+    Current PASS command uses explicit `OSS_CAD=/home/jemko/tools/oss-cad-suite-20261027`.
+  - Program-file concurrency: added `tools/run_hex_locked.py` and Makefile `RUN_HEX`, `RUN_MMU`,
+    `RUN_MMU5`. Test suites now call helpers instead of bare `./build/vlt/run_hex`; concurrent
+    runners hold a directory lock while copying the program hex and runner binary. `tools/run_regress.py`
+    also uses the helper.
+  - Linux checkpoint hash now hashes the pinned canonical rootfs copy used by the MMU runner
+    (`$(B)/linux/inputs/rootfs_canon.cpio`) instead of Buildroot's raw `rootfs.cpio`, and restore/probe/shell
+    targets use the same canonical input. This avoids run-to-run cpio timestamp churn.
+  - README FPGA limits now state explicitly that LR/SC atomics are stubbed in `fpga_pipe_top`
+    (`lwe=0`, `lwa=0`, `lwd=0` at `fpga_pipe_top.sv:33-35`).
+- Measured after fixes:
+  - `hdl make fpga_up5k_gate`: PASS at 13 MHz (`23.88 MHz`, `22.71 MHz`), netlist check passed.
+  - `hdl make fpga_tang OSS_CAD=/home/jemko/tools/oss-cad-suite-20261027`: OSS pin OK, Max frequency
+    `44.15 MHz` and `48.99 MHz` (`PASS at 27.00 MHz`), netlist check passed.
+  - `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=6`: UP5K expected no-fit text;
+    `6533 SB_LUT4 / 1768 SB_DFF / 8 SB_RAM40_4K / 1 SB_MAC16`, netlist sanity passed.
+  - `hdl make test`: `ALL PASS`.
+  - `hdl make linux`: reproduced OpenSBI + Sv32 Linux shell through `LINUX_SIM_DONE`;
+    fresh metrics: `#CKPT_SAVE cyc=219999999 insns=0 hash=f8b3c5837eae0326963556fe8c7b5014a8a3ca5ccbd0c727083d805f0e52daa7`,
+    `#STOP cyc=1326153238 login=1 done=1`, `#LINUX cycles=1326153238 insns=1753060742 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000`.
+
+### Metrics (review fixes on e76a5f0, measured this session)
+| Gate | Result |
+|---|---|
+| `fpga_up5k_gate` | `527 SB_LUT4 / 195 SB_DFF / 8 SB_RAM40_4K / 0 SB_MAC16`, PASS at 13 MHz (`23.88 MHz`, `22.71 MHz`) |
+| `fpga_full` | expected no-fit: `6533 SB_LUT4 / 1768 SB_DFF / 8 SB_RAM40_4K / 1 SB_MAC16`, no UP5K `.bin`; netlist sanity OK |
+| `fpga_tang` | `2538 LUT4 / 1219 DFF-family / 6 RAM / 278 ALU`, `44.15 MHz` + `48.99 MHz`, PASS at 27 MHz; OSS CAD pin checked |
+| `test` | `ALL PASS` through `tools/run_hex_locked.py` |
+| `linux` | `OPENBOOT OK`, `#STOP cyc=1326153238 login=1 done=1`, `#LINUX cycles=1326153238 insns=1753060742 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000` |

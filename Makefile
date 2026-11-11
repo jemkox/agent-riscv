@@ -40,6 +40,12 @@ SAIL_SHA256 ?= f9bb8a32b8f3eddbdf69b3a29d96dff4ba1e77f45877165e0478418367da6bee
 FREERTOS_TAG ?= V11.2.0
 WAD_SHA1 := 5b2e249b9c5133ec987b3ea77596381dc0d6bc1d
 B ?= build
+# Serialized runner helper: concurrent hdl make invocations must not share
+# $(B)/p.hex or the mutable runner binary. Always use these, never a bare
+# ./$(B)/vlt/run_hex in a test loop.
+RUN_HEX := python3 tools/run_hex_locked.py $(B)/vlt/run_hex_lat$(CACHE_LAT)
+RUN_MMU := python3 tools/run_hex_locked.py $(B)/vlt_mmu/run_mmu
+RUN_MMU5 := python3 tools/run_hex_locked.py $(B)/vlt_mmu5/run_mmu5
 RVTEST_DIR ?= $(firstword $(wildcard deps/riscv-tests/isa ../../downloads/riscv-tests/isa) deps/riscv-tests/isa)
 COREMARK_DIR ?= $(firstword $(wildcard deps/coremark ../../downloads/coremark) deps/coremark)
 FREERTOS_DIR ?= $(firstword $(wildcard deps/FreeRTOS-Kernel ../../downloads/FreeRTOS-Kernel) deps/FreeRTOS-Kernel)
@@ -52,7 +58,16 @@ FPGA_SEED ?= 6
 # (about 145% of UP5K LCs), not a required PASS gate.
 FPGA_NETLIST_LUT4 ?= 6533
 FPGA_NETLIST_FLOPS ?= 1768
-OSS_CAD ?= $(HOME)/tools/oss-cad-suite-20261027
+FPGA_UP5K_PROOF_LUT4 ?= 527
+FPGA_UP5K_PROOF_FLOPS ?= 195
+FPGA_UP5K_PROOF_FREQ ?= 13
+# No $(HOME) fallback: the OSS CAD Suite install for the Tang gate is pinned like
+# other externals and must be passed explicitly or detected from deps/oss-cad-suite.
+OSS_CAD_VERSION ?= 20261027
+OSS_CAD_NEXT_PNR_HIMBAECHEL_SHA256 ?= b8a76c74e615fa915dfbe460c15aaf0f419756e67d64e0c08cfd906b9f445be1
+OSS_CAD_YOSYS_SHA256 ?= 7c3e3396b38c129dd7485be5a0a0f0da8e495a94c8fd486059e3bea043a588d6
+OSS_CAD_GOWIN_PACK_SHA256 ?= 63944c4046c38df2327ba92e2a8f310dc36cbed12f06012976ca123cd8547bdf
+OSS_CAD ?= $(firstword $(wildcard deps/oss-cad-suite ../../downloads/oss-cad-suite) deps/oss-cad-suite)
 FPGA_TANG_DEVICE ?= GW2AR-LV18QN88C8/I7
 FPGA_TANG_FAMILY ?= GW2A-18C
 FPGA_TANG_CST ?= rtl/tangnano20k.cst
@@ -104,7 +119,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si fpga_tang fpga_tang_netlist linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu $(B)/vlt_mmu5/run_mmu5 mmu mmu5 spike_pin_check spike_tests linux_mmu_spike linux_mmu_spike_log linux_spike_cmp
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_up5k_gate fpga_full ua si fpga_tang fpga_tang_netlist oss_cad_pin_check linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu $(B)/vlt_mmu5/run_mmu5 mmu mmu5 spike_pin_check spike_tests linux_mmu_spike linux_mmu_spike_log linux_spike_cmp
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -281,42 +296,42 @@ $(B)/ua/%.hex: $(B)/ua/%.bin | $(B)/ua
 $(B)/sim_%.vvp: $(RTL) $(TB) | $(B)
 	iverilog -g2012 -Wall -DTBHEX='"$(B)/$*.hex"' -DTOPPIPE -o $(B)/sim_$*.vvp $(RTL) $(TB)
 
-test: $(foreach t,$(TESTS),$(B)/$t.bin $(B)/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_BINS) $(UM_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ui $(B)/ui/logs $(B)/um $(B)/um/logs
+test: $(foreach t,$(TESTS),$(B)/$t.bin $(B)/$t.hex) $(UI_BINS) $(UI_HEXES) $(UM_BINS) $(UM_HEXES) $(B)/vlt/run_hex_lat$(CACHE_LAT) | need_rvtests $(B)/ui $(B)/ui/logs $(B)/um $(B)/um/logs
 	@bad=0; mkdir -p $(B)/rand; \
-	for t in $(TESTS); do \
-  cp $(B)/$$t.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/$$t.rtl.log; \
-  python3 iss/iss.py --quiet --pass --log $(B)/$$t.iss.log $(B)/$$t.bin > /dev/null || { echo "$$t: ISS pass marker not reached"; bad=$$((bad+1)); }; \
-  python3 tools/cmp.py $(B)/$$t.rtl.log $(B)/$$t.iss.log > /dev/null || bad=$$((bad+1)); \
-  done; \
+	 for t in $(TESTS); do \
+   $(RUN_HEX) $(B)/$$t.hex $(B)/$$t.rtl.log; \
+   python3 iss/iss.py --quiet --pass --log $(B)/$$t.iss.log $(B)/$$t.bin > /dev/null || { echo "$$t: ISS pass marker not reached"; bad=$$((bad+1)); }; \
+   python3 tools/cmp.py $(B)/$$t.rtl.log $(B)/$$t.iss.log > /dev/null || bad=$$((bad+1)); \
+	 done; \
 	 python3 iss/iss.py --quiet --pass $(B)/t16_mret.bin > /dev/null || { echo "t16_mret: mret did not return to mepc"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass $(B)/t18_wfi.bin > /dev/null || { echo "t18_wfi: self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
 	 python3 iss/iss.py --quiet --pass $(B)/t19_amo.bin > /dev/null || { echo "t19_amo: atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
- 	 python3 iss/iss.py --quiet --pass $(B)/t20_amo_illegal.bin > /dev/null || { echo "t20_amo_illegal: illegal/reserved/MMIO atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
- 	 for t in t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop; do \
- 	 python3 iss/iss.py --quiet --pass $(B)/$$t.bin > /dev/null || { echo "$$t: gp self-check failed (gp!=1)"; bad=$$((bad+1)); }; \
- 	 done; \
- 	 for n in $(UI_NAMES); do \
-	 cp $(B)/ui/$$n.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/ui/logs/$$n.rtl.log; \
+	 python3 iss/iss.py --quiet --pass $(B)/t20_amo_illegal.bin > /dev/null || { echo "t20_amo_illegal: illegal/reserved/MMIO atomics self-check branch taken (gp!=1)"; bad=$$((bad+1)); }; \
+	 for t in t99_branchloop t100_csr_branch_fwd t101_linux_csrrw_clear t102_csr_dest_fwd t103_csr_dest_nop; do \
+	 python3 iss/iss.py --quiet --pass $(B)/$$t.bin > /dev/null || { echo "$$t: gp self-check failed (gp!=1)"; bad=$$((bad+1)); }; \
+	 done; \
+	 for n in $(UI_NAMES); do \
+	 $(RUN_HEX) $(B)/ui/$$n.hex $(B)/ui/logs/$$n.rtl.log; \
 	 python3 iss/iss.py --quiet --pass --log $(B)/ui/logs/$$n.iss.log $(B)/ui/$$n.bin > /dev/null; \
 	 python3 tools/cmp.py $(B)/ui/logs/$$n.rtl.log $(B)/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
 	 for n in $(UM_NAMES); do \
-	 cp $(B)/um/$$n.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/um/logs/$$n.rtl.log; \
+	 $(RUN_HEX) $(B)/um/$$n.hex $(B)/um/logs/$$n.rtl.log; \
 	 python3 iss/iss.py --quiet --pass --log $(B)/um/logs/$$n.iss.log $(B)/um/$$n.bin > /dev/null; \
 	 python3 tools/cmp.py $(B)/um/logs/$$n.rtl.log $(B)/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
 	 for i in $(shell seq 1 $(N)); do \
- 	 python3 tools/gen.py $$i $(B)/rand/p$$i > /dev/null || bad=$$((bad+1)); cp $(B)/rand/p$$i.hex $(B)/p.hex; ./$(B)/vlt/run_hex > $(B)/rand/$$i.rtl.log; \
+	 python3 tools/gen.py $$i $(B)/rand/p$$i > /dev/null || bad=$$((bad+1)); \
+	 $(RUN_HEX) $(B)/rand/p$$i.hex $(B)/rand/$$i.rtl.log; \
 	 python3 iss/iss.py --quiet --log $(B)/rand/$$i.iss.log $(B)/rand/p$$i.bin > /dev/null; \
 	 python3 tools/cmp.py $(B)/rand/$$i.rtl.log $(B)/rand/$$i.iss.log > /dev/null || bad=$$((bad+1)); \
 	 done; \
 	 if [ $$bad -eq 0 ]; then echo ALL PASS; else echo "TEST FAILED: $$bad errors"; exit 1; fi
 
-ui: $(UI_BINS) $(UI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ui $(B)/ui/logs
+ui: $(UI_BINS) $(UI_HEXES) $(B)/vlt/run_hex_lat$(CACHE_LAT) | need_rvtests $(B)/ui $(B)/ui/logs
 	@bad=0; \
   for n in $(UI_NAMES); do \
-    cp $(B)/ui/$$n.hex $(B)/p.hex; \
-    ./$(B)/vlt/run_hex > $(B)/ui/logs/$$n.rtl.log; \
+    $(RUN_HEX) $(B)/ui/$$n.hex $(B)/ui/logs/$$n.rtl.log; \
     python3 iss/iss.py --quiet --pass --log $(B)/ui/logs/$$n.iss.log $(B)/ui/$$n.bin > /dev/null || bad=$$((bad+1)); \
     python3 tools/cmp.py $(B)/ui/logs/$$n.rtl.log $(B)/ui/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
@@ -345,8 +360,7 @@ $(B)/vlt_mmudbg:
 
 mmu: $(B)/vlt_mmu/run_mmu $(B)/mmu $(B)/mmu/logs $(foreach t,$(MMU_TESTS),$(B)/$(t).bin $(B)/$(t).hex $(B)/$(t).elf) | $(B)
 	@bad=0; for t in $(MMU_TESTS); do \
-	  cp $(B)/$$t.hex $(B)/p.hex; \
-	  ./$(B)/vlt_mmu/run_mmu > $(B)/mmu/logs/$$t.rtl.log; \
+	  $(RUN_MMU) $(B)/$$t.hex $(B)/mmu/logs/$$t.rtl.log; \
 	  python3 iss/iss.py --quiet --pass --log $(B)/mmu/logs/$$t.iss.log $(B)/$$t.bin > /dev/null || bad=$$((bad+1)); \
 	  python3 tools/cmp.py $(B)/mmu/logs/$$t.rtl.log $(B)/mmu/logs/$$t.iss.log || bad=$$((bad+1)); \
 	  riscv64-unknown-elf-objdump -t $(B)/$$t.elf | python3 tools/mmuself.py tests/$$t.S $(B)/mmu/logs/$$t.rtl.log || bad=$$((bad+1)); \
@@ -367,49 +381,45 @@ $(B)/mmu5/logs:
 
 mmu5: $(B)/vlt_mmu5/run_mmu5 $(B)/mmu5 $(B)/mmu5/logs $(foreach t,$(MMU_TESTS),$(B)/$(t).bin $(B)/$(t).hex $(B)/$(t).elf) | $(B)
 	@bad=0; for t in $(MMU_TESTS); do \
-	  cp $(B)/$$t.hex $(B)/p.hex; \
-	  ./$(B)/vlt_mmu5/run_mmu5 > $(B)/mmu5/logs/$$t.rtl.log; \
+	  $(RUN_MMU5) $(B)/$$t.hex $(B)/mmu5/logs/$$t.rtl.log; \
 	  python3 iss/iss.py --quiet --pass --log $(B)/mmu5/logs/$$t.iss.log $(B)/$$t.bin > /dev/null || bad=$$((bad+1)); \
 	  python3 tools/cmp.py $(B)/mmu5/logs/$$t.rtl.log $(B)/mmu5/logs/$$t.iss.log || bad=$$((bad+1)); \
 	  riscv64-unknown-elf-objdump -t $(B)/$$t.elf | python3 tools/mmuself.py tests/$$t.S $(B)/mmu5/logs/$$t.rtl.log || bad=$$((bad+1)); \
- done; if [ $$bad -eq 0 ]; then echo "MMU5 ALL PASS"; else echo "MMU5 $$bad FAILS"; exit 1; fi
+	 done; if [ $$bad -eq 0 ]; then echo "MMU5 ALL PASS"; else echo "MMU5 $$bad FAILS"; exit 1; fi
 
-um: $(UM_BINS) $(UM_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/um $(B)/um/logs
+um: $(UM_BINS) $(UM_HEXES) $(B)/vlt/run_hex_lat$(CACHE_LAT) | need_rvtests $(B)/um $(B)/um/logs
 	@bad=0; \
   for n in $(UM_NAMES); do \
-    cp $(B)/um/$$n.hex $(B)/p.hex; \
-    ./$(B)/vlt/run_hex > $(B)/um/logs/$$n.rtl.log; \
+    $(RUN_HEX) $(B)/um/$$n.hex $(B)/um/logs/$$n.rtl.log; \
     python3 iss/iss.py --quiet --pass --log $(B)/um/logs/$$n.iss.log $(B)/um/$$n.bin > /dev/null || bad=$$((bad+1)); \
     python3 tools/cmp.py $(B)/um/logs/$$n.rtl.log $(B)/um/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
   if [ $$bad -eq 0 ]; then echo ALL UM PASS; else echo "UM TEST FAILED: $$bad errors"; exit 1; fi
 
-mi: $(MI_BINS) $(MI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/mi $(B)/mi/logs
+mi: $(MI_BINS) $(MI_HEXES) $(B)/vlt/run_hex_lat$(CACHE_LAT) | need_rvtests $(B)/mi $(B)/mi/logs
 	@bad=0; \
   for n in $(MI_NAMES); do \
-    cp $(B)/mi/$$n.hex $(B)/p.hex; \
-    ./$(B)/vlt/run_hex > $(B)/mi/logs/$$n.rtl.log; \
+    $(RUN_HEX) $(B)/mi/$$n.hex $(B)/mi/logs/$$n.rtl.log; \
     python3 iss/iss.py --quiet --pass --log $(B)/mi/logs/$$n.iss.log $(B)/mi/$$n.bin > /dev/null || bad=$$((bad+1)); \
     python3 tools/cmp.py $(B)/mi/logs/$$n.rtl.log $(B)/mi/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
   if [ $$bad -eq 0 ]; then echo ALL MI PASS; else echo "MI TEST FAILED: $$bad errors"; exit 1; fi
 
-ua: $(UA_BINS) $(UA_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/ua $(B)/ua/logs
-	@bad=0;   for n in $(UA_NAMES); do     cp $(B)/ua/$$n.hex $(B)/p.hex;     ./$(B)/vlt/run_hex > $(B)/ua/logs/$$n.rtl.log;     python3 iss/iss.py --quiet --pass --log $(B)/ua/logs/$$n.iss.log $(B)/ua/$$n.bin > /dev/null || bad=$$((bad+1));     python3 tools/cmp.py $(B)/ua/logs/$$n.rtl.log $(B)/ua/logs/$$n.iss.log > /dev/null || bad=$$((bad+1));   done;   if [ $$bad -eq 0 ]; then echo ALL UA PASS; else echo "UA TEST FAILED: $$bad errors"; exit 1; fi
+ua: $(UA_BINS) $(UA_HEXES) $(B)/vlt/run_hex_lat$(CACHE_LAT) | need_rvtests $(B)/ua $(B)/ua/logs
+	@bad=0;   for n in $(UA_NAMES); do     $(RUN_HEX) $(B)/ua/$$n.hex $(B)/ua/logs/$$n.rtl.log;     python3 iss/iss.py --quiet --pass --log $(B)/ua/logs/$$n.iss.log $(B)/ua/$$n.bin > /dev/null || bad=$$((bad+1));     python3 tools/cmp.py $(B)/ua/logs/$$n.rtl.log $(B)/ua/logs/$$n.iss.log > /dev/null || bad=$$((bad+1));   done;   if [ $$bad -eq 0 ]; then echo ALL UA PASS; else echo "UA TEST FAILED: $$bad errors"; exit 1; fi
 
-si: $(SI_BINS) $(SI_HEXES) $(B)/vlt/run_hex | need_rvtests $(B)/si $(B)/si/logs
+si: $(SI_BINS) $(SI_HEXES) $(B)/vlt/run_hex_lat$(CACHE_LAT) | need_rvtests $(B)/si $(B)/si/logs
 	@bad=0; \
   for n in $(SI_NAMES); do \
-    cp $(B)/si/$$n.hex $(B)/p.hex; \
-    ./$(B)/vlt/run_hex > $(B)/si/logs/$$n.rtl.log; \
+    $(RUN_HEX) $(B)/si/$$n.hex $(B)/si/logs/$$n.rtl.log; \
     python3 iss/iss.py --quiet --pass --log $(B)/si/logs/$$n.iss.log $(B)/si/$$n.bin > /dev/null || bad=$$((bad+1)); \
     python3 tools/cmp.py $(B)/si/logs/$$n.rtl.log $(B)/si/logs/$$n.iss.log > /dev/null || bad=$$((bad+1)); \
   done; \
   if [ $$bad -eq 0 ]; then echo ALL SI PASS; else echo "SI TEST FAILED: $$bad errors"; exit 1; fi
 
 
-regress: $(B)/vlt/run_hex
-	@python3 tools/run_regress.py $(N) $(B) $(CACHE_LAT)
+regress: $(B)/vlt/run_hex_lat$(CACHE_LAT)
+	@BUILD_ROOT=$(B) python3 tools/run_regress.py $(N) $(B) $(CACHE_LAT)
 
 TB_MMIO := tb/run_mmio.sv
 M7_NAMES := hello fib sort matmul bench
@@ -875,11 +885,32 @@ $(B)/cpu_full.asc: $(B)/cpu_full.json | $(B)
 $(B)/cpu_full.bin: $(B)/cpu_full.asc
 	@icepack $(B)/cpu_full.asc $(B)/cpu_full.bin
 
+$(B)/fpga_up5k_proof:
+	@mkdir -p $(B)/fpga_up5k_proof
+
+$(B)/fpga_up5k_proof/cpu.json: $(FPGA_RTL) | $(B)/fpga_up5k_proof $(B)
+	@yosys -p 'read_verilog -sv -Irtl $(FPGA_RTL); synth_ice40 -top fpga_top -json $(B)/fpga_up5k_proof/cpu.json; stat' > $(B)/fpga_up5k_proof_syn.log
+	$(call yosys_conflict_check,$(B)/fpga_up5k_proof_syn.log,$@)
+
+$(B)/fpga_up5k_proof/cpu.asc: $(B)/fpga_up5k_proof/cpu.json | $(B)/fpga_up5k_proof $(B)
+	@nextpnr-ice40 --up5k --package sg48 --json $(B)/fpga_up5k_proof/cpu.json --asc $(B)/fpga_up5k_proof/cpu.asc --freq $(FPGA_UP5K_PROOF_FREQ) --seed $(FPGA_SEED) > $(B)/fpga_up5k_proof_route.log 2>&1
+
+$(B)/fpga_up5k_proof/cpu.bin: $(B)/fpga_up5k_proof/cpu.asc
+	@icepack $(B)/fpga_up5k_proof/cpu.asc $(B)/fpga_up5k_proof/cpu.bin
+
+fpga_up5k_gate: $(B)/fpga_up5k_proof/cpu.bin | $(B)/fpga_up5k_proof $(B)
+	@echo "fpga_up5k_gate: separate real UP5K PASS gate (toy proof top fpga_top; fpga_full remains expected no-fit)"
+	@grep -E 'Max frequency .*PASS at $(FPGA_UP5K_PROOF_FREQ)' $(B)/fpga_up5k_proof_route.log
+	@python3 tools/fpga_netlist_check.py $(B)/fpga_up5k_proof/cpu.json --baseline-lut4 $(FPGA_UP5K_PROOF_LUT4) --baseline-flops $(FPGA_UP5K_PROOF_FLOPS) --skip-csr --allow-missing-prims
+
 fpga_full: $(B)/cpu_full.asc | $(B)
 	@echo "fpga_full: UP5K real-CPU place/route is EXPECTED-NOT-FIT (about 145% LCs); Tang Nano 20K is the PASS gate."
 	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' $(B)/cpu_full_syn.log $(B)/cpu_full_route.log || true
 	@python3 tools/fpga_netlist_check.py $(B)/cpu_full.json --baseline-lut4 $(FPGA_NETLIST_LUT4) --baseline-flops $(FPGA_NETLIST_FLOPS) --csr-min st_mepc:32 --csr-min st_mtvec:4 --csr-min st_mcause:6 --csr-min st_mie:4
 	@if test -f $(B)/cpu_full.bin; then echo "fpga_full UNEXPECTED: real CPU unexpectedly fit/routed on UP5K"; exit 1; else echo "fpga_full expected result: no UP5K .bin (expected no-fit)"; fi
+
+oss_cad_pin_check:
+	@OSS_CAD_VERSION=$(OSS_CAD_VERSION) OSS_CAD_YOSYS_SHA256=$(OSS_CAD_YOSYS_SHA256) OSS_CAD_NEXT_PNR_HIMBAECHEL_SHA256=$(OSS_CAD_NEXT_PNR_HIMBAECHEL_SHA256) OSS_CAD_GOWIN_PACK_SHA256=$(OSS_CAD_GOWIN_PACK_SHA256) python3 tools/oss_cad_check.py $(OSS_CAD)
 
 $(B)/fpga_tang:
 	@mkdir -p $(B)/fpga_tang
@@ -895,7 +926,7 @@ $(B)/fpga_tang.hex: $(B)/fpga_prog.hex | $(B)/fpga_tang $(B)
 $(B)/fpga_tang/fpga_prog_init.sv: $(B)/fpga_tang.hex | $(B)/fpga_tang $(B)
 	@python3 tools/gen_fpga_rom.py $< $@
 
-$(B)/fpga_tang/cpu.json: $(FPGA_TANG_RTL) $(B)/fpga_tang/fpga_prog_init.sv | $(B)/fpga_tang $(B)/fpga_tang/cache32_fpga.sv
+$(B)/fpga_tang/cpu.json: $(FPGA_TANG_RTL) $(B)/fpga_tang/fpga_prog_init.sv | $(B)/fpga_tang $(B)/fpga_tang/cache32_fpga.sv oss_cad_pin_check
 	@$(OSS_CAD)/bin/yosys -p 'read_verilog $(OSS_CAD)/share/yosys/ice40/cells_sim.v; read_verilog -sv -DFPGA -I$(B)/fpga_tang -Irtl $(FPGA_TANG_RTL); synth_gowin -family gw2a -top fpga_pipe_top -json $(B)/fpga_tang/cpu.json; stat' > $(B)/fpga_tang_syn.log
 	$(call yosys_conflict_check,$(B)/fpga_tang_syn.log,$@)
 
@@ -905,7 +936,7 @@ $(B)/fpga_tang/pnr.json: $(B)/fpga_tang/cpu.json $(FPGA_TANG_CST) | $(B)/fpga_ta
 $(B)/fpga_tang/cpu.bin: $(B)/fpga_tang/pnr.json
 	@$(OSS_CAD)/bin/gowin_pack -d $(FPGA_TANG_FAMILY) -o $(B)/fpga_tang/cpu.bin $(B)/fpga_tang/pnr.json
 
-fpga_tang: $(B)/fpga_tang/cpu.bin
+fpga_tang: $(B)/fpga_tang/cpu.bin oss_cad_pin_check
 	@echo "fpga_tang PASS gate: real fpga_pipe_top routed for Tang Nano 20K"
 	@grep -E 'Max frequency.*\(PASS at $(FPGA_TANG_FREQ)|does not fit|Failed' $(B)/fpga_tang_route.log
 	@python3 tools/fpga_netlist_check.py $(B)/fpga_tang/pnr.json --baseline-lut4 $(FPGA_TANG_NETLIST_LUT4) --baseline-flops $(FPGA_TANG_NETLIST_FLOPS) --csr-min st_mepc:32 --csr-min st_mtvec:4 --csr-min st_mcause:6 --csr-min st_mie:4
@@ -1181,25 +1212,25 @@ CKPT_REC_START ?= 0
 LINUX_TRACE_MAX ?= 20000000
 linux_mmu_ckpt_save: $(B)/vlt_openboot/run_openboot linux/linux_mmu.dtb linux_mmu_build | $(B)/linux/logs
 	@mkdir -p $(B)/linux/logs $(B)/linux/inputs
-	@cp -p $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/images/rootfs.cpio linux/linux_mmu.dtb $(B)/linux/inputs/
-	@rm -f $(B)/linux/boot_ckpt.bin
-	@H=$$( { sha256sum $(RTL) tb/run_linux.sv tb/run_openboot.cpp $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb; echo "addr $(INITRD_ADDR) $(DTB_ADDR) mt $(MTIME_RATE) $(MTIME_SEED)"; } | sha256sum | cut -d' ' -f1); \
+	@cp -p $(BR_MMU_OUT)/images/fw_jump.bin $(BR_MMU_OUT)/images/Image $(BR_MMU_OUT)/rootfs_canon.cpio linux/linux_mmu.dtb $(B)/linux/inputs/
+	@rm -f $(B)/linux/boot_ckpt.bin $(B)/linux/inputs/rootfs.cpio
+	@H=$$( { sha256sum $(RTL) tb/run_linux.sv tb/run_openboot.cpp $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb; echo "addr $(INITRD_ADDR) $(DTB_ADDR) mt $(MTIME_RATE) $(MTIME_SEED)"; } | sha256sum | cut -d' ' -f1); \
 	echo "$$H" > $(B)/linux/boot_ckpt.hash; \
-	INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) TRACE_MAX=$(LINUX_TRACE_MAX) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(CKPT_CYCLES) - '$(CKPT_REC_START)' save $(B)/linux/boot_ckpt.bin "$$H" $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_save.out
+	INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) TRACE_MAX=$(LINUX_TRACE_MAX) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(CKPT_CYCLES) - '$(CKPT_REC_START)' save $(B)/linux/boot_ckpt.bin "$$H" $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_save.out
 	@grep -q "^#CKPT_SAVE" $(B)/linux/logs/ckpt_save.out || { echo "CKPT SAVE FAILED"; exit 1; }
 
-linux_mmu_ckpt_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
-	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_restore.out
+linux_mmu_ckpt_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_SIM_CYCLES) prompt 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_retire.bin $(B)/linux/cpu_boot.log | tee $(B)/linux/logs/ckpt_restore.out
 	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/ckpt_restore.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
 	@grep -q "^OPENBOOT OK" $(B)/linux/logs/ckpt_restore.out || { echo "L7 CKPT-RESTORE SIM FAILED"; exit 1; fi
 
-linux_mmu_ckpt_probe: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
+linux_mmu_ckpt_probe: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
 	@rm -f $(B)/linux/cpu_shell_probe_retire.bin $(B)/linux/cpu_shell_probe_boot.log $(B)/linux/logs/probe.out
-	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_MMU_SHELL_CYCLES) shell 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_shell_probe_retire.bin $(B)/linux/cpu_shell_probe_boot.log > $(B)/linux/logs/probe.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_MMU_SHELL_CYCLES) shell 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_shell_probe_retire.bin $(B)/linux/cpu_shell_probe_boot.log > $(B)/linux/logs/probe.out
 
-linux_mmu_ckpt_shell_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
+linux_mmu_ckpt_shell_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(B)/linux/boot_ckpt.hash | $(B)/linux/logs
 	@rm -f $(B)/linux/cpu_shell_retire.bin $(B)/linux/cpu_shell_boot.log $(B)/linux/logs/ckpt_shell.out
-	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_MMU_SHELL_CYCLES) shell 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_shell_retire.bin $(B)/linux/cpu_shell_boot.log | tee $(B)/linux/logs/ckpt_shell.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(LINUX_MMU_SHELL_CYCLES) shell 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/cpu_shell_retire.bin $(B)/linux/cpu_shell_boot.log | tee $(B)/linux/logs/ckpt_shell.out
 	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/ckpt_shell.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
 	@grep -q "#LINUX.*done=1" $(B)/linux/logs/ckpt_shell.out || { echo "L7/L8 MMU SHELL FAILED: LINUX_SIM_DONE output not observed"; exit 1; }
 	@grep -q "#LINUX.*cmds=1" $(B)/linux/logs/ckpt_shell.out || { echo "L7/L8 MMU SHELL FAILED: expected command output not observed"; exit 1; }
@@ -1212,7 +1243,7 @@ linux_mmu_ckpt_shell_restore: $(B)/vlt_openboot/run_openboot $(B)/linux/inputs/f
 PANIC_CYCLES ?= 4000000
 linux_panic_trace: $(B)/vlt_openboot/run_openboot $(B)/linux/boot_ckpt.hash $(B)/linux/inputs/linux_mmu.dtb | $(B)/linux/logs
 	@rm -f $(B)/linux/panic_retire.bin
-	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(PANIC_CYCLES) - 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/panic_retire.bin $(B)/linux/panic_boot.log | tee $(B)/linux/logs/panic_trace.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 time ./$(B)/vlt_openboot/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(PANIC_CYCLES) - 0 restore $(B)/linux/boot_ckpt.bin $(shell cat $(B)/linux/boot_ckpt.hash) $(B)/linux/panic_retire.bin $(B)/linux/panic_boot.log | tee $(B)/linux/logs/panic_trace.out
 	@if grep -q "^#CKPT_STALE" $(B)/linux/logs/panic_trace.out; then echo "CKPT STALE (hash changed)"; exit 1; fi
 	@echo "panic trace: $(B)/linux/panic_retire.bin (rec_start=0, past_panic)"
 
@@ -1225,7 +1256,7 @@ linux_panic_dbg: $(B)/linux/inputs/linux_mmu.dtb linux_mmu_build | $(B)/linux/lo
 	@verilator --cc --exe --savable --Wall -O2 --x-assign fast --x-initial fast -DSCDBG3 $(MT_DEFINE) -DLINUX -DLINUX_DEBUG -DCACHE_LAT=1 --top-module run_linux --Mdir $(B)/vlt_scdbg -o run_openboot $(RTL) tb/run_linux.sv $(CURDIR)/tb/run_openboot.cpp
 	@$(MAKE) -C $(B)/vlt_scdbg -f Vrun_linux.mk OPT_FAST="-O2 -DLINUX_DEBUG -DSCDBG3" run_openboot -j 4
 	@rm -f $(B)/linux/panic_scdbg.bin $(B)/linux/ckpt_scdbg.bin
-	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 ./$(B)/vlt_scdbg/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb $(SCDBG_SAVE) - '$(SCDBG_SAVE)' save $(B)/linux/ckpt_scdbg.bin x $(B)/linux/panic_scdbg.bin $(B)/linux/panic_scdbg.log > $(B)/linux/logs/panic_scdbg_save.out
-	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 ./$(B)/vlt_scdbg/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs.cpio $(B)/linux/inputs/linux_mmu.dtb 3400000 - $(SCDBG_SAVE) restore $(B)/linux/ckpt_scdbg.bin x $(B)/linux/panic_scdbg.bin $(B)/linux/panic_scdbg.log > $(B)/linux/logs/panic_scdbg.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 ./$(B)/vlt_scdbg/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb $(SCDBG_SAVE) - '$(SCDBG_SAVE)' save $(B)/linux/ckpt_scdbg.bin x $(B)/linux/panic_scdbg.bin $(B)/linux/panic_scdbg.log > $(B)/linux/logs/panic_scdbg_save.out
+	@INITRD_ADDR=$(INITRD_ADDR) DTB_ADDR=$(DTB_ADDR) PAST_PANIC=1 ./$(B)/vlt_scdbg/run_openboot $(B)/linux/inputs/fw_jump.bin $(B)/linux/inputs/Image $(B)/linux/inputs/rootfs_canon.cpio $(B)/linux/inputs/linux_mmu.dtb 3400000 - $(SCDBG_SAVE) restore $(B)/linux/ckpt_scdbg.bin x $(B)/linux/panic_scdbg.bin $(B)/linux/panic_scdbg.log > $(B)/linux/logs/panic_scdbg.out
 	@grep -c 'SCDBG' $(B)/linux/logs/panic_scdbg.out
 	@echo "scdbg panic trace: $(B)/linux/panic_scdbg.bin"

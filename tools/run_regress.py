@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 500
 B = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("BUILD_ROOT", "build")
 LAT = int(sys.argv[3]) if len(sys.argv) > 3 else 1   # CACHE_LAT of the run_hex build
-BIN = os.path.join(B, "vlt", "run_hex")
+BIN = os.path.join(B, "vlt", "run_hex_lat%d" % LAT)
 RD = os.path.join(B, "rand")
 os.makedirs(RD, exist_ok=True)
 
@@ -40,17 +40,18 @@ print("to-run %d seeds" % len(todo), flush=True)
 fails = []
 simfail = []
 for n, (i, h) in enumerate(todo):
-    os.path.join(B, "p.hex")
-    with open(os.path.join(RD, "p%d.hex" % i)) as f:
-        open(os.path.join(B, "p.hex"), "w").write(f.read())
+    rtl_log = os.path.join(RD, "%d.rtl.log" % i)
+    helper_out = os.path.join(RD, "%d.helper.log" % i)
     try:
-        r = subprocess.run([BIN], capture_output=True, text=True, timeout=60)
-        open(os.path.join(RD, "%d.rtl.log" % i), "w").write(r.stdout)
-        if "#NOTERM" in r.stdout:
-            fails.append((i, "SIM NOTERM (stuck pipeline)"))
+        r = subprocess.run([sys.executable, "tools/run_hex_locked.py", BIN,
+                            os.path.join(RD, "p%d.hex" % i), rtl_log],
+                           capture_output=True, text=True, timeout=70)
+        open(helper_out, "w").write(r.stdout + r.stderr)
+        if r.returncode != 0 or not os.path.exists(rtl_log) or "#NOTERM" in open(rtl_log).read():
+            fails.append((i, "SIM NOTERM/helper failure rc=%d (stuck pipeline)" % r.returncode))
             continue
     except subprocess.TimeoutExpired:
-        simfail.append((i, "SIM TIMEOUT 60s"))
+        simfail.append((i, "SIM TIMEOUT 70s (locked helper)"))
         continue
     open(os.path.join(RD, "p%d.state2" % i), "w").write(h)
     if (n + 1) % 100 == 0:
