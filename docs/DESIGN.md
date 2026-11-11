@@ -2,6 +2,10 @@
 
 Milestone tags such as (M10c) refer to sections of [`PROGRESS.md`](../PROGRESS.md), the build log.
 
+> These notes describe the Doom-era core (RV32IM, machine mode). The Linux additions (A extension,
+> S/U modes, Sv32 MMU, CLINT, OpenSBI boot) are documented in the [README](../README.md#linux-notes)
+> and in the L1–L8 sections of [`PROGRESS.md`](../PROGRESS.md).
+
 A 5-stage in-order RV32IM CPU, Verilator-tested against official riscv-tests
 (riscv-tests rv32ui/rv32um/selected rv32mi), a Python ISS, 17 directed tests,
 N=500/5000 random differential programs, a k-induction formal model, and DOOM
