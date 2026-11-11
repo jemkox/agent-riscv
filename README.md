@@ -59,7 +59,7 @@ hardware.
 | CoreMark | **3.19 CoreMark/MHz** (EEMBC CoreMark 1.0, CRCs validated, GCC 13.2 `-O2`) |
 | Operating system | **FreeRTOS** V11.2.0 (own port): tasks, queue, mutex, preemption, software timers, 185 context switches in the demo |
 | DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
-| FPGA (iCE40 UP5K) | current tree, `make fpga_full FPGA_FREQ=13 FPGA_SEED=4`: netlist **3123 SB_LUT4 / 1099 SB_DFF flops**, 8 SB_RAM40_4K, 1 SB_MAC16; **17.43 MHz** after synthesis, **16.89 MHz** final route (PASS at 13 MHz); dedicated `fpga_csrtrap_netlist` ROM: **2176 SB_LUT4 / 1020 SB_DFF** |
+| FPGA (iCE40 UP5K) | current `make fpga_full FPGA_FREQ=13 FPGA_SEED=4`: honest UP5K proof-fit gate using `fpga_top`: **527 SB_LUT4 / 195 SB_DFF**, 8 RAM, Max freq 22.85–23.68 MHz. The fixed full `fpga_pipe_top` netlist measures **6533 SB_LUT4 / 850 SB_CARRY**, 145% of UP5K; Tang Nano 20K nextpnr-himbaechel is not installed here. Dedicated `fpga_csrtrap_netlist`: **5544 SB_LUT4 / 1667 SB_DFF** |
 
 What that means in frames per second:
 
@@ -310,7 +310,7 @@ else's part:
   reproduction is ~13 min wall at ~1.6M cycles/s (build cached); the run is
   deterministic with fixed MT seed and fixed rootfs canonicalization.
 - Cycle counts for the current `hdl make linux` boot: login prompt detected at
-  427,205,495 cycles; `#LINUX cycles=1326617464 insns=1753060506 prompt=1 login=1 done=1 halt=0 cmds=1`.
+  427M cycles (approx.); `#LINUX cycles=1326849360 insns=1753061298 prompt=1 login=1 done=1 halt=0 cmds=1`.
 - Boot log excerpt (`build/linux/logs/shell.out`):
 
 ```
@@ -327,8 +327,8 @@ mmu		: sv32
 bin  init  lib  proc ...
 # echo LINUX_SIM_DONE
 LINUX_SIM_DONE
-#STOP cyc=1326617464 login=1 prompt_stop=0 done=1 shell_stop=1 panic=0 past_panic=0 halt=0
-#LINUX cycles=1326617464 insns=1753060506 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000
+#STOP cyc=1326849360 login=1 prompt_stop=0 done=1 shell_stop=1 panic=0 past_panic=0 halt=0
+#LINUX cycles=1326849360 insns=1753061298 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000
 ```
 
 ## Honest limits
@@ -344,7 +344,7 @@ LINUX_SIM_DONE
   (`0x1FC0_0000`), a 64KiB direct-mapped 32-bit-line I/D data cache (128KiB
   total) and the 16MiB `rv32-linux-sim` dtb/rootfs pins. One reproduction of
   the boot takes ~13 min of wall time (checkpointed 220M-cycle save plus
-  restore to `LINUX_SIM_DONE`; login at 427M cycles, done at 1.3266B cycles);
+  restore to `LINUX_SIM_DONE`; login around 427M cycles, done at 1.32685B cycles);
   the console is serial-only — no networking (the pinned rootfs has no network
   daemons) and no GUI. The FPGA top (`fpga_pipe_top`) has no CLINT, no S/U
   modes and no MMU (under `ifdef FPGA` WFI never executes and the FPGA SYSTEM

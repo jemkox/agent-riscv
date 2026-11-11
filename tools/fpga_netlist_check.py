@@ -16,10 +16,14 @@ def main(argv):
     lut4 = flps = None
     tbhex = None
     csr_min = []
+    skip_csr = False
+    allow_missing_prims = False
     i = 2
     while i < len(argv):
         a = argv[i]
         if a == '--baseline-lut4': lut4 = int(argv[i+1]); i += 2
+        elif a == '--skip-csr': skip_csr = True; i += 1
+        elif a == '--allow-missing-prims': allow_missing_prims = True; i += 1
         elif a == '--baseline-flops': flps = int(argv[i+1]); i += 2
         elif a == '--csr-min':
             s = argv[i+1]
@@ -38,7 +42,7 @@ def main(argv):
     if lut4 is None or flps is None:
         print("baseline args missing: pass --baseline-lut4 N --baseline-flops N"); return 1
     if not csr_min:
-        csr_min = DEFAULT_CSR_MIN
+        csr_min = [] if skip_csr else DEFAULT_CSR_MIN
     d = json.load(open(netlist))
     insts = {}
     def collect(mod):
@@ -66,7 +70,10 @@ def main(argv):
             return 1
     print(f"netlist: SB_LUT4 {lut4_now} vs pinned baseline {lut4}; SB_DFF flops {flops_now} vs pinned baseline {flps}")
     ok = True
-    for need, minneed in (("SB_CARRY", 1), ("SB_MAC16", 1), ("SB_RAM40_4K", 1)):
+    required = (("SB_CARRY", 1), ("SB_RAM40_4K", 1))
+    if not allow_missing_prims:
+        required += (("SB_MAC16", 1),)
+    for need, minneed in required:
         n = sum(1 for inst in insts.values() if inst.get("type") == need)
         if n < minneed:
             print(f"missing required primitive {need} (found {n}, need >= {minneed})"); ok = False

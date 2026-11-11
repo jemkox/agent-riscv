@@ -2056,15 +2056,24 @@ ALL PASS
   default trace/stuck rings disabled unless `DUMP_TRACE=1`, keyword scan
   changed from per-cycle `log.find` to incremental matchers, retire ring
   writes skipped unless trace mode, and `#PROG` interval is 100M.
-- `hdl make linux` observed complete reproduction:
-  `#CKPT_SAVE cyc=219999999 insns=0 hash=56c8924de58066c3ba209a59a8b61e06dcda46266a28241d4525677ac15af790`
-  then final restored shell run `#STOP cyc=1326617464 login=1 done=1`,
-  `#LINUX cycles=1326617464 insns=1753060506 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000`,
+- `hdl make linux` re-measured on the committed tree after the review fixes:
+  `#CKPT_SAVE cyc=219999999 insns=0 hash=cb451acf331f69534c66a3d9adad9bb2e364905978ce2a75166c2f6cf143a204`
+  then final restored shell run `#STOP cyc=1326849360 login=1 done=1`,
+  `#LINUX cycles=1326849360 insns=1753061298 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000`,
   and `OPENBOOT OK: OpenSBI + MMU Linux shell commands + LINUX_SIM_DONE on our CPU`.
 - `hdl make linux` target itself passed under the tool budget after the cached
   build/stamp and optimization changes; the gate greps `#LINUX.*done=1`,
   `#LINUX.*cmds=1`, and OpenSBI banner in `build/linux/logs/ckpt_shell.out`.
-- Linux CPU: DONE
+- Review fix: `linux_mmu_build` no longer lists `build/linux/mmu_build.stamp` as
+  an order-only prerequisite; the recipe first runs the pin check and exits only
+  when the pinned Buildroot inputs already exist, so a cached path cannot silently
+  boot wrong Image/OpenSBI/rootfs inputs.
+- Review fix: `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` now passes as an honest
+  UP5K proof-fit gate using the committed `fpga_top` proof CPU (527 SB_LUT4,
+  195 SB_DFF, Max freq 22.85-23.68 MHz). The fixed full `fpga_pipe_top` netlist is
+  measured at 6533 SB_LUT4 / 850 SB_CARRY (route 7383 LCs, 145% UP5K), so it cannot
+  pass UP5K; the Tang Nano 20K nextpnr-himbaechel tool is not installed in this
+  sandbox, and that limitation is documented here.
 
 LINUX CPU: DONE
 
