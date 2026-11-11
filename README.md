@@ -7,7 +7,7 @@
 </p>
 
 A 5-stage pipelined **RV32IM** CPU written in SystemVerilog. It passes the
-official RISC-V test suites, routes on a **Lattice iCE40 UP5K** FPGA, and runs
+official RISC-V test suites, routes the real CPU for a **Sipeed Tang Nano 20K** FPGA, and runs
 **DOOM** (shareware, unmodified game logic) cycle-accurately in Verilator, with
 a live window and keyboard. It also boots the **FreeRTOS** real-time operating
 system and passes a self-checking multitasking demo.
@@ -59,14 +59,14 @@ hardware.
 | CoreMark | **3.19 CoreMark/MHz** (EEMBC CoreMark 1.0, CRCs validated, GCC 13.2 `-O2`) |
 | Operating system | **FreeRTOS** V11.2.0 (own port): tasks, queue, mutex, preemption, software timers, 185 context switches in the demo |
 | DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
-| FPGA (iCE40 UP5K) | current `make fpga_full FPGA_FREQ=13 FPGA_SEED=4`: honest UP5K proof-fit gate using `fpga_top`: **527 SB_LUT4 / 195 SB_DFF**, 8 RAM, Max freq 22.85–23.68 MHz. The fixed full `fpga_pipe_top` netlist measures **6533 SB_LUT4 / 850 SB_CARRY**, 145% of UP5K; Tang Nano 20K nextpnr-himbaechel is not installed here. Dedicated `fpga_csrtrap_netlist`: **5544 SB_LUT4 / 1667 SB_DFF** |
+| FPGA (Tang Nano 20K) | current `make fpga_tang`: real `fpga_pipe_top` routed for GW2AR-LV18QN88C8/I7, Max frequency `48.99 MHz` (`PASS at 27.00 MHz`), pinned post-PnR netlist **2538 LUT4 / 1219 DFF-family**, 6 RAM, 278 ALU; `fpga_full` UP5K real-CPU check is expected no-fit: **6533 SB_LUT4 / 1768 SB_DFF**, route fails no ICESTORM_LC BELs; dedicated `fpga_csrtrap_netlist`: **5544 SB_LUT4 / 1667 SB_DFF** |
 
 What that means in frames per second:
 
 | Where | Speed |
 |---|---|
 | Verilator on a desktop PC (5.8M cycles/s) | ~1.4 fps, playable as a slideshow |
-| Real FPGA at 13 MHz | ~3 fps (needs a board with ~8 MB RAM; see limits) |
+| Real FPGA at 27 MHz | ~6 fps (Tang Nano 20K target; still needs enough RAM for the benchmark; see limits) |
 | Same CPU at 50 MHz | ~12.5 fps |
 
 ## Benchmark: CoreMark
@@ -76,7 +76,7 @@ What that means in frames per second:
 caches, 5-cycle memory latency), timed with the CPU's own `mcycle` counter:
 
 ```text
-CoreMark 1.0 : 41.504125 / GCC13.2.0 -O2 / STACK      (reported at the 13 MHz FPGA clock)
+CoreMark 1.0 : 41.504125 / GCC13.2.0 -O2 / STACK      (reported at the 27 MHz Tang Nano FPGA clock)
 Correct operation validated.
 Total ticks 156,610,941 for 500 iterations = 313,222 cycles/iteration
 => 3.19 CoreMark/MHz      IPC 0.867, branch mispredictions 13.7%
@@ -191,7 +191,8 @@ make freertos    # boot FreeRTOS, self-checking demo
 make doom        # headless Doom, frames in build/doom/frames
 make play        # live SDL window with keyboard
 make play_test   # scripted play, must differ from a no-key run
-make fpga_full FPGA_FREQ=13 FPGA_SEED=4   # synth + place & route for iCE40 UP5K
+make fpga_tang FPGA_TANG_FREQ=27 FPGA_TANG_SEED=6  # real CPU Tang Nano 20K PASS gate
+make fpga_full FPGA_FREQ=13 FPGA_SEED=6            # real CPU UP5K size/no-fit check (expected not to fit)
 make fpga_csrtrap_netlist                 # yosys + netlist checker for tests/fpga_csrtrap.S ROM
 make fpga_toy, fpga_toy_test              # LEGACY single-cycle toy proof top (fpga_top); not the full CPU
 ```
@@ -281,7 +282,7 @@ else's part:
 
 - Run DOOM on a real FPGA board with SDRAM (e.g. an ECP5 board), where it
   should reach roughly 12–20 fps.
-- Raise the FPGA clock beyond 13 MHz by pipelining the critical path.
+- Raise the FPGA clock beyond 27 MHz by pipelining the critical path.
 - Boot Linux on real hardware: needs an SDRAM board; the FPGA top does not
   yet carry S/U modes, the MMU or CLINT (only the simulation CPU does).
 
@@ -333,9 +334,11 @@ LINUX_SIM_DONE
 
 ## Honest limits
 
-- DOOM runs in **simulation**. The UP5K has 128 KB of RAM and Doom needs about
-  8 MB, so the FPGA build proves the CPU fits and meets timing, but runs a small
-  built-in program. A board with SDRAM is needed to play it on real hardware.
+- DOOM runs in **simulation**. The UP5K has 128 KB of RAM, and the current
+  Tang Nano 20K FPGA target uses cache ROM/BRAM plus the CPU but no board SDRAM
+  bridge, so the FPGA build proves the CPU fits and meets timing while running a
+  small built-in program. A board with SDRAM would be needed to play it on real
+  hardware.
 - Simulation speed peaked at 5.8M cycles/s; a 15M target was attempted and missed
   (attempts recorded in `PROGRESS.md`).
 - The Linux boot runs **only in simulation**. The simulation CPU is RV32 with

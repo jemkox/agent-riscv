@@ -8,6 +8,9 @@
 # family >= requested count), and optional TBHEX program sanity.
 import json, sys
 DEFAULT_CSR_MIN = (("st_mepc", 32), ("st_mtvec", 4), ("st_mcause", 6), ("st_mie", 4))
+GOWIN_LUT_TYPES = {"LUT4"}
+GOWIN_RAM_TYPES = {"DPX9B", "SDP36KE", "SDP136K", "RAM16SDP4", "RAM16SDP2", "RAM16SDP1", "DP", "SDP"}
+GOWIN_MDU_TYPES = {"ALU", "PADD18", "PADD9", "MULT18X18", "MULT36X36", "MULTALU36X18"}
 def main(argv):
     if len(argv) < 2:
         print("usage: fpga_netlist_check.py NETLIST.json --baseline-lut4 N --baseline-flops N [TBHEX] [--csr-min NAME:COUNT]...")
@@ -51,45 +54,71 @@ def main(argv):
         for mod in (d.get("modules") or {}).values(): collect(mod)
     else:
         collect(d)
+    types = [inst.get("type") for inst in insts.values()]
+    ice_mode = any(t == "SB_LUT4" or (t or "").startswith("SB_DFF") or t in ("SB_CARRY", "SB_RAM40_4K") for t in types)
+    gowin_mode = any(t in GOWIN_LUT_TYPES for t in types)
     lut4_now = flops_now = ram = dsp = 0
-    for inst in insts.values():
-        t = inst.get("type")
-        if t == "SB_LUT4": lut4_now += 1
-        elif t and t.startswith("SB_DFF"): flops_now += 1
-        elif t == "SB_RAM40_4K": ram += 1
-        elif t == "SB_MAC16": dsp += 1
+    if ice_mode:
+        for t in types:
+            if t == "SB_LUT4": lut4_now += 1
+            elif t and t.startswith("SB_DFF"): flops_now += 1
+            elif t == "SB_RAM40_4K": ram += 1
+            elif t == "SB_MAC16": dsp += 1
+        required = (("SB_CARRY", 1), ("SB_RAM40_4K", 1))
+        if not allow_missing_prims:
+            required += (("SB_MAC16", 1),)
+        forbidden = ("SB_MUX2", "SB_OR_NOT")
+        flops_prefix = "SB_DFF"
+        primitive_report = f"iCE40 primitives found: SB_LUT4 {lut4_now}, SB_DFF {flops_now}, SB_RAM40_4K {ram}, SB_MAC16 {dsp}"
+    elif gowin_mode:
+        for t in types:
+            if t in GOWIN_LUT_TYPES: lut4_now += 1
+            elif t and t.startswith("DFF"): flops_now += 1
+            elif t in GOWIN_RAM_TYPES: ram += 1
+            elif t in GOWIN_MDU_TYPES: dsp += 1
+        required = (("IBUF", 1), ("OBUF", 1))
+        if not allow_missing_prims:
+            required += (("ALU", 1),)
+        forbidden = ()
+        flops_prefix = "DFF"
+        primitive_report = f"Gowin primitives found: LUT-family {lut4_now}, DFF-family {flops_now}, RAM {ram}, MDU/ALU {dsp}"
+    else:
+        print("unknown netlist primitive target: no SB_LUT4/SB_DFF or Gowin LUT/DFF types found")
+        return 1
     if lut4_now < lut4:
         pct = 100.0 * (lut4 - lut4_now) / lut4
         if pct > 10.0:
-            print(f"UNEXPLAINED SHRINK: LUT4 {lut4_now} vs pinned baseline {lut4} ({pct:.1f}%); ask why and update baseline")
+            print(f"UNEXPLAINED SHRINK: LUT4-family {lut4_now} vs pinned baseline {lut4} ({pct:.1f}%); ask why and update baseline")
             return 1
     if flops_now < flps:
         pct = 100.0 * (flps - flops_now) / flps
         if pct > 10.0:
             print(f"UNEXPLAINED SHRINK: flops {flops_now} vs pinned baseline {flps} ({pct:.1f}%); ask why and update baseline")
             return 1
-    print(f"netlist: SB_LUT4 {lut4_now} vs pinned baseline {lut4}; SB_DFF flops {flops_now} vs pinned baseline {flps}")
+    print(f"netlist: LUT4-family {lut4_now} vs pinned baseline {lut4}; DFF-family flops {flops_now} vs pinned baseline {flps}")
     ok = True
-    required = (("SB_CARRY", 1), ("SB_RAM40_4K", 1))
-    if not allow_missing_prims:
-        required += (("SB_MAC16", 1),)
     for need, minneed in required:
-        n = sum(1 for inst in insts.values() if inst.get("type") == need)
+        n = sum(1 for t in types if t == need)
         if n < minneed:
             print(f"missing required primitive {need} (found {n}, need >= {minneed})"); ok = False
-    for inst in insts.values():
-        if inst.get("type") in ("SB_MUX2", "SB_OR_NOT"):
-            print(f"forbidden primitive {inst.get('type')}"); ok = False
+    if gowin_mode and not allow_missing_prims and ram < 1:
+        print("missing Gowin RAM primitive (DP/DPX9B/SDP/RAM16SDP*)"); ok = False
+    for t in types:
+        if ice_mode and t in forbidden:
+            print(f"forbidden primitive {t}"); ok = False
     # Required trap-state DFF instances by (sub)name: named trap CSRs must be
     # real flops in the netlist, with at least the requested live bit count.
+    def csr_match(nm, need):
+        base = need[3:] if need.startswith("st_") else need
+        return need in nm or ("after_" + base) in nm
     for need, need_count in csr_min:
         n = sum(1 for nm, inst in insts.items()
-                if need in nm and str(inst.get("type") or "").startswith("SB_DFF"))
+                if csr_match(nm, need) and str(inst.get("type") or "").startswith(flops_prefix))
         if n < need_count:
             print(f"missing trap-CSR DFF bits {need} (found {n}, need >= {need_count})"); ok = False
         else:
             print(f"trap-CSR DFF {need}: {n} instance(s) (need >= {need_count})")
-    print(f"iCE40 primitives found: SB_LUT4 {lut4_now}, SB_DFF {flops_now}, SB_RAM40_4K {ram}, SB_MAC16 {dsp}")
+    print(primitive_report)
     if tbhex is not None:
         try:
             raw = open(tbhex).read()

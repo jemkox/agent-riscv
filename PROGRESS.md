@@ -2056,10 +2056,10 @@ ALL PASS
   default trace/stuck rings disabled unless `DUMP_TRACE=1`, keyword scan
   changed from per-cycle `log.find` to incremental matchers, retire ring
   writes skipped unless trace mode, and `#PROG` interval is 100M.
-- `hdl make linux` re-measured on the committed tree after the review fixes:
-  `#CKPT_SAVE cyc=219999999 insns=0 hash=cb451acf331f69534c66a3d9adad9bb2e364905978ce2a75166c2f6cf143a204`
-  then final restored shell run `#STOP cyc=1326849360 login=1 done=1`,
-  `#LINUX cycles=1326849360 insns=1753061298 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000`,
+- `hdl make linux` re-measured on the committed tree after the Tang re-check:
+  `#CKPT_SAVE cyc=219999999 insns=0 hash=dceee5496e6c9c2e1ff13f4b16828f317a65dfe214b582b2292ddf8dc7d9ec9a`
+  then final restored shell run `#STOP cyc=1326655444 login=1 done=1`,
+  `#LINUX cycles=1326655444 insns=1753060414 prompt=1 login=1 done=1 halt=0 cmds=1 dtb=83e00000`,
   and `OPENBOOT OK: OpenSBI + MMU Linux shell commands + LINUX_SIM_DONE on our CPU`.
 - `hdl make linux` target itself passed under the tool budget after the cached
   build/stamp and optimization changes; the gate greps `#LINUX.*done=1`,
@@ -2068,12 +2068,22 @@ ALL PASS
   an order-only prerequisite; the recipe first runs the pin check and exits only
   when the pinned Buildroot inputs already exist, so a cached path cannot silently
   boot wrong Image/OpenSBI/rootfs inputs.
-- Review fix: `hdl make fpga_full FPGA_FREQ=13 FPGA_SEED=4` now passes as an honest
-  UP5K proof-fit gate using the committed `fpga_top` proof CPU (527 SB_LUT4,
-  195 SB_DFF, Max freq 22.85-23.68 MHz). The fixed full `fpga_pipe_top` netlist is
-  measured at 6533 SB_LUT4 / 850 SB_CARRY (route 7383 LCs, 145% UP5K), so it cannot
-  pass UP5K; the Tang Nano 20K nextpnr-himbaechel tool is not installed in this
-  sandbox, and that limitation is documented here.
+- Tang review re-check: the board target is now Tang Nano 20K via
+  `$(OSS_CAD)/bin/nextpnr-himbaechel` with `OSS_CAD ?= $(HOME)/tools/oss-cad-suite-20261027`.
+  `hdl make fpga_tang` builds real `fpga_pipe_top` (`-DFPGA`, same RTL family) through
+  `synth_gowin -family gw2a -top fpga_pipe_top`, places/routes with
+  `rtl/tangnano20k.cst`, and passed: post-route Max frequency `48.99 MHz`
+  (`PASS at 27.00 MHz`), report `build/fpga_tang_report.json`,
+  pinned post-PnR netlist `2538 LUT4` / `1219 DFF-family` with CSR DFFs live
+  (`st_mepc:32`, `st_mtvec:32`, `st_mcause:19`, `st_mie:32`).
+  Critical path starts `posedge CPU.CSR1.CL.clk`, first routed net
+  `CPU.FWDD.mwb_wv_DFFE_Q_2_D_LUT4_F_I3_LUT4_F_I2_LUT4_F_I1[2]`, then long
+  ALU carry chain through `CPU.FWDD.idex_r2_DFFE_Q_31_D...ALU_SUM...` and MMU
+  `st_pend`/`dc_lo`, ending at net
+  `CPU.MM.dc_lo.0.0_DOB_1_DFFE_Q$conn$D` before returning to `posedge CPU.CSR1.CL.clk`.
+- `fpga_full` is kept as the old real-CPU UP5K size/no-fit check, not a PASS gate:
+  synthesis `6533 SB_LUT4 / 1768 SB_DFF`, nextpnr reports
+  `Unable to place ... no BELs remaining to implement ICESTORM_LC` for the real CPU.
 
 LINUX CPU: DONE
 

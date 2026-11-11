@@ -1,0 +1,35 @@
+// Tang Nano 20K (GW2AR-LV18QN88C8/I7) constraints for rtl/fpga_pipe_top.
+// Pin references verified against the Sipeed Tang Nano 20K pinout.
+// https://wiki.sipeed.com/hardware/en/tang/tang-nano-20k/nano-20k.html
+// The yosys netlist names IO cells with their _O suffix, so these IO_LOC names
+// are the post-synth cell/port names.
+IO_LOC "CPU.CSR1.CL.clk_IBUF_O" 4; // PIN04_SYS_CLK: 27 MHz crystal oscillator clock
+IO_PORT "CPU.CSR1.CL.clk_IBUF_O" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+
+IO_LOC "CPU.CSR1.CL.reset_IBUF_O" 87; // PIN87_MODE1_KEY2
+IO_PORT "CPU.CSR1.CL.reset_IBUF_O" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// UART on the BL616 pins: TX enable/valid on pin 69, TX bit0 on pin 70 (the
+// board RX pin is used as the lowest TX/RX data pin by this CPU top), and the
+// remaining TX bits on the nearby GPIO pins so nextpnr can place all bits.
+IO_LOC "uart_tx_valid_OBUF_O" 69; // PIN69_SYS_TX
+IO_PORT "uart_tx_valid_OBUF_O" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC "uart_tx_OBUF_O" 70; // PIN70_SYS_RX
+IO_PORT "uart_tx_OBUF_O" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_LOC "uart_tx_OBUF_O_1" 71;
+IO_LOC "uart_tx_OBUF_O_2" 72;
+IO_LOC "uart_tx_OBUF_O_3" 73;
+IO_LOC "uart_tx_OBUF_O_4" 74;
+IO_LOC "uart_tx_OBUF_O_5" 75;
+IO_LOC "uart_tx_OBUF_O_6" 76;
+IO_LOC "uart_tx_OBUF_O_7" 77;
+
+// halt is shown on the first system LED (pin 15); pins 16..20 are the other
+// system LEDs, reserved for future status bits.
+IO_LOC "halt_OBUF_O" 15; // PIN15_SYS_LED0
+IO_PORT "halt_OBUF_O" IO_TYPE=LVCMOS33 DRIVE=8;
+//IO_LOC "led[1]" 16; // PIN16_SYS_LED1
+//IO_LOC "led[2]" 17; // PIN17_SYS_LED2
+//IO_LOC "led[3]" 18; // PIN18_SYS_LED3
+//IO_LOC "led[4]" 19; // PIN19_SYS_LED4
+//IO_LOC "led[5]" 20; // PIN20_SYS_LED5

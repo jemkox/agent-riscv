@@ -46,13 +46,20 @@ FREERTOS_DIR ?= $(firstword $(wildcard deps/FreeRTOS-Kernel ../../downloads/Free
 WAD_SRC ?= $(firstword $(wildcard deps/doom1.wad ../../downloads/doomwad/doom1.wad) deps/doom1.wad)
 FPGA_FREQ ?= 12.5
 FPGA_SEED ?= 6
-# Pinned netlist baseline (review: pass via tool args, not parsed from PROGRESS.md)
-# `fpga_full` is now an honest UP5K fit-proof gate: it routes the committed
-# proof CPU `fpga_top`, because the fixed Linux-capable `fpga_pipe_top` netlist
-# measures 6533 SB_LUT4 + 850 SB_CARRY (route 7383 LCs, 145% UP5K) and Tang
-# Nano 20K nextpnr-himbaechel is not installed in this sandbox.
-FPGA_NETLIST_LUT4 ?= 527
-FPGA_NETLIST_FLOPS ?= 195
+# Pinned netlist baselines (review: pass via tool args, not parsed from PROGRESS.md).
+# Board target is now Tang Nano 20K. The full Linux-capable CPU `fpga_pipe_top`
+# is the real FPGA CPU; its UP5K route is an expected does-not-fit result
+# (about 145% of UP5K LCs), not a required PASS gate.
+FPGA_NETLIST_LUT4 ?= 6533
+FPGA_NETLIST_FLOPS ?= 1768
+OSS_CAD ?= $(HOME)/tools/oss-cad-suite-20261027
+FPGA_TANG_DEVICE ?= GW2AR-LV18QN88C8/I7
+FPGA_TANG_FAMILY ?= GW2A-18C
+FPGA_TANG_CST ?= rtl/tangnano20k.cst
+FPGA_TANG_FREQ ?= 27
+FPGA_TANG_SEED ?= 6
+FPGA_TANG_NETLIST_LUT4 ?= 2538
+FPGA_TANG_NETLIST_FLOPS ?= 1219
 # Pinned netlist for the documented fpga_csrtrap ROM (smaller, but it exercises
 # trap CSRs dynamically; see fpga_csrtrap_netlist target below).
 FPGA_CSRTRAP_NETLIST_LUT4 ?= 5544
@@ -97,7 +104,7 @@ UA_NAMES := amoadd_w amoand_w amomaxu_w amomax_w amominu_w amomin_w amoor_w amos
 UA_HEXES := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).hex)
 UA_BINS := $(foreach n,$(UA_NAMES),$(B)/ua/$(n).bin)
 
-.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu $(B)/vlt_mmu5/run_mmu5 mmu mmu5 spike_pin_check spike_tests linux_mmu_spike linux_mmu_spike_log linux_spike_cmp
+.PHONY: deps need_rvtests need_coremark need_wad need_freertos freertos coremark test regress lint clean synth riscof ui um mi mdiu_tb lat1 lat5 lat20 m7 fpga fpga_test fpga_toy fpga_toy_test fpga_mgate fpga_subw_gate fpga_control_gate fpga_csr_gate all_tests fpga_csrtrap_netlist mpp_ret_gate play play_test doom_mem doom_probe doom_elf fpga_full ua si fpga_tang fpga_tang_netlist linux linux_sim linux_shell linux_sim_dbg linux_dbg_initrd linux_trace_check linux_ckpt_hash linux_ckpt_save linux_ckpt_restore linux_ckpt_equiv linux_dbg_ckpt $(B)/vlt/run_hex $(B)/vlt/run_mmio $(B)/vlt_mmu/run_mmu $(B)/vlt_mmu5/run_mmu5 mmu mmu5 spike_pin_check spike_tests linux_mmu_spike linux_mmu_spike_log linux_spike_cmp
 .PRECIOUS: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 .SECONDARY: $(B)/%.o $(B)/%.elf $(B)/%.bin $(B)/ui/%.rvo $(B)/ui/%.o $(B)/ui/%.elf $(B)/ui/%.bin $(B)/um/%.rvo $(B)/um/%.o $(B)/um/%.elf $(B)/um/%.bin $(B)/mi/%.rvo $(B)/mi/%.o $(B)/mi/%.elf $(B)/mi/%.bin
 
@@ -857,20 +864,52 @@ $(B)/fpga_csrtrap/cache32_fpga.sv: rtl/cache32_fpga.sv | $(B)/fpga_csrtrap
 	@cp -f $< $@
 
 FPGA_FIT_RTL := $(B)/fpga_csrtrap/cache32_fpga.sv $(filter-out rtl/cache32_fpga.sv,$(FPGA_PIPE_RTL))
-$(B)/cpu_full.json: rtl/fpga_top.sv | $(B)
-	@yosys -p 'read_verilog -sv rtl/fpga_top.sv; synth_ice40 -dsp -top fpga_top -json $(B)/cpu_full.json; stat' > $(B)/cpu_full_syn.log
+$(B)/cpu_full.json: $(FPGA_PIPE_RTL) rtl/fpga_prog_init.sv | $(B)
+	@yosys -p 'read_verilog -sv -Irtl -DFPGA $(FPGA_PIPE_RTL); synth_ice40 -dsp -top fpga_pipe_top -json $(B)/cpu_full.json; stat' > $(B)/cpu_full_syn.log
 	$(call yosys_conflict_check,$(B)/cpu_full_syn.log,$@)
 
 $(B)/cpu_full.asc: $(B)/cpu_full.json | $(B)
-	@nextpnr-ice40 --up5k --package sg48 --json $(B)/cpu_full.json --asc $(B)/cpu_full.asc --freq $(FPGA_FREQ) --seed $(FPGA_SEED) > $(B)/cpu_full_route.log 2>&1
+	@nextpnr-ice40 --up5k --package sg48 --json $(B)/cpu_full.json --asc $(B)/cpu_full.asc --freq $(FPGA_FREQ) --seed $(FPGA_SEED) > $(B)/cpu_full_route.log 2>&1 || true ; \
+ grep -E 'does not fit|Failed|ERROR|Max frequency' $(B)/cpu_full_route.log || true
 
 $(B)/cpu_full.bin: $(B)/cpu_full.asc
 	@icepack $(B)/cpu_full.asc $(B)/cpu_full.bin
 
-fpga_full: $(B)/cpu_full.bin | $(B)
-	@echo "$(B)/cpu_full.bin"
-	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' $(B)/cpu_full_syn.log $(B)/cpu_full_route.log
-	@python3 tools/fpga_netlist_check.py $(B)/cpu_full.json --baseline-lut4 $(FPGA_NETLIST_LUT4) --baseline-flops $(FPGA_NETLIST_FLOPS) --skip-csr --allow-missing-prims
+fpga_full: $(B)/cpu_full.asc | $(B)
+	@echo "fpga_full: UP5K real-CPU place/route is EXPECTED-NOT-FIT (about 145% LCs); Tang Nano 20K is the PASS gate."
+	@grep -E 'ICESTORM_LC |SB_LUT4 *[0-9]|ICESTORM_RAM |Max frequency' $(B)/cpu_full_syn.log $(B)/cpu_full_route.log || true
+	@python3 tools/fpga_netlist_check.py $(B)/cpu_full.json --baseline-lut4 $(FPGA_NETLIST_LUT4) --baseline-flops $(FPGA_NETLIST_FLOPS) --csr-min st_mepc:32 --csr-min st_mtvec:4 --csr-min st_mcause:6 --csr-min st_mie:4
+	@if test -f $(B)/cpu_full.bin; then echo "fpga_full UNEXPECTED: real CPU unexpectedly fit/routed on UP5K"; exit 1; else echo "fpga_full expected result: no UP5K .bin (expected no-fit)"; fi
+
+$(B)/fpga_tang:
+	@mkdir -p $(B)/fpga_tang
+
+$(B)/fpga_tang/cache32_fpga.sv: rtl/cache32_fpga.sv | $(B)/fpga_tang
+	@cp -f $< $@
+
+FPGA_TANG_RTL := $(B)/fpga_tang/cache32_fpga.sv $(filter-out rtl/cache32_fpga.sv,$(FPGA_PIPE_RTL))
+
+$(B)/fpga_tang.hex: $(B)/fpga_prog.hex | $(B)/fpga_tang $(B)
+	@cp -f $(B)/fpga_prog.hex $(B)/fpga_tang.hex
+
+$(B)/fpga_tang/fpga_prog_init.sv: $(B)/fpga_tang.hex | $(B)/fpga_tang $(B)
+	@python3 tools/gen_fpga_rom.py $< $@
+
+$(B)/fpga_tang/cpu.json: $(FPGA_TANG_RTL) $(B)/fpga_tang/fpga_prog_init.sv | $(B)/fpga_tang $(B)/fpga_tang/cache32_fpga.sv
+	@$(OSS_CAD)/bin/yosys -p 'read_verilog $(OSS_CAD)/share/yosys/ice40/cells_sim.v; read_verilog -sv -DFPGA -I$(B)/fpga_tang -Irtl $(FPGA_TANG_RTL); synth_gowin -family gw2a -top fpga_pipe_top -json $(B)/fpga_tang/cpu.json; stat' > $(B)/fpga_tang_syn.log
+	$(call yosys_conflict_check,$(B)/fpga_tang_syn.log,$@)
+
+$(B)/fpga_tang/pnr.json: $(B)/fpga_tang/cpu.json $(FPGA_TANG_CST) | $(B)/fpga_tang
+	@$(OSS_CAD)/bin/nextpnr-himbaechel --device $(FPGA_TANG_DEVICE) --vopt family=$(FPGA_TANG_FAMILY) --vopt cst=$(FPGA_TANG_CST) --json $(B)/fpga_tang/cpu.json --write $(B)/fpga_tang/pnr.json --report $(B)/fpga_tang_report.json --freq $(FPGA_TANG_FREQ) --threads 4 --seed $(FPGA_TANG_SEED) > $(B)/fpga_tang_route.log 2>&1
+
+$(B)/fpga_tang/cpu.bin: $(B)/fpga_tang/pnr.json
+	@$(OSS_CAD)/bin/gowin_pack -d $(FPGA_TANG_FAMILY) -o $(B)/fpga_tang/cpu.bin $(B)/fpga_tang/pnr.json
+
+fpga_tang: $(B)/fpga_tang/cpu.bin
+	@echo "fpga_tang PASS gate: real fpga_pipe_top routed for Tang Nano 20K"
+	@grep -E 'Max frequency.*\(PASS at $(FPGA_TANG_FREQ)|does not fit|Failed' $(B)/fpga_tang_route.log
+	@python3 tools/fpga_netlist_check.py $(B)/fpga_tang/pnr.json --baseline-lut4 $(FPGA_TANG_NETLIST_LUT4) --baseline-flops $(FPGA_TANG_NETLIST_FLOPS) --csr-min st_mepc:32 --csr-min st_mtvec:4 --csr-min st_mcause:6 --csr-min st_mie:4
+	@grep -H 'Critical path|Critical|to_net|from_net|Max frequency' $(B)/fpga_tang_report.json || true
 
 $(B)/fpga_csrtrap:
 	@mkdir -p $(B)/fpga_csrtrap
