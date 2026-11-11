@@ -1,0 +1,106 @@
+#!/bin/sh
+# Independent milestone reviewer for the CPU builder. After a builder commit: pause the builder, run a reviewer
+# session (agent "review", fresh context, own clone) on the newest commit, check the builder's project was not
+# touched, notify the user with the verdict, then resume the builder - with the review's fix list when the verdict
+# is not a clean PASS. Report: WORKSPACE/reviews/rv32cpu-<commit>.md (settings: ~/.config/cpu-agent/config)
+#   review-at-commit          one review at the next commit (trial mode)
+#   review-at-commit --loop   keep reviewing (at most one review per MIN_GAP seconds; runs as cpu-agent-reviewer)
+. "$HOME/.config/cpu-agent/config" || { echo "no ~/.config/cpu-agent/config (run agent/install.sh)" >&2; exit 1; }
+PROJECT="$PROJECT"
+REVIEWS="$WORKSPACE/reviews"
+LOG="$WORKSPACE/.agent-logs/watchdog.log"
+URL="http://127.0.0.1:${SERVER_PORT:-4096}"
+BUILDER="$SESSION"
+[ -n "$BUILDER" ] || { echo "no builder SESSION in ~/.config/cpu-agent/config (run cpu-agent start first)" >&2; exit 1; }
+log() { echo "$(date '+%F %T') review: $*" >> "$LOG"; }
+say() { notify-send -a "CPU agent" "$1" "$2"; [ -f "$HOME/.config/cpu-agent/ntfy-topic" ] && \
+  python3 -c 'import json,sys,urllib.request; t=open(sys.argv[1]).read().strip(); urllib.request.urlopen(urllib.request.Request("https://ntfy.sh/", data=json.dumps({"topic":t,"title":sys.argv[2],"message":sys.argv[3]}).encode(), headers={"Content-Type":"application/json"}), timeout=10)' \
+  "$HOME/.config/cpu-agent/ntfy-topic" "$1" "$2" 2>/dev/null; }
+api() { curl -s -m 20 -H 'Content-Type: application/json' "$@"; }
+MIN_GAP="${MIN_GAP:-3600}"
+LOOP=0; [ "${1:-}" = "--loop" ] && LOOP=1
+last_end=$(date +%s)   # the first review waits MIN_GAP too (a review just ran)
+start=$(git -C "$PROJECT" rev-parse HEAD)
+while :; do
+
+log "armed; waiting for a builder commit after $(echo "$start" | cut -c1-7)"
+while [ "$(git -C "$PROJECT" rev-parse HEAD)" = "$start" ]; do sleep 20; done
+# at most one review per MIN_GAP; commits made meanwhile are covered by reviewing the newest one
+while [ $(( $(date +%s) - last_end )) -lt "$MIN_GAP" ]; do sleep 60; done
+sleep 5
+commit=$(git -C "$PROJECT" rev-parse HEAD); short=$(echo "$commit" | cut -c1-7)
+subject=$(git -C "$PROJECT" log -1 --format=%s)
+log "new commit $short \"$subject\": pausing the builder"
+
+# Pause the builder: abort its current step (the loop treats an abort as "stopped by the user") and stop the watchdog.
+api -X POST "$URL/session/$BUILDER/abort" -o /dev/null
+systemctl --user stop cpu-agent-watchdog
+# Say so on the builder's own page (noReply: shown as a message, the model is not called).
+api -X POST "$URL/session/$BUILDER/prompt_async" -o /dev/null \
+  -d "{\"agent\":\"cpu\",\"noReply\":true,\"parts\":[{\"type\":\"text\",\"text\":\"🔎 PAUSED: an independent review of commit $short is running (about 20-40 min). Do nothing until the next message; the review's fix list, if any, comes with it.\"}]}"
+before=$(git -C "$PROJECT" rev-parse HEAD; git -C "$PROJECT" status --porcelain | md5sum)
+
+# Reload the server so it knows the "review" agent, then start the reviewer in a new session.
+systemctl --user restart cpu-agent-server
+i=0; until curl -fs -m 1 "$URL/session/status" >/dev/null; do i=$((i+1)); [ $i -gt 120 ] && break; sleep 0.5; done
+# A child session of the builder: it lives on the builder's page and stays out of the session list.
+rid=$(api -X POST "$URL/session" -d "{\"title\":\"Review $short\",\"parentID\":\"$BUILDER\"}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+[ -n "$rid" ] || { log "could not create the review session"; say "⚠️ Review failed to start" "Builder will be resumed."; rid=""; }
+if [ -n "$rid" ]; then
+  prompt=$(sed -e "s|PROJECT_DIR|$PROJECT|g" -e "s|REVIEWS_DIR|$REVIEWS|g" -e "s/COMMIT_ID/$commit/g" -e "s/COMMIT_SHORT/$short/g" -e "s|COMMIT_SUBJECT|$(echo "$subject" | sed 's/[|&]/ /g')|g" "$REVIEWS/REVIEW_PROMPT.md")
+  python3 - "$URL" "$rid" "$prompt" <<'EOF'
+import json, sys, urllib.request
+url, rid, text = sys.argv[1:4]
+req = urllib.request.Request(f"{url}/session/{rid}/prompt_async", data=json.dumps({"agent": "review", "parts": [{"type": "text", "text": text}]}).encode(), headers={"Content-Type": "application/json"})
+urllib.request.urlopen(req, timeout=20)
+EOF
+  log "reviewer session $rid started on $short"
+  say "🔎 Review started" "An independent reviewer is checking commit $short. The builder is paused until it is done."
+  # Wait until the reviewer says TASK COMPLETE (the auto-continue plugin keeps it going meanwhile), max 2 h.
+  t0=$(date +%s)
+  while :; do
+    sleep 30
+    last=$(api "$URL/session/$rid/message?limit=1" | python3 -c '
+import json,sys
+m=json.load(sys.stdin) or [{}]
+x=m[-1]; print("".join(p.get("text","") for p in x.get("parts",[]) if p.get("type")=="text") if x.get("info",{}).get("role")=="assistant" else "")' 2>/dev/null)
+    echo "$last" | grep -q "TASK COMPLETE" && break
+    [ $(( $(date +%s) - t0 )) -gt 7200 ] && { log "reviewer timed out after 2 h"; break; }
+  done
+  api -X POST "$URL/session/$rid/abort" -o /dev/null
+fi
+
+# The builder's project must be exactly as it was (same HEAD, same uncommitted changes).
+after=$(git -C "$PROJECT" rev-parse HEAD; git -C "$PROJECT" status --porcelain | md5sum)
+report="$REVIEWS/rv32cpu-$short.md"
+verdict=$(grep -m1 -oiE 'verdict[^A-Za-z]*(PASS WITH ISSUES|PASS|FAIL)' "$report" 2>/dev/null | grep -oiE 'PASS WITH ISSUES|PASS|FAIL' | head -1)
+if [ "$before" = "$after" ]; then untouched="project untouched"; else untouched="WARNING: the builder's project changed during the review"; fi
+log "review of $short done: verdict=${verdict:-none} report=$report ($untouched)"
+say "🔎 Review of $short: ${verdict:-no verdict}" "Report: reviews/rv32cpu-$short.md ($untouched). Builder resumed."
+
+# Resume the builder, with the review's fix list when the verdict is not a clean PASS.
+systemctl --user start cpu-agent-watchdog
+python3 - "$URL" "$BUILDER" "$report" "${verdict:-none}" "$short" <<'EOF'
+import json, re, sys, urllib.request
+url, sid, report, verdict, short = sys.argv[1:6]
+try:
+    text = open(report).read()
+except OSError:
+    text = ""
+m = re.search(r"#+\s*Fix list[^\n]*\n(.*?)(?:\n#+\s|\Z)", text, re.S | re.I)
+fixes = m.group(1).strip() if m else ""
+if verdict.upper() == "PASS" or not fixes:
+    msg = (f"You were paused for an independent review of commit {short}: verdict {verdict}, nothing to fix. "
+           "Continue with the next unfinished step in PROMPT.md.")
+else:
+    msg = (f"Independent review of commit {short}: verdict {verdict} (full report: reviews/rv32cpu-{short}.md). "
+           "Fix these first, commit them as `review fixes: ...`, then continue with PROMPT.md:\n" + fixes[:3500])
+req = urllib.request.Request(f"{url}/session/{sid}/prompt_async", headers={"Content-Type": "application/json"},
+                             data=json.dumps({"agent": "cpu", "parts": [{"type": "text", "text": msg}]}).encode())
+urllib.request.urlopen(req, timeout=20)
+EOF
+log "builder resumed (fix list sent unless the verdict was PASS)"
+last_end=$(date +%s)
+start=$(git -C "$PROJECT" rev-parse HEAD)
+[ "$LOOP" = 1 ] || break
+done

@@ -1,4 +1,4 @@
-# rv32cpu: a RISC-V CPU that runs DOOM, built by a local AI agent
+# rv32cpu: a RISC-V CPU that runs DOOM and boots Linux, built by a local AI agent
 
 [![CI](https://github.com/jemkox/agent-riscv-doom/actions/workflows/ci.yml/badge.svg)](https://github.com/jemkox/agent-riscv-doom/actions/workflows/ci.yml)
 
@@ -6,13 +6,16 @@
   <img src="docs/doom/gameplay.gif" width="640" alt="DOOM E1M1 running on the rv32cpu pipeline in Verilator">
 </p>
 
-A 5-stage pipelined **RV32IM** CPU written in SystemVerilog. It passes the
-official RISC-V test suites, routes the real CPU for a **Sipeed Tang Nano 20K** FPGA, and runs
-**DOOM** (shareware, unmodified game logic) cycle-accurately in Verilator, with
-a live window and keyboard. It also boots the **FreeRTOS** real-time operating
-system and passes a self-checking multitasking demo.
+A 5-stage pipelined **RV32IMA** CPU written in SystemVerilog, with
+machine/supervisor/user modes and an **Sv32 MMU**. In cycle-accurate Verilator
+simulation it **boots Linux 6.12** (OpenSBI → Sv32 kernel → BusyBox login and
+shell), runs **DOOM** (shareware, unmodified game logic) with a live window and
+keyboard, and boots the **FreeRTOS** real-time operating system. It passes the
+official RISC-V architecture tests (riscv-arch-test through RISCOF, against the
+Sail reference model), and the core places and routes for a **Sipeed Tang Nano
+20K** FPGA.
 
-The design (about 2,700 lines of RTL), its tests and the Doom port were written
+The design (about 4,300 lines of RTL today), its tests and the Doom port were written
 autonomously by a **local LLM coding agent** running on a consumer PC. I designed
 the agent setup, the task, and the verification rules it had to obey, and
 reviewed the milestones. Claude (Anthropic) assisted with setup and review,
@@ -50,16 +53,19 @@ hardware.
 
 | | |
 |---|---|
-| ISA | RV32I + M (mul/div) + Zicsr, machine mode, timer interrupt |
+| ISA | RV32I + M + A (LR/SC, AMOs) + Zicsr + Zifencei; M/S/U privilege modes, traps, delegation |
+| Memory management | Sv32 MMU: two-level hardware page-table walk (sets A/D bits), I and D TLBs, `sfence.vma` |
+| Linux | OpenSBI v1.6 + Linux 6.12.27 (Sv32) + BusyBox boot to a login shell in simulation, ~1.33 billion cycles |
 | Pipeline | 5 stages (IF ID EX MEM WB), full forwarding, load-use stall, BTB with 2-bit counters |
 | Caches | 16 KB I + 16 KB D, direct-mapped, 16 B lines, configurable miss latency |
 | Official tests | `rv32ui` all pass, `rv32um` all pass, 15 `rv32mi` tests pass |
+| riscv-arch-test | v3.9.1 through RISCOF vs. the Sail RV32 model: I 39/39, M 8/8, A 9/9, Zifencei 1/1, privilege 15/15 (`make riscof`) |
 | Random testing | 500–5000 random programs per run, compared instruction-by-instruction with a Python reference model: 0 mismatches |
 | Formal | k-induction proof of pipeline invariants (SymbiYosys) |
 | CoreMark | **3.19 CoreMark/MHz** (EEMBC CoreMark 1.0, CRCs validated, GCC 13.2 `-O2`) |
 | Operating system | **FreeRTOS** V11.2.0 (own port): tasks, queue, mutex, preemption, software timers, 185 context switches in the demo |
 | DOOM | runs to gameplay; 3.99M cycles/frame avg (~2.3M per rendered frame), IPC 0.91 |
-| FPGA (Tang Nano 20K) | current `make fpga_tang`: real `fpga_pipe_top` routed for GW2AR-LV18QN88C8/I7, Max frequency `48.99 MHz` (`PASS at 27.00 MHz`), pinned post-PnR netlist **2538 LUT4 / 1219 DFF-family**, 6 RAM, 278 ALU; separate `make fpga_up5k_gate`: toy proof top real UP5K PASS at 13 MHz, **527 SB_LUT4 / 195 SB_DFF / 8 SB_RAM40_4K**; `fpga_full` UP5K real-CPU check is expected no-fit: **6533 SB_LUT4 / 1768 SB_DFF**, route fails no ICESTORM_LC BELs; dedicated `fpga_csrtrap_netlist`: **5544 SB_LUT4 / 1667 SB_DFF** |
+| FPGA (Tang Nano 20K) | place-and-route of the real core (`fpga_pipe_top`) for GW2AR-18: **2,538 LUT4 + 278 ALU, 1,219 flip-flops, 6 block RAMs**, nextpnr post-route estimate **44–49 MHz** (gate: ≥ 27 MHz). Not yet run on a physical board. |
 
 What that means in frames per second:
 
@@ -191,8 +197,8 @@ make freertos    # boot FreeRTOS, self-checking demo
 make doom        # headless Doom, frames in build/doom/frames
 make play        # live SDL window with keyboard
 make play_test   # scripted play, must differ from a no-key run
-make fpga_up5k_gate                              # separate real UP5K PASS gate (toy proof top, 13 MHz)
-make fpga_tang OSS_CAD=/home/jemko/tools/oss-cad-suite-20261027 # real CPU Tang Nano 20K PASS gate
+make fpga_up5k_gate                              # UP5K flow check with the small single-cycle proof top
+make fpga_tang OSS_CAD=/path/to/oss-cad-suite   # real CPU, Tang Nano 20K place-and-route gate
 make fpga_full FPGA_FREQ=13 FPGA_SEED=6           # real CPU UP5K size/no-fit check (expected not to fit)
 make fpga_csrtrap_netlist                 # yosys + netlist checker for tests/fpga_csrtrap.S ROM
 make fpga_toy, fpga_toy_test              # LEGACY single-cycle toy proof top (fpga_top); not the full CPU
@@ -256,8 +262,9 @@ flowchart LR
   G --> R
   C[Claude: setup,<br/>reviews, debugging] -.-> G
 ```
-- **Timeline:** first commit 2026-10-31 23:27, finished 2026-11-02 10:39
-  (about 35 hours).
+- **Timeline:** first commit 2026-10-31 23:27; Doom finished 2026-11-02 10:39
+  (about 35 hours); the Linux goal (A extension, S/U modes, MMU, OpenSBI,
+  Linux to a shell) finished 2026-11-11.
 
 The complete harness (sandbox, loop plugin, watchdog, reviewer agent) is in
 [`agent/`](agent/), together with three reports the reviewer wrote during the
@@ -281,11 +288,11 @@ else's part:
 
 ## What's next
 
-- Run DOOM on a real FPGA board with SDRAM (e.g. an ECP5 board), where it
-  should reach roughly 12–20 fps.
-- Raise the FPGA clock beyond 27 MHz by pipelining the critical path.
-- Boot Linux on real hardware: needs an SDRAM board; the FPGA top does not
-  yet carry S/U modes, the MMU or CLINT (only the simulation CPU does).
+- Bring the CPU up on a real Tang Nano 20K (LED blink, UART), then add an
+  SDRAM bridge so Doom can run on the board.
+- Boot Linux on the board: the FPGA top does not yet carry S/U modes, the MMU
+  or CLINT (only the simulation CPU does).
+- More verification: coverage, riscv-formal, lockstep against Spike.
 
 ## Linux notes
 
@@ -303,7 +310,20 @@ else's part:
 
 ### Booting Linux on the finished CPU (reproducible)
 
-- `hdl make linux` reproduces the whole L7/L8 boot from committed source and
+Prebuilt boot images (OpenSBI, kernel `Image`, rootfs; built with Buildroot
+2025.02.19 from the configs in `linux/configs/`) are attached to the GitHub
+release as `rv32cpu-linux-images.tar.xz`. Their sha256 sums are pinned in the
+Makefile, so a rebuilt image that differs is refused.
+
+```sh
+mkdir -p ../linux-mmu && tar -xJf rv32cpu-linux-images.tar.xz -C ../linux-mmu
+make linux BR_MMU_OUT=../linux-mmu    # ~15 min; ends with LINUX BOOT REPRODUCED
+```
+
+To build the images yourself instead, set `BR_ROOT` to a Buildroot 2025.02.19
+tree and `BR_MMU_OUT` to an empty directory.
+
+- `make linux` reproduces the whole L7/L8 boot from committed source and
   pinned image shas: Buildroot/OpenSBI `fw_jump.bin`, Linux 6.12.27 MMU
   `Image`, canonical rootfs sha `0fda249a...` with a minimal L7/L8 `rcS`, and
   `linux/linux_mmu.dtb` generated from the committed DTS. It saves a fresh
@@ -311,7 +331,7 @@ else's part:
   `cat /proc/cpuinfo`, `ls /`, and `echo LINUX_SIM_DONE`. The observed full
   reproduction is ~13 min wall at ~1.6M cycles/s (build cached); the run is
   deterministic with fixed MT seed and fixed rootfs canonicalization.
-- Cycle counts for the current `hdl make linux` boot: login prompt detected at
+- Cycle counts for the current `make linux` boot: login prompt detected at
   427M cycles (approx.); `#LINUX cycles=1326153238 insns=1753060742 prompt=1 login=1 done=1 halt=0 cmds=1`.
 - Boot log excerpt (`build/linux/logs/shell.out`):
 

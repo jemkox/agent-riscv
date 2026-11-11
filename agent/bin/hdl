@@ -1,0 +1,43 @@
+#!/bin/sh
+# Run an HDL tool inside a bubblewrap sandbox for the local agent:
+# the whole system is read-only, only the workspace is writable, /tmp is private, the network is shared
+# (Ubuntu 24.04+ forbids the sandbox loopback trick that bwrap uses to block network, so we keep it shared),
+# and secret folders (~/.ssh, ~/.gnupg, keyrings, browser profiles, agent and Claude config) are hidden.
+# Usage: hdl <iverilog|vvp|verilator|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|riscv64-linux-gnu-*|qemu-riscv32|qemu-riscv64|qemu-system-riscv32|dtc|sby> [args...]   (run from inside the workspace)
+# Workspace from ~/.config/cpu-agent/config (install.sh), default ~/agent-workspace.
+WORKSPACE=""; [ -f "$HOME/.config/cpu-agent/config" ] && . "$HOME/.config/cpu-agent/config"
+WS="${WORKSPACE:-$HOME/agent-workspace}"
+exec 2>&1   # errors and output in one stream, so no 2>&1 is needed
+tool="${1:-}"
+if [ -z "$tool" ]; then
+  echo "usage: hdl <iverilog|vvp|verilator|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|riscv64-linux-gnu-*|qemu-riscv32|qemu-riscv64|qemu-system-riscv32|dtc|sby> [args...]   (sandboxed: no network, writes only inside $WS)"; exit 0
+fi
+case "$tool" in
+  iverilog|vvp|verilator|verilator_bin|yosys|make|nextpnr-ice40|icepack|icetime|riscv64-unknown-elf-*|riscv64-linux-gnu-*|qemu-riscv32|qemu-riscv64|qemu-system-riscv32|dtc|sby) ;;
+  *) echo "hdl: only iverilog, vvp, verilator, yosys, make, nextpnr-ice40, icepack, icetime, riscv64-unknown-elf-*, riscv64-linux-gnu-*, qemu-riscv32/64, qemu-system-riscv32, dtc or sby (got '${tool:-nothing}')" >&2; exit 2 ;;
+esac
+here=$(pwd -P)
+case "$here/" in
+  "$WS"/*) ;;
+  *) echo "hdl: run it from inside $WS (now in $here)" >&2; exit 2 ;;
+esac
+set -- "$@"
+hide=""
+for d in .ssh .gnupg .config/opencode .config/cpu-agent .claude .local/share/keyrings .mozilla .config/google-chrome .config/chromium .password-store; do
+  [ -e "$HOME/$d" ] && hide="$hide --tmpfs $HOME/$d"
+done
+# Verilator rebuilds go through ccache; its cache must live in the writable workspace.
+export OBJCACHE=ccache CCACHE_DIR="$WS/.ccache"
+# Let simulations open a window (SDL2 framebuffer): show the X server socket inside the private /tmp.
+x11=""
+[ -d /tmp/.X11-unix ] && x11="--ro-bind /tmp/.X11-unix /tmp/.X11-unix"
+# The agent's background server has no display variables; default to the desktop session's.
+export DISPLAY="${DISPLAY:-:0}"
+[ -z "${XAUTHORITY:-}" ] && [ -f "$HOME/.Xauthority" ] && export XAUTHORITY="$HOME/.Xauthority"
+# If memory runs out, the kernel should kill this tool (e.g. a huge Yosys run), never the Strata model:
+# oom_score_adj 1000 makes the sandboxed command the first choice of the out-of-memory killer.
+oom=""
+command -v choom >/dev/null 2>&1 && oom="choom -n 1000 --"
+# shellcheck disable=SC2086
+exec $oom bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp $x11 $hide \
+  --bind "$WS" "$WS" --unshare-all --share-net --new-session --die-with-parent --chdir "$here" "$@"

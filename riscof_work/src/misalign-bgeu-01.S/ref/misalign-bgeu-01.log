@@ -1,6 +1,0 @@
-using /home/jemko/agent-workspace/hdl/rv32cpu/riscof_work/src/misalign-bgeu-01.S/ref/Reference-sail_c_simulator.signature for test-signature output.
-HTIF located at 0x80002000
-begin_signature: 0x80004110
-end_signature: 0x80004230
-Entry point: 0x80000000
-SUCCESS

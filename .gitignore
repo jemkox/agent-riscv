@@ -30,3 +30,12 @@ linux/txx.S
 linux/txx.o
 tb/t_ctrl_probe.sv
 tests/probe_*.S
+
+# Stray outputs from debugging/riscof runs at the repo root (kept out of git).
+/riscof_work/
+/config.ini
+/p.hex
+/qemu.dtb
+/init
+/bin/
+/tmpdbg/

@@ -1,0 +1,68 @@
+#!/bin/sh
+# cpu-agent [start|window|stop|status|log|activity]: run the RISC-V CPU agent unattended.
+#   start (default): start the model server (cpu-agent-model), the OpenCode server, the watchdog and the
+#                    reviewer as systemd user units, enabled so they come back at every login. On the first
+#                    start it creates the builder session and gives it PROMPT.md as its task.
+#   window:   also attach the agent's terminal UI.
+#   stop:     stop the watchdog, the reviewer and the server, and turn off their autostart (the model keeps running).
+#   status:   show the units.   log: follow the watchdog log.
+#   activity: follow the live activity feed (every file edit, test run and commit the agent makes).
+# Settings: ~/.config/cpu-agent/config (written by agent/install.sh).
+CFG="$HOME/.config/cpu-agent/config"
+. "$CFG" || { echo "no $CFG: run agent/install.sh first" >&2; exit 1; }
+URL="http://127.0.0.1:${SERVER_PORT:-4096}"
+UNITS="cpu-agent-server cpu-agent-watchdog cpu-agent-reviewer"
+
+# Create the builder session (agent "cpu") with the project's PROMPT.md as its task, and save its id.
+new_session() {
+  SESSION=$(curl -fs -m 20 -H 'Content-Type: application/json' -X POST "$URL/session" \
+    -d '{"title":"RISC-V CPU builder"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])') || return 1
+  [ -n "$SESSION" ] || return 1
+  sed -i "s|^SESSION=.*|SESSION=\"$SESSION\"|" "$CFG"
+  python3 - "$URL" "$SESSION" "$PROJECT" <<'EOF'
+import json, sys, urllib.request
+url, sid, project = sys.argv[1:4]
+text = (f"Read {project}/PROMPT.md: it is your task. Keep {project}/PROGRESS.md as described there "
+        "(create it if missing) and work through the milestones until the finish line is proven.")
+req = urllib.request.Request(f"{url}/session/{sid}/prompt_async", headers={"Content-Type": "application/json"},
+                             data=json.dumps({"agent": "cpu", "parts": [{"type": "text", "text": text}]}).encode())
+urllib.request.urlopen(req, timeout=20)
+EOF
+  echo "created builder session $SESSION"
+}
+
+case "${1:-start}" in
+  start|window)
+    W="$HOME/.config/systemd/user/default.target.wants"; mkdir -p "$W"
+    for u in cpu-agent-model $UNITS; do ln -sf "../$u.service" "$W/$u.service"; done
+    systemctl --user daemon-reload
+    curl -fs -m 3 "$MODEL_URL/health" >/dev/null || echo "Waiting for the model server at $MODEL_URL…"
+    systemctl --user start cpu-agent-model.service || { echo "the model server is not up (journalctl --user -u cpu-agent-model)" >&2; exit 1; }
+    systemctl --user start cpu-agent-server.service
+    i=0; until curl -fs -m 1 "$URL/session/status" >/dev/null; do
+      i=$((i+1)); [ $i -gt 120 ] && { echo "the OpenCode server did not start (journalctl --user -u cpu-agent-server)" >&2; exit 1; }
+      sleep 0.5
+    done
+    [ -n "$SESSION" ] || new_session || { echo "could not create the builder session" >&2; exit 1; }
+    systemctl --user start cpu-agent-watchdog.service cpu-agent-reviewer.service
+    echo "CPU agent running in the background (session $SESSION). Follow it with: cpu-agent activity"
+    [ "$1" = window ] || exit 0
+    exec opencode attach "$URL" --dir "$WORKSPACE" --session "$SESSION"
+    ;;
+  stop)
+    systemctl --user stop cpu-agent-reviewer cpu-agent-watchdog cpu-agent-server 2>/dev/null
+    for u in $UNITS; do rm -f "$HOME/.config/systemd/user/default.target.wants/$u.service"; done
+    systemctl --user daemon-reload
+    echo "stopped (autostart off; the model keeps running)"
+    ;;
+  status)
+    systemctl --user --no-pager status cpu-agent-model $UNITS | grep -E '●|Active:'
+    ;;
+  log)
+    tail -n 30 -f "$WORKSPACE/.agent-logs/watchdog.log"
+    ;;
+  activity)
+    tail -n 40 -f "$WORKSPACE/.agent-logs/activity.log"
+    ;;
+  *) echo "usage: cpu-agent [start|window|stop|status|log|activity]" >&2; exit 2 ;;
+esac

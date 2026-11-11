@@ -1,5 +1,5 @@
 # Runs the whole CPU verification on a clean GitHub machine (Ubuntu 24.04, same tool versions as the
-# original run), plus the FPGA build and a clean install of the agent harness. Doom is not run here
+# original run), plus the Tang Nano 20K FPGA build and a clean install of the agent harness. Doom is not run here
 # because the WAD is not redistributed in this repo.
 name: CI
 
@@ -47,10 +47,14 @@ jobs:
       - name: FreeRTOS (tasks, queue, mutex, preemption, software timer)
         run: make freertos
 
-      - name: FPGA build for iCE40 UP5K (must meet 13 MHz)
+      - name: Fetch the pinned OSS CAD Suite (Gowin flow for the Tang Nano 20K)
         run: |
-          make fpga_full FPGA_FREQ=13 FPGA_SEED=4
-          grep -q "PASS at 13.00 MHz" build/cpu_full_route.log
+          curl -fsSL -o "$RUNNER_TEMP/oss-cad.tgz" \
+            https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-10-27/oss-cad-suite-linux-x64-20261027.tgz
+          mkdir -p deps && tar -xzf "$RUNNER_TEMP/oss-cad.tgz" -C deps
+
+      - name: FPGA place-and-route of the real CPU for the Tang Nano 20K (must meet 27 MHz)
+        run: make fpga_tang OSS_CAD=deps/oss-cad-suite
 
   agent:
     name: Agent harness installs cleanly

@@ -1,6 +1,0 @@
-using /home/jemko/agent-workspace/hdl/rv32cpu/riscof_work/src/ecall.S/ref/Reference-sail_c_simulator.signature for test-signature output.
-HTIF located at 0x80001000
-begin_signature: 0x80003110
-end_signature: 0x80003130
-Entry point: 0x80000000
-SUCCESS
